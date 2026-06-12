@@ -1,0 +1,686 @@
+package dbs
+
+import (
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/juggleim/jugglechat-server-ai/storages/models"
+	"github.com/juggleim/jugglechat-server-ai/commons/dbcommons"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+type AgentDao struct{}
+
+type AgentTwinDao struct {
+	ID             int64      `gorm:"primary_key"`
+	AppKey         string     `gorm:"app_key"`
+	UniqueName     string     `gorm:"unique_name"`
+	BotId          string     `gorm:"bot_id"`
+	DisplayName    string     `gorm:"display_name"`
+	AvatarURL      string     `gorm:"avatar_url"`
+	Greeting       string     `gorm:"greeting"`
+	Prompts        string     `gorm:"prompts"`
+	OwnerId        string     `gorm:"owner_id"`
+	Status         string     `gorm:"status"`
+	ActiveVersion  string     `gorm:"active_version"`
+	TrainingMode   string     `gorm:"training_mode"`
+	MaterialsCount int        `gorm:"materials_count"`
+	SyncStatus     string     `gorm:"sync_status"`
+	SyncError      string     `gorm:"sync_error"`
+	LastSyncedAt   *time.Time `gorm:"last_synced_at"`
+	UpdatedTime    time.Time  `gorm:"updated_time"`
+	CreatedTime    time.Time  `gorm:"created_time"`
+}
+
+func (AgentTwinDao) TableName() string { return "agent_twins" }
+
+type AgentTwinTombstoneDao struct {
+	ID          int64     `gorm:"primary_key"`
+	AppKey      string    `gorm:"app_key"`
+	UniqueName  string    `gorm:"unique_name"`
+	OwnerId     string    `gorm:"owner_id"`
+	CreatedTime time.Time `gorm:"created_time"`
+}
+
+func (AgentTwinTombstoneDao) TableName() string { return "agent_twin_tombstones" }
+
+type AgentMaterialDao struct {
+	ID           int64      `gorm:"primary_key"`
+	AppKey       string     `gorm:"app_key"`
+	UniqueName   string     `gorm:"unique_name"`
+	MaterialId   string     `gorm:"material_id"`
+	Type         string     `gorm:"type"`
+	Title        string     `gorm:"title"`
+	Source       string     `gorm:"source"`
+	Content      string     `gorm:"content"`
+	URL          string     `gorm:"url"`
+	FilePath     string     `gorm:"file_path"`
+	SizeBytes    int64      `gorm:"size_bytes"`
+	SyncStatus   string     `gorm:"sync_status"`
+	SyncError    string     `gorm:"sync_error"`
+	LastSyncedAt *time.Time `gorm:"last_synced_at"`
+	UpdatedTime  time.Time  `gorm:"updated_time"`
+	CreatedTime  time.Time  `gorm:"created_time"`
+}
+
+func (AgentMaterialDao) TableName() string { return "agent_materials" }
+
+type AgentJobDao struct {
+	ID             int64           `gorm:"primary_key"`
+	AppKey         string          `gorm:"app_key"`
+	JobId          string          `gorm:"job_id"`
+	UniqueName     string          `gorm:"unique_name"`
+	Type           string          `gorm:"type"`
+	Status         string          `gorm:"status"`
+	Progress       *int            `gorm:"progress"`
+	ResultJSON     json.RawMessage `gorm:"result_json"`
+	ErrorCode      string          `gorm:"error_code"`
+	ErrorMessage   string          `gorm:"error_message"`
+	AgentCreatedAt *time.Time      `gorm:"agent_created_at"`
+	StartedAt      *time.Time      `gorm:"started_at"`
+	FinishedAt     *time.Time      `gorm:"finished_at"`
+	UpdatedTime    time.Time       `gorm:"updated_time"`
+	CreatedTime    time.Time       `gorm:"created_time"`
+}
+
+func (AgentJobDao) TableName() string { return "agent_jobs" }
+
+type AgentVersionDao struct {
+	ID             int64      `gorm:"primary_key"`
+	AppKey         string     `gorm:"app_key"`
+	UniqueName     string     `gorm:"unique_name"`
+	Version        string     `gorm:"version"`
+	Mode           string     `gorm:"mode"`
+	Active         bool       `gorm:"active"`
+	TrainingJobId  string     `gorm:"training_job_id"`
+	MaterialsCount int        `gorm:"materials_count"`
+	AgentCreatedAt *time.Time `gorm:"agent_created_at"`
+	UpdatedTime    time.Time  `gorm:"updated_time"`
+	CreatedTime    time.Time  `gorm:"created_time"`
+}
+
+func (AgentVersionDao) TableName() string { return "agent_versions" }
+
+type AgentEvaluationDao struct {
+	ID             int64           `gorm:"primary_key"`
+	AppKey         string          `gorm:"app_key"`
+	EvaluationId   string          `gorm:"evaluation_id"`
+	UniqueName     string          `gorm:"unique_name"`
+	Version        string          `gorm:"version"`
+	OverallScore   *float64        `gorm:"overall_score"`
+	DimensionsJSON json.RawMessage `gorm:"dimensions_json"`
+	SummaryMD      string          `gorm:"summary_md"`
+	AgentCreatedAt *time.Time      `gorm:"agent_created_at"`
+	UpdatedTime    time.Time       `gorm:"updated_time"`
+	CreatedTime    time.Time       `gorm:"created_time"`
+}
+
+func (AgentEvaluationDao) TableName() string { return "agent_evaluations" }
+
+type AgentMessageDao struct {
+	ID             int64           `gorm:"primary_key"`
+	AppKey         string          `gorm:"app_key"`
+	UniqueName     string          `gorm:"unique_name"`
+	CustomerId     string          `gorm:"customer_id"`
+	IMMsgId        string          `gorm:"im_msg_id"`
+	AgentMessageId string          `gorm:"agent_message_id"`
+	SessionId      string          `gorm:"session_id"`
+	Role           string          `gorm:"role"`
+	Text           string          `gorm:"text"`
+	Fallback       bool            `gorm:"fallback"`
+	Source         string          `gorm:"source"`
+	Platform       string          `gorm:"platform"`
+	ConverType     int             `gorm:"conver_type"`
+	RawPayload     json.RawMessage `gorm:"raw_payload"`
+	MsgTime        *time.Time      `gorm:"msg_time"`
+	UpdatedTime    time.Time       `gorm:"updated_time"`
+	CreatedTime    time.Time       `gorm:"created_time"`
+}
+
+func (AgentMessageDao) TableName() string { return "agent_messages" }
+
+func (d *AgentDao) CreateTwin(item models.AgentTwin) error {
+	return dbcommons.GetDb().Create(agentTwinToDao(item)).Error
+}
+
+func (d *AgentDao) UpdateTwin(item models.AgentTwin) error {
+	updates := map[string]interface{}{
+		"bot_id":          item.BotId,
+		"display_name":    item.DisplayName,
+		"avatar_url":      item.AvatarURL,
+		"greeting":        item.Greeting,
+		"prompts":         item.Prompts,
+		"status":          item.Status,
+		"active_version":  item.ActiveVersion,
+		"training_mode":   item.TrainingMode,
+		"materials_count": item.MaterialsCount,
+		"sync_status":     item.SyncStatus,
+		"sync_error":      item.SyncError,
+		"last_synced_at":  milliToTimePtr(item.LastSyncedAt),
+	}
+	return dbcommons.GetDb().Model(&AgentTwinDao{}).
+		Where("app_key=? and unique_name=? and owner_id=?", item.AppKey, item.UniqueName, item.OwnerId).
+		Updates(updates).Error
+}
+
+func (d *AgentDao) DeleteTwin(appkey, uniqueName string) error {
+	return dbcommons.GetDb().Where("app_key=? and unique_name=?", appkey, uniqueName).Delete(&AgentTwinDao{}).Error
+}
+
+func (d *AgentDao) FindTwin(appkey, uniqueName string) (*models.AgentTwin, error) {
+	var item AgentTwinDao
+	err := dbcommons.GetDb().Where("app_key=? and unique_name=?", appkey, uniqueName).Take(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return agentTwinFromDao(item), nil
+}
+
+func (d *AgentDao) FindTwinByBotId(appkey, botId string) (*models.AgentTwin, error) {
+	var item AgentTwinDao
+	err := dbcommons.GetDb().Where("app_key=? and bot_id=?", appkey, botId).Take(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return agentTwinFromDao(item), nil
+}
+
+func (d *AgentDao) FindTwinByAnyKey(appkey, key string) (*models.AgentTwin, error) {
+	var item AgentTwinDao
+	err := dbcommons.GetDb().Where("app_key=? and (unique_name=? or bot_id=?)", appkey, key, key).Take(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return agentTwinFromDao(item), nil
+}
+
+func (d *AgentDao) QryTwinsByOwner(appkey, ownerId string, startId, limit int64) ([]*models.AgentTwin, error) {
+	db := dbcommons.GetDb().Where("app_key=? and owner_id=?", appkey, ownerId)
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	var items []AgentTwinDao
+	err := db.Order("id desc").Limit(normalizeLimit(limit)).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentTwin, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, agentTwinFromDao(item))
+	}
+	return ret, nil
+}
+
+func (d *AgentDao) CreateTwinTombstone(appkey, uniqueName, ownerId string) error {
+	return dbcommons.GetDb().Clauses(clause.OnConflict{DoNothing: true}).Create(&AgentTwinTombstoneDao{
+		AppKey:     appkey,
+		UniqueName: uniqueName,
+		OwnerId:    ownerId,
+	}).Error
+}
+
+func (d *AgentDao) HasTwinTombstone(appkey, uniqueName string) (bool, error) {
+	var count int64
+	err := dbcommons.GetDb().Model(&AgentTwinTombstoneDao{}).
+		Where("app_key=? and unique_name=?", appkey, uniqueName).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func (d *AgentDao) CreateMaterial(item models.AgentMaterial) error {
+	return dbcommons.GetDb().Create(agentMaterialToDao(item)).Error
+}
+
+func (d *AgentDao) DeleteMaterial(appkey, materialId string) error {
+	return dbcommons.GetDb().Where("app_key=? and material_id=?", appkey, materialId).Delete(&AgentMaterialDao{}).Error
+}
+
+func (d *AgentDao) QryMaterials(appkey, uniqueName string, startId, limit int64) ([]*models.AgentMaterial, error) {
+	db := dbcommons.GetDb().Where("app_key=? and unique_name=?", appkey, uniqueName)
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	var items []AgentMaterialDao
+	err := db.Order("id desc").Limit(normalizeLimit(limit)).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentMaterial, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, agentMaterialFromDao(item))
+	}
+	return ret, nil
+}
+
+func (d *AgentDao) UpsertJob(item models.AgentJob) error {
+	return dbcommons.GetDb().Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "app_key"}, {Name: "job_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"unique_name", "type", "status", "progress", "result_json", "error_code", "error_message", "agent_created_at", "started_at", "finished_at"}),
+	}).Create(agentJobToDao(item)).Error
+}
+
+func (d *AgentDao) FindJob(appkey, jobId string) (*models.AgentJob, error) {
+	var item AgentJobDao
+	err := dbcommons.GetDb().Where("app_key=? and job_id=?", appkey, jobId).Take(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return agentJobFromDao(item), nil
+}
+
+func (d *AgentDao) QryJobs(appkey, uniqueName, jobType, status string, startId, limit int64) ([]*models.AgentJob, error) {
+	db := dbcommons.GetDb().Where("app_key=? and unique_name=?", appkey, uniqueName)
+	if jobType != "" {
+		db = db.Where("type=?", jobType)
+	}
+	if status != "" {
+		db = db.Where("status=?", status)
+	}
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	var items []AgentJobDao
+	err := db.Order("id desc").Limit(normalizeLimit(limit)).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentJob, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, agentJobFromDao(item))
+	}
+	return ret, nil
+}
+
+func (d *AgentDao) UpsertVersion(item models.AgentVersion) error {
+	return dbcommons.GetDb().Transaction(func(tx *gorm.DB) error {
+		if item.Active {
+			if err := tx.Model(&AgentVersionDao{}).
+				Where("app_key=? and unique_name=?", item.AppKey, item.UniqueName).
+				Update("active", false).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "app_key"}, {Name: "unique_name"}, {Name: "version"}},
+			DoUpdates: clause.AssignmentColumns([]string{"mode", "active", "training_job_id", "materials_count", "agent_created_at"}),
+		}).Create(agentVersionToDao(item)).Error
+	})
+}
+
+func (d *AgentDao) QryVersions(appkey, uniqueName string, startId, limit int64) ([]*models.AgentVersion, error) {
+	db := dbcommons.GetDb().Where("app_key=? and unique_name=?", appkey, uniqueName)
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	var items []AgentVersionDao
+	err := db.Order("id desc").Limit(normalizeLimit(limit)).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentVersion, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, agentVersionFromDao(item))
+	}
+	return ret, nil
+}
+
+func (d *AgentDao) FindCurrentVersion(appkey, uniqueName string) (*models.AgentVersion, error) {
+	var item AgentVersionDao
+	err := dbcommons.GetDb().Where("app_key=? and unique_name=? and active=?", appkey, uniqueName, true).Take(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return agentVersionFromDao(item), nil
+}
+
+func (d *AgentDao) SetActiveVersion(appkey, uniqueName, version string) error {
+	return dbcommons.GetDb().Transaction(func(tx *gorm.DB) error {
+		var item AgentVersionDao
+		if err := tx.Where("app_key=? and unique_name=? and version=?", appkey, uniqueName, version).Take(&item).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&AgentVersionDao{}).Where("app_key=? and unique_name=?", appkey, uniqueName).Update("active", false).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&AgentVersionDao{}).Where("id=?", item.ID).Update("active", true).Error; err != nil {
+			return err
+		}
+		return tx.Model(&AgentTwinDao{}).Where("app_key=? and unique_name=?", appkey, uniqueName).Updates(map[string]interface{}{
+			"active_version": version,
+			"training_mode":  item.Mode,
+			"status":         "trained",
+		}).Error
+	})
+}
+
+func (d *AgentDao) UpsertEvaluation(item models.AgentEvaluation) error {
+	return dbcommons.GetDb().Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "app_key"}, {Name: "evaluation_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"unique_name", "version", "overall_score", "dimensions_json", "summary_md", "agent_created_at"}),
+	}).Create(agentEvaluationToDao(item)).Error
+}
+
+func (d *AgentDao) FindEvaluation(appkey, evaluationId string) (*models.AgentEvaluation, error) {
+	var item AgentEvaluationDao
+	err := dbcommons.GetDb().Where("app_key=? and evaluation_id=?", appkey, evaluationId).Take(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return agentEvaluationFromDao(item), nil
+}
+
+func (d *AgentDao) CreateMessage(item models.AgentMessage) error {
+	return dbcommons.GetDb().Create(agentMessageToDao(item)).Error
+}
+
+func (d *AgentDao) FindMessageByIM(appkey, imMsgId, role string) (*models.AgentMessage, error) {
+	var item AgentMessageDao
+	err := dbcommons.GetDb().Where("app_key=? and im_msg_id=? and role=?", appkey, imMsgId, role).Take(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return agentMessageFromDao(item), nil
+}
+
+func (d *AgentDao) QryMessages(appkey, uniqueName, customerId string, startId, limit int64) ([]*models.AgentMessage, error) {
+	db := dbcommons.GetDb().Where("app_key=? and unique_name=? and customer_id=?", appkey, uniqueName, customerId)
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	var items []AgentMessageDao
+	err := db.Order("id desc").Limit(normalizeLimit(limit)).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentMessage, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, agentMessageFromDao(item))
+	}
+	return ret, nil
+}
+
+func (d *AgentDao) QryMessagesByIM(appkey, imMsgId string) ([]*models.AgentMessage, error) {
+	var items []AgentMessageDao
+	err := dbcommons.GetDb().Where("app_key=? and im_msg_id=?", appkey, imMsgId).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentMessage, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, agentMessageFromDao(item))
+	}
+	return ret, nil
+}
+
+func normalizeLimit(limit int64) int {
+	if limit <= 0 {
+		return 20
+	}
+	if limit > 100 {
+		return 100
+	}
+	return int(limit)
+}
+
+func milliToTimePtr(ms int64) *time.Time {
+	if ms <= 0 {
+		return nil
+	}
+	t := time.UnixMilli(ms)
+	return &t
+}
+
+func timePtrToMilli(t *time.Time) int64 {
+	if t == nil || t.IsZero() {
+		return 0
+	}
+	return t.UnixMilli()
+}
+
+func jsonStringToData(s string) json.RawMessage {
+	if s == "" {
+		return nil
+	}
+	return json.RawMessage(s)
+}
+
+func jsonDataToString(v json.RawMessage) string {
+	if len(v) == 0 {
+		return ""
+	}
+	return string(v)
+}
+
+func agentTwinToDao(item models.AgentTwin) *AgentTwinDao {
+	syncStatus := item.SyncStatus
+	if syncStatus == "" {
+		syncStatus = string(models.SyncStatusPending)
+	}
+	return &AgentTwinDao{
+		AppKey:         item.AppKey,
+		UniqueName:     item.UniqueName,
+		BotId:          item.BotId,
+		DisplayName:    item.DisplayName,
+		AvatarURL:      item.AvatarURL,
+		Greeting:       item.Greeting,
+		Prompts:        item.Prompts,
+		OwnerId:        item.OwnerId,
+		Status:         item.Status,
+		ActiveVersion:  item.ActiveVersion,
+		TrainingMode:   item.TrainingMode,
+		MaterialsCount: item.MaterialsCount,
+		SyncStatus:     syncStatus,
+		SyncError:      item.SyncError,
+		LastSyncedAt:   milliToTimePtr(item.LastSyncedAt),
+	}
+}
+
+func agentTwinFromDao(item AgentTwinDao) *models.AgentTwin {
+	return &models.AgentTwin{
+		ID:             item.ID,
+		AppKey:         item.AppKey,
+		UniqueName:     item.UniqueName,
+		BotId:          item.BotId,
+		DisplayName:    item.DisplayName,
+		AvatarURL:      item.AvatarURL,
+		Greeting:       item.Greeting,
+		Prompts:        item.Prompts,
+		OwnerId:        item.OwnerId,
+		Status:         item.Status,
+		ActiveVersion:  item.ActiveVersion,
+		TrainingMode:   item.TrainingMode,
+		MaterialsCount: item.MaterialsCount,
+		SyncStatus:     item.SyncStatus,
+		SyncError:      item.SyncError,
+		LastSyncedAt:   timePtrToMilli(item.LastSyncedAt),
+		UpdatedTime:    item.UpdatedTime.UnixMilli(),
+		CreatedTime:    item.CreatedTime.UnixMilli(),
+	}
+}
+
+func agentMaterialToDao(item models.AgentMaterial) *AgentMaterialDao {
+	syncStatus := item.SyncStatus
+	if syncStatus == "" {
+		syncStatus = string(models.SyncStatusPending)
+	}
+	return &AgentMaterialDao{
+		AppKey:       item.AppKey,
+		UniqueName:   item.UniqueName,
+		MaterialId:   item.MaterialId,
+		Type:         item.Type,
+		Title:        item.Title,
+		Source:       item.Source,
+		Content:      item.Content,
+		URL:          item.URL,
+		FilePath:     item.FilePath,
+		SizeBytes:    item.SizeBytes,
+		SyncStatus:   syncStatus,
+		SyncError:    item.SyncError,
+		LastSyncedAt: milliToTimePtr(item.LastSyncedAt),
+	}
+}
+
+func agentMaterialFromDao(item AgentMaterialDao) *models.AgentMaterial {
+	return &models.AgentMaterial{
+		ID:           item.ID,
+		AppKey:       item.AppKey,
+		UniqueName:   item.UniqueName,
+		MaterialId:   item.MaterialId,
+		Type:         item.Type,
+		Title:        item.Title,
+		Source:       item.Source,
+		Content:      item.Content,
+		URL:          item.URL,
+		FilePath:     item.FilePath,
+		SizeBytes:    item.SizeBytes,
+		SyncStatus:   item.SyncStatus,
+		SyncError:    item.SyncError,
+		LastSyncedAt: timePtrToMilli(item.LastSyncedAt),
+		UpdatedTime:  item.UpdatedTime.UnixMilli(),
+		CreatedTime:  item.CreatedTime.UnixMilli(),
+	}
+}
+
+func agentJobToDao(item models.AgentJob) *AgentJobDao {
+	return &AgentJobDao{
+		AppKey:         item.AppKey,
+		JobId:          item.JobId,
+		UniqueName:     item.UniqueName,
+		Type:           item.Type,
+		Status:         item.Status,
+		Progress:       item.Progress,
+		ResultJSON:     jsonStringToData(item.ResultJSON),
+		ErrorCode:      item.ErrorCode,
+		ErrorMessage:   item.ErrorMessage,
+		AgentCreatedAt: milliToTimePtr(item.AgentCreatedAt),
+		StartedAt:      milliToTimePtr(item.StartedAt),
+		FinishedAt:     milliToTimePtr(item.FinishedAt),
+	}
+}
+
+func agentJobFromDao(item AgentJobDao) *models.AgentJob {
+	return &models.AgentJob{
+		ID:             item.ID,
+		AppKey:         item.AppKey,
+		JobId:          item.JobId,
+		UniqueName:     item.UniqueName,
+		Type:           item.Type,
+		Status:         item.Status,
+		Progress:       item.Progress,
+		ResultJSON:     jsonDataToString(item.ResultJSON),
+		ErrorCode:      item.ErrorCode,
+		ErrorMessage:   item.ErrorMessage,
+		AgentCreatedAt: timePtrToMilli(item.AgentCreatedAt),
+		StartedAt:      timePtrToMilli(item.StartedAt),
+		FinishedAt:     timePtrToMilli(item.FinishedAt),
+		UpdatedTime:    item.UpdatedTime.UnixMilli(),
+		CreatedTime:    item.CreatedTime.UnixMilli(),
+	}
+}
+
+func agentVersionToDao(item models.AgentVersion) *AgentVersionDao {
+	return &AgentVersionDao{
+		AppKey:         item.AppKey,
+		UniqueName:     item.UniqueName,
+		Version:        item.Version,
+		Mode:           item.Mode,
+		Active:         item.Active,
+		TrainingJobId:  item.TrainingJobId,
+		MaterialsCount: item.MaterialsCount,
+		AgentCreatedAt: milliToTimePtr(item.AgentCreatedAt),
+	}
+}
+
+func agentVersionFromDao(item AgentVersionDao) *models.AgentVersion {
+	return &models.AgentVersion{
+		ID:             item.ID,
+		AppKey:         item.AppKey,
+		UniqueName:     item.UniqueName,
+		Version:        item.Version,
+		Mode:           item.Mode,
+		Active:         item.Active,
+		TrainingJobId:  item.TrainingJobId,
+		MaterialsCount: item.MaterialsCount,
+		AgentCreatedAt: timePtrToMilli(item.AgentCreatedAt),
+		UpdatedTime:    item.UpdatedTime.UnixMilli(),
+		CreatedTime:    item.CreatedTime.UnixMilli(),
+	}
+}
+
+func agentEvaluationToDao(item models.AgentEvaluation) *AgentEvaluationDao {
+	return &AgentEvaluationDao{
+		AppKey:         item.AppKey,
+		EvaluationId:   item.EvaluationId,
+		UniqueName:     item.UniqueName,
+		Version:        item.Version,
+		OverallScore:   item.OverallScore,
+		DimensionsJSON: jsonStringToData(item.DimensionsJSON),
+		SummaryMD:      item.SummaryMD,
+		AgentCreatedAt: milliToTimePtr(item.AgentCreatedAt),
+	}
+}
+
+func agentEvaluationFromDao(item AgentEvaluationDao) *models.AgentEvaluation {
+	return &models.AgentEvaluation{
+		ID:             item.ID,
+		AppKey:         item.AppKey,
+		EvaluationId:   item.EvaluationId,
+		UniqueName:     item.UniqueName,
+		Version:        item.Version,
+		OverallScore:   item.OverallScore,
+		DimensionsJSON: jsonDataToString(item.DimensionsJSON),
+		SummaryMD:      item.SummaryMD,
+		AgentCreatedAt: timePtrToMilli(item.AgentCreatedAt),
+		UpdatedTime:    item.UpdatedTime.UnixMilli(),
+		CreatedTime:    item.CreatedTime.UnixMilli(),
+	}
+}
+
+func agentMessageToDao(item models.AgentMessage) *AgentMessageDao {
+	return &AgentMessageDao{
+		AppKey:         item.AppKey,
+		UniqueName:     item.UniqueName,
+		CustomerId:     item.CustomerId,
+		IMMsgId:        item.IMMsgId,
+		AgentMessageId: item.AgentMessageId,
+		SessionId:      item.SessionId,
+		Role:           item.Role,
+		Text:           item.Text,
+		Fallback:       item.Fallback,
+		Source:         item.Source,
+		Platform:       item.Platform,
+		ConverType:     item.ConverType,
+		RawPayload:     jsonStringToData(item.RawPayload),
+		MsgTime:        milliToTimePtr(item.MsgTime),
+	}
+}
+
+func agentMessageFromDao(item AgentMessageDao) *models.AgentMessage {
+	return &models.AgentMessage{
+		ID:             item.ID,
+		AppKey:         item.AppKey,
+		UniqueName:     item.UniqueName,
+		CustomerId:     item.CustomerId,
+		IMMsgId:        item.IMMsgId,
+		AgentMessageId: item.AgentMessageId,
+		SessionId:      item.SessionId,
+		Role:           item.Role,
+		Text:           item.Text,
+		Fallback:       item.Fallback,
+		Source:         item.Source,
+		Platform:       item.Platform,
+		ConverType:     item.ConverType,
+		RawPayload:     jsonDataToString(item.RawPayload),
+		MsgTime:        timePtrToMilli(item.MsgTime),
+		UpdatedTime:    item.UpdatedTime.UnixMilli(),
+		CreatedTime:    item.CreatedTime.UnixMilli(),
+	}
+}
+
+var _ models.AgentStorage = (*AgentDao)(nil)
+
+func isNotFound(err error) bool {
+	return errors.Is(err, gorm.ErrRecordNotFound)
+}

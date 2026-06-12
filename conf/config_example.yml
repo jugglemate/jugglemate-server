@@ -1,0 +1,26 @@
+port: 8050
+
+adminSecret: juggleim
+
+log:
+  logPath: ./logs
+  logName: jugglechat-server-ai
+
+mysql:
+  user: root
+  password: 123456
+  address: 127.0.0.1:3306
+  name: im_db
+
+imApiDomain: http://127.0.0.1:9001
+imAdminDomain: http://127.0.0.1:8090
+
+botConnector:
+  domain: <bot-connector url>
+
+agentServer:
+  baseURL: http://127.0.0.1:8080/v1
+  timeoutSeconds: 5
+# 默认 AppKey 配置（简化版，实际生产应从数据库读取）
+appkey: juggleim
+appSecret: juggleim_secret_key
