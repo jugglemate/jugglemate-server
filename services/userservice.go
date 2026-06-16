@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	apiModels "github.com/juggleim/jugglechat-server-ai/apis/models"
+	"github.com/juggleim/jugglechat-server-ai/commons/configures"
 	"github.com/juggleim/jugglechat-server-ai/commons/ctxs"
 	"github.com/juggleim/jugglechat-server-ai/commons/errs"
 	"github.com/juggleim/jugglechat-server-ai/commons/imsdk"
@@ -96,7 +97,7 @@ func Register(ctx context.Context, account, password string) (errs.IMErrorCode, 
 		UserId:        userId,
 		NickName:      nickname,
 		Avatar:        "",
-		Authorization: GenerateToken(appkey, userId, ""),
+		Authorization: GenerateToken(appkey, userId, configures.Config.AppSecret),
 		ImToken:       resp.Token,
 	}
 }
@@ -141,7 +142,7 @@ func Login(ctx context.Context, account, password string) (errs.IMErrorCode, *ap
 		UserId:        user.UserId,
 		NickName:      user.Nickname,
 		Avatar:        user.UserPortrait,
-		Authorization: GenerateToken(appkey, user.UserId, ""),
+		Authorization: GenerateToken(appkey, user.UserId, configures.Config.AppSecret),
 		ImToken:       resp.Token,
 	}
 }

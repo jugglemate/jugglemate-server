@@ -30,8 +30,8 @@ type AgentTwinDao struct {
 	SyncStatus     string     `gorm:"sync_status"`
 	SyncError      string     `gorm:"sync_error"`
 	LastSyncedAt   *time.Time `gorm:"last_synced_at"`
-	UpdatedTime    time.Time  `gorm:"updated_time"`
-	CreatedTime    time.Time  `gorm:"created_time"`
+	UpdatedTime    time.Time  `gorm:"autoUpdateTime"`
+	CreatedTime    time.Time  `gorm:"autoCreateTime"`
 }
 
 func (AgentTwinDao) TableName() string { return "agent_twins" }
@@ -130,6 +130,7 @@ type AgentMessageDao struct {
 	Role           string          `gorm:"role"`
 	Text           string          `gorm:"text"`
 	Fallback       bool            `gorm:"fallback"`
+	SuggestionStatus string `gorm:"suggestion_status"`
 	Source         string          `gorm:"source"`
 	Platform       string          `gorm:"platform"`
 	ConverType     int             `gorm:"conver_type"`
@@ -505,6 +506,7 @@ func agentMaterialToDao(item models.AgentMaterial) *AgentMaterialDao {
 	if syncStatus == "" {
 		syncStatus = string(models.SyncStatusPending)
 	}
+	now := time.Now()
 	return &AgentMaterialDao{
 		AppKey:       item.AppKey,
 		UniqueName:   item.UniqueName,
@@ -519,6 +521,8 @@ func agentMaterialToDao(item models.AgentMaterial) *AgentMaterialDao {
 		SyncStatus:   syncStatus,
 		SyncError:    item.SyncError,
 		LastSyncedAt: milliToTimePtr(item.LastSyncedAt),
+		CreatedTime:  now,
+		UpdatedTime:  now,
 	}
 }
 
@@ -640,43 +644,391 @@ func agentEvaluationFromDao(item AgentEvaluationDao) *models.AgentEvaluation {
 
 func agentMessageToDao(item models.AgentMessage) *AgentMessageDao {
 	return &AgentMessageDao{
-		AppKey:         item.AppKey,
-		UniqueName:     item.UniqueName,
-		CustomerId:     item.CustomerId,
-		IMMsgId:        item.IMMsgId,
-		AgentMessageId: item.AgentMessageId,
-		SessionId:      item.SessionId,
-		Role:           item.Role,
-		Text:           item.Text,
-		Fallback:       item.Fallback,
-		Source:         item.Source,
-		Platform:       item.Platform,
-		ConverType:     item.ConverType,
-		RawPayload:     jsonStringToData(item.RawPayload),
-		MsgTime:        milliToTimePtr(item.MsgTime),
+		AppKey:           item.AppKey,
+		UniqueName:       item.UniqueName,
+		CustomerId:       item.CustomerId,
+		IMMsgId:          item.IMMsgId,
+		AgentMessageId:   item.AgentMessageId,
+		SessionId:        item.SessionId,
+		Role:             item.Role,
+		Text:             item.Text,
+		Fallback:         item.Fallback,
+		SuggestionStatus: item.SuggestionStatus,
+		Source:           item.Source,
+		Platform:         item.Platform,
+		ConverType:       item.ConverType,
+		RawPayload:       jsonStringToData(item.RawPayload),
+		MsgTime:          milliToTimePtr(item.MsgTime),
 	}
 }
 
 func agentMessageFromDao(item AgentMessageDao) *models.AgentMessage {
 	return &models.AgentMessage{
-		ID:             item.ID,
+		ID:               item.ID,
+		AppKey:           item.AppKey,
+		UniqueName:       item.UniqueName,
+		CustomerId:       item.CustomerId,
+		IMMsgId:          item.IMMsgId,
+		AgentMessageId:   item.AgentMessageId,
+		SessionId:        item.SessionId,
+		Role:             item.Role,
+		Text:             item.Text,
+		Fallback:         item.Fallback,
+		SuggestionStatus: item.SuggestionStatus,
+		Source:           item.Source,
+		Platform:         item.Platform,
+		ConverType:       item.ConverType,
+		RawPayload:       jsonDataToString(item.RawPayload),
+		MsgTime:          timePtrToMilli(item.MsgTime),
+		UpdatedTime:      item.UpdatedTime.UnixMilli(),
+		CreatedTime:      item.CreatedTime.UnixMilli(),
+	}
+}
+
+func (d *AgentDao) QryMessagesBySession(appkey, sessionId string, startId, limit int64) ([]*models.AgentMessage, error) {
+	db := dbcommons.GetDb().Where("app_key=? and session_id=?", appkey, sessionId)
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	var items []AgentMessageDao
+	err := db.Order("id asc").Limit(normalizeLimit(limit)).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentMessage, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, agentMessageFromDao(item))
+	}
+	return ret, nil
+}
+
+func (d *AgentDao) UpdateMessageSuggestionStatus(appkey string, id int64, status string) error {
+	return dbcommons.GetDb().Model(&AgentMessageDao{}).
+		Where("app_key=? and id=?", appkey, id).
+		Update("suggestion_status", status).Error
+}
+
+// ========== AgentSession ==========
+
+type AgentSessionDao struct {
+	ID             int64           `gorm:"primary_key"`
+	AppKey         string          `gorm:"app_key"`
+	SessionId      string          `gorm:"session_id"`
+	UniqueName     string          `gorm:"unique_name"`
+	CustomerId     string          `gorm:"customer_id"`
+	Platform       string          `gorm:"platform"`
+	PlatformConvId string          `gorm:"platform_conv_id"`
+	OperatorId     string          `gorm:"operator_id"`
+	Status         int             `gorm:"status"`
+	AutoMode       int             `gorm:"auto_mode"`
+	MsgCount       int             `gorm:"msg_count"`
+	Tags           json.RawMessage `gorm:"tags"`
+	Summary        string          `gorm:"summary"`
+	FirstMsgAt     *time.Time      `gorm:"first_msg_at"`
+	LastMsgAt      *time.Time      `gorm:"last_msg_at"`
+	ClosedAt       *time.Time      `gorm:"closed_at"`
+	UpdatedTime    time.Time       `gorm:"updated_time"`
+	CreatedTime    time.Time       `gorm:"created_time"`
+}
+
+func (AgentSessionDao) TableName() string { return "agent_sessions" }
+
+func (d *AgentDao) CreateSession(item models.AgentSession) error {
+	return dbcommons.GetDb().Create(&AgentSessionDao{
 		AppKey:         item.AppKey,
+		SessionId:      item.SessionId,
 		UniqueName:     item.UniqueName,
 		CustomerId:     item.CustomerId,
-		IMMsgId:        item.IMMsgId,
-		AgentMessageId: item.AgentMessageId,
-		SessionId:      item.SessionId,
-		Role:           item.Role,
-		Text:           item.Text,
-		Fallback:       item.Fallback,
-		Source:         item.Source,
 		Platform:       item.Platform,
-		ConverType:     item.ConverType,
-		RawPayload:     jsonDataToString(item.RawPayload),
-		MsgTime:        timePtrToMilli(item.MsgTime),
+		PlatformConvId: item.PlatformConvId,
+		OperatorId:     item.OperatorId,
+		Status:         item.Status,
+		AutoMode:       item.AutoMode,
+		MsgCount:       item.MsgCount,
+		Tags:           json.RawMessage(item.Tags),
+		Summary:        item.Summary,
+		FirstMsgAt:     milliToTimePtr(item.FirstMsgAt),
+		LastMsgAt:      milliToTimePtr(item.LastMsgAt),
+		ClosedAt:       milliToTimePtr(item.ClosedAt),
+	}).Error
+}
+
+func (d *AgentDao) UpdateSession(item models.AgentSession) error {
+	return dbcommons.GetDb().Model(&AgentSessionDao{}).
+		Where("app_key=? and session_id=?", item.AppKey, item.SessionId).
+		Updates(map[string]interface{}{
+			"operator_id": item.OperatorId,
+			"status":      item.Status,
+			"auto_mode":   item.AutoMode,
+			"msg_count":   item.MsgCount,
+			"summary":     item.Summary,
+			"last_msg_at": milliToTimePtr(item.LastMsgAt),
+			"closed_at":   milliToTimePtr(item.ClosedAt),
+		}).Error
+}
+
+func (d *AgentDao) FindSession(appkey, sessionId string) (*models.AgentSession, error) {
+	var item AgentSessionDao
+	err := dbcommons.GetDb().Where("app_key=? and session_id=?", appkey, sessionId).Take(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return &models.AgentSession{
+		ID:             item.ID,
+		AppKey:         item.AppKey,
+		SessionId:      item.SessionId,
+		UniqueName:     item.UniqueName,
+		CustomerId:     item.CustomerId,
+		Platform:       item.Platform,
+		PlatformConvId: item.PlatformConvId,
+		OperatorId:     item.OperatorId,
+		Status:         item.Status,
+		AutoMode:       item.AutoMode,
+		MsgCount:       item.MsgCount,
+		Tags:           string(item.Tags),
+		Summary:        item.Summary,
+		FirstMsgAt:     timePtrToMilli(item.FirstMsgAt),
+		LastMsgAt:      timePtrToMilli(item.LastMsgAt),
+		ClosedAt:       timePtrToMilli(item.ClosedAt),
 		UpdatedTime:    item.UpdatedTime.UnixMilli(),
 		CreatedTime:    item.CreatedTime.UnixMilli(),
+	}, nil
+}
+
+func (d *AgentDao) FindSessionByCustomerAgent(appkey, customerId, uniqueName string, status int) (*models.AgentSession, error) {
+	var item AgentSessionDao
+	err := dbcommons.GetDb().
+		Where("app_key=? and customer_id=? and unique_name=? and status=?", appkey, customerId, uniqueName, status).
+		Order("id desc").
+		Take(&item).Error
+	if err != nil {
+		return nil, err
 	}
+	return &models.AgentSession{
+		ID:             item.ID,
+		AppKey:         item.AppKey,
+		SessionId:      item.SessionId,
+		UniqueName:     item.UniqueName,
+		CustomerId:     item.CustomerId,
+		Platform:       item.Platform,
+		PlatformConvId: item.PlatformConvId,
+		OperatorId:     item.OperatorId,
+		Status:         item.Status,
+		AutoMode:       item.AutoMode,
+		MsgCount:       item.MsgCount,
+		Tags:           string(item.Tags),
+		Summary:        item.Summary,
+		FirstMsgAt:     timePtrToMilli(item.FirstMsgAt),
+		LastMsgAt:      timePtrToMilli(item.LastMsgAt),
+		ClosedAt:       timePtrToMilli(item.ClosedAt),
+		UpdatedTime:    item.UpdatedTime.UnixMilli(),
+		CreatedTime:    item.CreatedTime.UnixMilli(),
+	}, nil
+}
+
+// FindSessionByConv 按 IM 会话维度查找 session（platform_conv_id = receiver/conversationId）
+func (d *AgentDao) FindSessionByConv(appkey, platformConvId, uniqueName string) (*models.AgentSession, error) {
+	var item AgentSessionDao
+	err := dbcommons.GetDb().
+		Where("app_key=? and platform_conv_id=? and unique_name=? and status<>2", appkey, platformConvId, uniqueName).
+		Order("id desc").
+		Take(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return &models.AgentSession{
+		ID:             item.ID,
+		AppKey:         item.AppKey,
+		SessionId:      item.SessionId,
+		UniqueName:     item.UniqueName,
+		CustomerId:     item.CustomerId,
+		Platform:       item.Platform,
+		PlatformConvId: item.PlatformConvId,
+		OperatorId:     item.OperatorId,
+		Status:         item.Status,
+		AutoMode:       item.AutoMode,
+		MsgCount:       item.MsgCount,
+		Tags:           string(item.Tags),
+		Summary:        item.Summary,
+		FirstMsgAt:     timePtrToMilli(item.FirstMsgAt),
+		LastMsgAt:      timePtrToMilli(item.LastMsgAt),
+		ClosedAt:       timePtrToMilli(item.ClosedAt),
+		UpdatedTime:    item.UpdatedTime.UnixMilli(),
+		CreatedTime:    item.CreatedTime.UnixMilli(),
+	}, nil
+}
+
+func (d *AgentDao) QrySessionsByAgent(appkey, uniqueName string, startId, limit int64) ([]*models.AgentSession, error) {
+	db := dbcommons.GetDb().Where("app_key=? and unique_name=?", appkey, uniqueName)
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	var items []AgentSessionDao
+	err := db.Order("id desc").Limit(normalizeLimit(limit)).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentSession, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, &models.AgentSession{
+			ID:             item.ID,
+			AppKey:         item.AppKey,
+			SessionId:      item.SessionId,
+			UniqueName:     item.UniqueName,
+			CustomerId:     item.CustomerId,
+			Platform:       item.Platform,
+			PlatformConvId: item.PlatformConvId,
+			OperatorId:     item.OperatorId,
+			Status:         item.Status,
+			AutoMode:       item.AutoMode,
+			MsgCount:       item.MsgCount,
+			Tags:           string(item.Tags),
+			Summary:        item.Summary,
+			FirstMsgAt:     timePtrToMilli(item.FirstMsgAt),
+			LastMsgAt:      timePtrToMilli(item.LastMsgAt),
+			ClosedAt:       timePtrToMilli(item.ClosedAt),
+			UpdatedTime:    item.UpdatedTime.UnixMilli(),
+			CreatedTime:    item.CreatedTime.UnixMilli(),
+		})
+	}
+	return ret, nil
+}
+
+func (d *AgentDao) QrySessionsByOperator(appkey, operatorId string, status int, startId, limit int64) ([]*models.AgentSession, error) {
+	db := dbcommons.GetDb().Where("app_key=? and operator_id=?", appkey, operatorId)
+	if status >= 0 {
+		db = db.Where("status=?", status)
+	}
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	var items []AgentSessionDao
+	err := db.Order("id desc").Limit(normalizeLimit(limit)).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentSession, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, &models.AgentSession{
+			ID:             item.ID,
+			AppKey:         item.AppKey,
+			SessionId:      item.SessionId,
+			UniqueName:     item.UniqueName,
+			CustomerId:     item.CustomerId,
+			Platform:       item.Platform,
+			PlatformConvId: item.PlatformConvId,
+			OperatorId:     item.OperatorId,
+			Status:         item.Status,
+			AutoMode:       item.AutoMode,
+			MsgCount:       item.MsgCount,
+			Tags:           string(item.Tags),
+			Summary:        item.Summary,
+			FirstMsgAt:     timePtrToMilli(item.FirstMsgAt),
+			LastMsgAt:      timePtrToMilli(item.LastMsgAt),
+			ClosedAt:       timePtrToMilli(item.ClosedAt),
+			UpdatedTime:    item.UpdatedTime.UnixMilli(),
+			CreatedTime:    item.CreatedTime.UnixMilli(),
+		})
+	}
+	return ret, nil
+}
+
+// ========== AgentFeedback ==========
+
+type AgentFeedbackDao struct {
+	ID             int64     `gorm:"primary_key"`
+	AppKey         string    `gorm:"app_key"`
+	FeedbackId     string    `gorm:"feedback_id"`
+	SessionId      string    `gorm:"session_id"`
+	UniqueName     string    `gorm:"unique_name"`
+	AgentMsgId     string    `gorm:"agent_msg_id"`
+	AgentReplyText string    `gorm:"agent_reply_text"`
+	Action         string    `gorm:"action"`
+	FinalReplyText string    `gorm:"final_reply_text"`
+	EditDiff       string    `gorm:"edit_diff"`
+	RejectReason   string    `gorm:"reject_reason"`
+	OperatorId     string    `gorm:"operator_id"`
+	CreatedTime    time.Time `gorm:"created_time"`
+}
+
+func (AgentFeedbackDao) TableName() string { return "agent_feedbacks" }
+
+func (d *AgentDao) CreateFeedback(item models.AgentFeedback) error {
+	return dbcommons.GetDb().Create(&AgentFeedbackDao{
+		AppKey:         item.AppKey,
+		FeedbackId:     item.FeedbackId,
+		SessionId:      item.SessionId,
+		UniqueName:     item.UniqueName,
+		AgentMsgId:     item.AgentMsgId,
+		AgentReplyText: item.AgentReplyText,
+		Action:         item.Action,
+		FinalReplyText: item.FinalReplyText,
+		EditDiff:       item.EditDiff,
+		RejectReason:   item.RejectReason,
+		OperatorId:     item.OperatorId,
+	}).Error
+}
+
+func (d *AgentDao) QryFeedbacksByAgent(appkey, uniqueName string, startId, limit int64) ([]*models.AgentFeedback, error) {
+	db := dbcommons.GetDb().Where("app_key=? and unique_name=?", appkey, uniqueName)
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	var items []AgentFeedbackDao
+	err := db.Order("id desc").Limit(normalizeLimit(limit)).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentFeedback, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, &models.AgentFeedback{
+			ID:             item.ID,
+			AppKey:         item.AppKey,
+			FeedbackId:     item.FeedbackId,
+			SessionId:      item.SessionId,
+			UniqueName:     item.UniqueName,
+			AgentMsgId:     item.AgentMsgId,
+			AgentReplyText: item.AgentReplyText,
+			Action:         item.Action,
+			FinalReplyText: item.FinalReplyText,
+			EditDiff:       item.EditDiff,
+			RejectReason:   item.RejectReason,
+			OperatorId:     item.OperatorId,
+			CreatedTime:    item.CreatedTime.UnixMilli(),
+		})
+	}
+	return ret, nil
+}
+
+func (d *AgentDao) QryFeedbacksBySession(appkey, sessionId string, startId, limit int64) ([]*models.AgentFeedback, error) {
+	db := dbcommons.GetDb().Where("app_key=? and session_id=?", appkey, sessionId)
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	var items []AgentFeedbackDao
+	err := db.Order("id desc").Limit(normalizeLimit(limit)).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentFeedback, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, &models.AgentFeedback{
+			ID:             item.ID,
+			AppKey:         item.AppKey,
+			FeedbackId:     item.FeedbackId,
+			SessionId:      item.SessionId,
+			UniqueName:     item.UniqueName,
+			AgentMsgId:     item.AgentMsgId,
+			AgentReplyText: item.AgentReplyText,
+			Action:         item.Action,
+			FinalReplyText: item.FinalReplyText,
+			EditDiff:       item.EditDiff,
+			RejectReason:   item.RejectReason,
+			OperatorId:     item.OperatorId,
+			CreatedTime:    item.CreatedTime.UnixMilli(),
+		})
+	}
+	return ret, nil
 }
 
 var _ models.AgentStorage = (*AgentDao)(nil)

@@ -53,6 +53,9 @@ func main() {
 	httpServer := gin.Default()
 	httpServer.Use(corsHandler())
 
+	// Serve uploaded static files (avatars, etc.) publicly
+	httpServer.Static("/static", "./data")
+
 	msgCallbackGrp := httpServer.Group("/botmsgs")
 	routers.RouteMsgCallback(msgCallbackGrp)
 

@@ -105,6 +105,7 @@ type AgentMessage struct {
 	Role           string
 	Text           string
 	Fallback       bool
+	SuggestionStatus string
 	Source         string
 	Platform       string
 	ConverType     int
@@ -145,4 +146,20 @@ type AgentStorage interface {
 	FindMessageByIM(appkey, imMsgId, role string) (*AgentMessage, error)
 	QryMessages(appkey, uniqueName, customerId string, startId, limit int64) ([]*AgentMessage, error)
 	QryMessagesByIM(appkey, imMsgId string) ([]*AgentMessage, error)
+	QryMessagesBySession(appkey, sessionId string, startId, limit int64) ([]*AgentMessage, error)
+	UpdateMessageSuggestionStatus(appkey string, id int64, status string) error
+
+	// AgentSession
+	CreateSession(item AgentSession) error
+	UpdateSession(item AgentSession) error
+	FindSession(appkey, sessionId string) (*AgentSession, error)
+	FindSessionByCustomerAgent(appkey, customerId, uniqueName string, status int) (*AgentSession, error)
+	FindSessionByConv(appkey, platformConvId, uniqueName string) (*AgentSession, error)
+	QrySessionsByAgent(appkey, uniqueName string, startId, limit int64) ([]*AgentSession, error)
+	QrySessionsByOperator(appkey, operatorId string, status int, startId, limit int64) ([]*AgentSession, error)
+
+	// AgentFeedback
+	CreateFeedback(item AgentFeedback) error
+	QryFeedbacksByAgent(appkey, uniqueName string, startId, limit int64) ([]*AgentFeedback, error)
+	QryFeedbacksBySession(appkey, sessionId string, startId, limit int64) ([]*AgentFeedback, error)
 }

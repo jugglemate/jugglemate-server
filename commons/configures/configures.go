@@ -31,9 +31,20 @@ type AppConfig struct {
 		Domain string `yaml:"domain"`
 	} `yaml:"botConnector"`
 
+	// OSS 统一上传配置
+	Oss OssConfig `yaml:"oss"`
+
 	// AppKey 配置
 	AppKey    string `yaml:"appkey"`
 	AppSecret string `yaml:"appSecret"`
+}
+
+// OssConfig 阿里云 OSS 上传配置
+type OssConfig struct {
+	Endpoint  string `yaml:"endpoint"`
+	AccessKey string `yaml:"access_key"`
+	SecretKey string `yaml:"secret_key"`
+	Bucket    string `yaml:"bucket"`
 }
 
 var Config AppConfig

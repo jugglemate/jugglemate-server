@@ -1,6 +1,7 @@
 package apis
 
 import (
+	"log"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -14,14 +15,19 @@ import (
 func CreateAiBot(ctx *gin.Context) {
 	var req models.AiBotInfo
 	if err := ctx.ShouldBindJSON(&req); err != nil || (req.Nickname == "" && req.DisplayName == "") {
+		log.Printf("[CreateAiBot] bind failed: err=%v, body=%+v", err, req)
 		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
 		return
 	}
+	log.Printf("[CreateAiBot] request: unique_name=%q display_name=%q greeting=%q prompts_len=%d avatar_url=%q",
+		req.UniqueName, req.DisplayName, req.Greeting, len(req.Prompts), req.AvatarURL)
 	code, botInfo := services.CreateAiBot(ctxs.ToCtx(ctx), &req)
 	if code != errs.IMErrorCode_SUCCESS {
+		log.Printf("[CreateAiBot] service failed: code=%d", code)
 		responses.ErrorHttpResp(ctx, code)
 		return
 	}
+	log.Printf("[CreateAiBot] success: bot_id=%s unique_name=%s", botInfo.BotId, botInfo.UniqueName)
 	responses.SuccessHttpResp(ctx, botInfo)
 }
 
@@ -62,6 +68,11 @@ func QryMyAiBots(ctx *gin.Context) {
 			count = intVal
 		}
 	}
+	if val := ctx.Query("limit"); val != "" {
+		if intVal, err := strconv.ParseInt(val, 10, 64); err == nil {
+			count = intVal
+		}
+	}
 	offset := ctx.Query("offset")
 	code, bots := services.QryMyAiBots(ctxs.ToCtx(ctx), count, offset)
 	if code != errs.IMErrorCode_SUCCESS {
@@ -96,6 +107,11 @@ func QryAiMaterials(ctx *gin.Context) {
 	}
 	count := int64(20)
 	if val := ctx.Query("count"); val != "" {
+		if intVal, err := strconv.ParseInt(val, 10, 64); err == nil {
+			count = intVal
+		}
+	}
+	if val := ctx.Query("limit"); val != "" {
 		if intVal, err := strconv.ParseInt(val, 10, 64); err == nil {
 			count = intVal
 		}
@@ -200,4 +216,52 @@ func RemoveAiMaterial(ctx *gin.Context) {
 		return
 	}
 	responses.SuccessHttpResp(ctx, nil)
+}
+
+func UploadAvatar(ctx *gin.Context) {
+	file, header, err := ctx.Request.FormFile("avatar")
+	if err != nil {
+		log.Printf("[UploadAvatar] FormFile failed: err=%v", err)
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	defer file.Close()
+
+	code, url := services.UploadAvatar(ctxs.ToCtx(ctx), file, header)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, map[string]string{
+		"url": url,
+	})
+}
+
+func UploadAiMaterial(ctx *gin.Context) {
+	uniqueName := ctx.Param("unique_name")
+	if uniqueName == "" {
+		uniqueName = ctx.Query("unique_name")
+	}
+	if uniqueName == "" {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	file, header, err := ctx.Request.FormFile("file")
+	if err != nil {
+		log.Printf("[UploadAiMaterial] FormFile failed: err=%v", err)
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	defer file.Close()
+	title := ctx.PostForm("title")
+	if title == "" {
+		title = header.Filename
+	}
+	source := ctx.PostForm("source")
+	code, material := services.UploadAiMaterial(ctxs.ToCtx(ctx), uniqueName, file, header, title, source)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, material)
 }

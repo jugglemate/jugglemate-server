@@ -35,14 +35,19 @@ type UpdateAiBotReq struct {
 }
 
 type AiMaterialInfo struct {
-	Id        string `json:"id"`
-	Type      string `json:"type"`
-	Title     string `json:"title"`
-	Source    string `json:"source"`
-	Content   string `json:"content,omitempty"`
-	Url       string `json:"url,omitempty"`
-	FilePath  string `json:"file_path,omitempty"`
-	SizeBytes int64  `json:"size_bytes"`
+	Id         string `json:"id"`
+	MaterialId string `json:"material_id"`
+	Type       string `json:"type"`
+	Title      string `json:"title"`
+	Source     string `json:"source"`
+	Content    string `json:"content,omitempty"`
+	Url        string `json:"url,omitempty"`
+	FilePath   string `json:"file_path,omitempty"`
+	FileName   string `json:"file_name"`
+	SizeBytes  int64  `json:"size_bytes"`
+	SyncStatus string `json:"sync_status"`
+	SyncError  string `json:"sync_error,omitempty"`
+	CreatedAt  string `json:"created_at,omitempty"`
 }
 
 type AiMaterialInfos struct {

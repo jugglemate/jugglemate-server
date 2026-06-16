@@ -3,6 +3,7 @@ package routers
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/juggleim/jugglechat-server-ai/apis"
+	"github.com/juggleim/jugglechat-server-ai/apis/handlers"
 )
 
 func Route(group *gin.RouterGroup) {
@@ -13,6 +14,8 @@ func Route(group *gin.RouterGroup) {
 	group.POST("/aibots/remove", apis.RemoveAiBot)
 	group.GET("/aibots/mybots", apis.QryMyAiBots)
 	group.POST("/aibots/:unique_name/materials/add", apis.AddAiMaterial)
+	group.POST("/aibots/:unique_name/materials/upload", apis.UploadAiMaterial)
+	group.POST("/aibots/avatar/upload", apis.UploadAvatar)
 	group.GET("/aibots/:unique_name/materials", apis.QryAiMaterials)
 	group.POST("/aibots/:unique_name/materials/:material_id/remove", apis.RemoveAiMaterial)
 	group.POST("/aibots/:unique_name/training", apis.StartTraining)
@@ -21,6 +24,13 @@ func Route(group *gin.RouterGroup) {
 	group.POST("/aibots/:unique_name/versions/:version/activate", apis.ActivateVersion)
 	group.GET("/aibots/:unique_name/versions/current", apis.GetCurrentVersion)
 	group.GET("/aibots/:unique_name/evaluations", apis.ListEvaluations)
+	// Session & Feedback
+	group.GET("/aibots/sessions/lookup", handlers.LookupSession)
+	group.GET("/aibots/sessions/:session_id", handlers.GetSession)
+	group.POST("/aibots/sessions/:session_id/takeover", handlers.TakeoverSession)
+	group.POST("/aibots/sessions/:session_id/feedback", handlers.SubmitFeedback)
+	group.GET("/aibots/:unique_name/sessions", handlers.ListAgentSessions)
+	group.GET("/aibots/:unique_name/feedbacks", handlers.ListAgentFeedbacks)
 }
 
 func RouteMsgCallback(group *gin.RouterGroup) {

@@ -1,21 +1,49 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"mime/multipart"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	apiModels "github.com/juggleim/jugglechat-server-ai/apis/models"
+	"github.com/juggleim/jugglechat-server-ai/commons/configures"
 	"github.com/juggleim/jugglechat-server-ai/commons/ctxs"
 	"github.com/juggleim/jugglechat-server-ai/commons/errs"
 	"github.com/juggleim/jugglechat-server-ai/commons/imsdk"
+	"github.com/juggleim/jugglechat-server-ai/commons/oss"
 	"github.com/juggleim/jugglechat-server-ai/commons/tools"
 	"github.com/juggleim/jugglechat-server-ai/storages"
 	storageModels "github.com/juggleim/jugglechat-server-ai/storages/models"
 
 	juggleimsdk "github.com/juggleim/imserver-sdk-go"
 )
+
+var (
+	ossClient     *oss.Client
+	ossClientErr  error
+	ossClientOnce sync.Once
+)
+
+// getOssClient returns the shared OSS upload client (lazy init).
+func getOssClient() (*oss.Client, error) {
+	ossClientOnce.Do(func() {
+		ossClient, ossClientErr = oss.New(oss.Config{
+			Endpoint:  configures.Config.Oss.Endpoint,
+			AccessKey: configures.Config.Oss.AccessKey,
+			SecretKey: configures.Config.Oss.SecretKey,
+			Bucket:    configures.Config.Oss.Bucket,
+		})
+	})
+	return ossClient, ossClientErr
+}
 
 func CreateAiBot(ctx context.Context, bot *apiModels.AiBotInfo) (errs.IMErrorCode, *apiModels.AiBotInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
@@ -25,12 +53,17 @@ func CreateAiBot(ctx context.Context, bot *apiModels.AiBotInfo) (errs.IMErrorCod
 	displayName := normalizeDisplayName(bot)
 	avatarURL := normalizeAvatarURL(bot)
 
+	log.Printf("[CreateAiBot] params: appkey=%s userId=%s uniqueName=%s displayName=%s greeting=%q prompts_len=%d",
+		appkey, userId, uniqueName, displayName, bot.Greeting, len(bot.Prompts))
+
 	storage := storages.NewAgentStorage()
 	_, err := storage.HasTwinTombstone(appkey, uniqueName)
 	if err != nil {
+		log.Printf("[CreateAiBot] HasTwinTombstone failed: err=%v", err)
 		return errs.IMErrorCode_APP_AIBOT_AddBotFailed, nil
 	}
 	if _, err := storage.FindTwin(appkey, uniqueName); err == nil {
+		log.Printf("[CreateAiBot] FindTwin found existing agent: appkey=%s uniqueName=%s", appkey, uniqueName)
 		return errs.IMErrorCode_APP_AIBOT_AddBotFailed, nil
 	}
 	err = storage.CreateTwin(storageModels.AgentTwin{
@@ -47,6 +80,7 @@ func CreateAiBot(ctx context.Context, bot *apiModels.AiBotInfo) (errs.IMErrorCod
 		MaterialsCount: 0,
 	})
 	if err != nil {
+		log.Printf("[CreateAiBot] CreateTwin failed: err=%v", err)
 		return errs.IMErrorCode_APP_AIBOT_AddBotFailed, nil
 	}
 	registerBotToIM(appkey, botId, displayName, avatarURL)
@@ -521,15 +555,30 @@ func twinToAPI(item *storageModels.AgentTwin, displayName, avatarURL, greeting s
 
 func materialToAPI(item *storageModels.AgentMaterial) *apiModels.AiMaterialInfo {
 	return &apiModels.AiMaterialInfo{
-		Id:        item.MaterialId,
-		Type:      item.Type,
-		Title:     item.Title,
-		Source:    item.Source,
-		Content:   item.Content,
-		Url:       item.URL,
-		FilePath:  item.FilePath,
-		SizeBytes: item.SizeBytes,
+		MaterialId: item.MaterialId,
+		Type:       item.Type,
+		Title:      item.Title,
+		Source:     item.Source,
+		Content:    item.Content,
+		Url:        item.URL,
+		FilePath:   item.FilePath,
+		FileName:   extractFileName(item.FilePath),
+		SizeBytes:  item.SizeBytes,
+		SyncStatus: item.SyncStatus,
+		SyncError:  item.SyncError,
+		CreatedAt:  time.UnixMilli(item.CreatedTime).Format(time.RFC3339),
 	}
+}
+
+func extractFileName(path string) string {
+	if path == "" {
+		return ""
+	}
+	idx := strings.LastIndex(path, "/")
+	if idx >= 0 {
+		return path[idx+1:]
+	}
+	return path
 }
 
 func extractVersionSeq(v string) int {
@@ -552,4 +601,143 @@ func registerBotToIM(appkey, botId, nickname, avatar string) {
 			},
 		})
 	}
+}
+
+// UploadAiMaterial handles file upload for agent training materials.
+// The file is saved locally for training and also uploaded to Qiniu CDN for public access.
+func UploadAiMaterial(ctx context.Context, uniqueName string, file multipart.File, header *multipart.FileHeader, title, source string) (errs.IMErrorCode, *apiModels.AiMaterialInfo) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	userId := ctxs.GetRequesterIdFromCtx(ctx)
+	storage := storages.NewAgentStorage()
+
+	twin, err := storage.FindTwin(appkey, uniqueName)
+	if err != nil {
+		return errs.IMErrorCode_APP_AIBOT_BotNotFound, nil
+	}
+	if twin.OwnerId != userId {
+		return errs.IMErrorCode_APP_AIBOT_NoPermission, nil
+	}
+
+	// Determine material type from MIME
+	contentType := header.Header.Get("Content-Type")
+	materialType := "file"
+	if strings.HasPrefix(contentType, "image/") {
+		materialType = "image"
+	}
+
+	// Default source to type if not provided
+	if source == "" {
+		source = materialType
+	}
+
+	materialId := "mat_" + tools.GenerateUUIDShort11()
+
+	// Build storage path: data/materials/{appkey}/{unique_name}/{materialId}_{filename}
+	dir := filepath.Join("data", "materials", appkey, uniqueName)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Printf("[UploadAiMaterial] MkdirAll failed: path=%s err=%v", dir, err)
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, nil
+	}
+	savedFilename := materialId + "_" + header.Filename
+	savePath := filepath.Join(dir, savedFilename)
+
+	dst, err := os.Create(savePath)
+	if err != nil {
+		log.Printf("[UploadAiMaterial] Create file failed: path=%s err=%v", savePath, err)
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, nil
+	}
+	defer dst.Close()
+
+	written, err := io.Copy(dst, file)
+	if err != nil {
+		log.Printf("[UploadAiMaterial] Copy file failed: err=%v", err)
+		os.Remove(savePath)
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, nil
+	}
+	dst.Close()
+
+	// Upload to OSS CDN for public access (read from saved file)
+	cdnURL := ""
+	uploadFile, err := os.Open(savePath)
+	if err != nil {
+		log.Printf("[UploadAiMaterial] failed to reopen for oss upload: path=%s err=%v", savePath, err)
+	} else {
+		defer uploadFile.Close()
+		cdnPrefix := fmt.Sprintf("materials/%s/%s/", appkey, uniqueName)
+		ossCli, ossErr := getOssClient()
+		if ossErr != nil {
+			log.Printf("[UploadAiMaterial] oss client init failed: err=%v", ossErr)
+		} else {
+			result, uploadErr := ossCli.Upload(ctx, uploadFile, cdnPrefix, savedFilename)
+			if uploadErr != nil {
+				log.Printf("[UploadAiMaterial] oss upload failed (file saved locally): err=%v", uploadErr)
+			} else {
+				cdnURL = result.URL
+			}
+		}
+	}
+
+	item := storageModels.AgentMaterial{
+		AppKey:       appkey,
+		UniqueName:   uniqueName,
+		MaterialId:   materialId,
+		Type:         materialType,
+		Title:        title,
+		Source:       source,
+		Content:      "",
+		URL:          cdnURL,
+		FilePath:     savePath,
+		SizeBytes:    written,
+		SyncStatus:   string(storageModels.SyncStatusPending),
+		LastSyncedAt: 0,
+	}
+	if err := storage.CreateMaterial(item); err != nil {
+		os.Remove(savePath)
+		return errs.IMErrorCode_APP_AIBOT_AddMaterialFailed, nil
+	}
+
+	twin.MaterialsCount++
+	_ = storage.UpdateTwin(*twin)
+
+	return errs.IMErrorCode_SUCCESS, materialToAPI(&item)
+}
+
+// UploadAvatar handles avatar image upload to OSS CDN and returns the public CDN URL.
+func UploadAvatar(ctx context.Context, file multipart.File, header *multipart.FileHeader) (errs.IMErrorCode, string) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	contentType := header.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "image/") {
+		log.Printf("[UploadAvatar] invalid content type: %s", contentType)
+		return errs.IMErrorCode_APP_ParamError, ""
+	}
+
+	// Generate unique filename for CDN key
+	ext := filepath.Ext(header.Filename)
+	savedFilename := fmt.Sprintf("%d_%s%s", time.Now().UnixMilli(), tools.GenerateUUIDShort11(), ext)
+
+	// Read full file bytes into memory, then upload to OSS
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		log.Printf("[UploadAvatar] ReadAll failed: appkey=%s filename=%s err=%v", appkey, savedFilename, err)
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, ""
+	}
+
+	ossCli, ossErr := getOssClient()
+	if ossErr != nil {
+		log.Printf("[UploadAvatar] oss client init failed: err=%v", ossErr)
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, ""
+	}
+
+	result, uploadErr := ossCli.Upload(
+		ctx, bytes.NewReader(fileBytes),
+		"avatars/"+appkey+"/",
+		savedFilename,
+	)
+	if uploadErr != nil {
+		log.Printf("[UploadAvatar] oss upload failed: appkey=%s filename=%s err=%v", appkey, savedFilename, uploadErr)
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, ""
+	}
+
+	log.Printf("[UploadAvatar] success: appkey=%s cdnURL=%s", appkey, result.URL)
+	return errs.IMErrorCode_SUCCESS, result.URL
 }
