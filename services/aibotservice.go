@@ -14,6 +14,8 @@ import (
 	"time"
 
 	apiModels "github.com/juggleim/jugglechat-server-ai/apis/models"
+	"github.com/juggleim/jugglechat-server-ai/commons/agentclient"
+	"github.com/juggleim/jugglechat-server-ai/commons/agentconfig"
 	"github.com/juggleim/jugglechat-server-ai/commons/configures"
 	"github.com/juggleim/jugglechat-server-ai/commons/ctxs"
 	"github.com/juggleim/jugglechat-server-ai/commons/errs"
@@ -45,6 +47,14 @@ func getOssClient() (*oss.Client, error) {
 	return ossClient, ossClientErr
 }
 
+func newAgentClient() *agentclient.Client {
+	return agentclient.New(agentclient.Config{
+		BaseURL:    strings.TrimRight(agentconfig.BaseURL(), "/"),
+		Timeout:    agentconfig.Timeout(),
+		TwinsToken: agentconfig.TwinsToken(),
+	})
+}
+
 func CreateAiBot(ctx context.Context, bot *apiModels.AiBotInfo) (errs.IMErrorCode, *apiModels.AiBotInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -66,6 +76,22 @@ func CreateAiBot(ctx context.Context, bot *apiModels.AiBotInfo) (errs.IMErrorCod
 		log.Printf("[CreateAiBot] FindTwin found existing agent: appkey=%s uniqueName=%s", appkey, uniqueName)
 		return errs.IMErrorCode_APP_AIBOT_AddBotFailed, nil
 	}
+
+	// Step 1: call agent API first — if agent service is down, don't create ghost records
+	agentCli := newAgentClient()
+	createReq := map[string]any{
+		"unique_name":  uniqueName,
+		"display_name": displayName,
+		"avatar_url":   avatarURL,
+	}
+	_, syncCode, syncErr := agentCli.CreateTwin(ctx, userId, createReq)
+	if syncErr != nil || (syncCode != 200 && syncCode != 201) {
+		syncErrMsg := fmt.Sprintf("agent CreateTwin failed: code=%d err=%v", syncCode, syncErr)
+		log.Printf("[CreateAiBot] %s", syncErrMsg)
+		return errs.IMErrorCode_APP_AIBOT_AddBotFailed, nil
+	}
+
+	// Step 2: agent API succeeded, persist to local DB
 	err = storage.CreateTwin(storageModels.AgentTwin{
 		AppKey:         appkey,
 		UniqueName:     uniqueName,
@@ -76,7 +102,7 @@ func CreateAiBot(ctx context.Context, bot *apiModels.AiBotInfo) (errs.IMErrorCod
 		Prompts:        bot.Prompts,
 		OwnerId:        userId,
 		Status:         "untrained",
-		SyncStatus:     string(storageModels.SyncStatusPending),
+		SyncStatus:     string(storageModels.SyncStatusSynced),
 		MaterialsCount: 0,
 	})
 	if err != nil {
@@ -84,6 +110,7 @@ func CreateAiBot(ctx context.Context, bot *apiModels.AiBotInfo) (errs.IMErrorCod
 		return errs.IMErrorCode_APP_AIBOT_AddBotFailed, nil
 	}
 	registerBotToIM(appkey, botId, displayName, avatarURL)
+
 	return errs.IMErrorCode_SUCCESS, &apiModels.AiBotInfo{
 		BotId:       botId,
 		UniqueName:  uniqueName,
@@ -94,6 +121,7 @@ func CreateAiBot(ctx context.Context, bot *apiModels.AiBotInfo) (errs.IMErrorCod
 		Prompts:     bot.Prompts,
 		Greeting:    bot.Greeting,
 		Status:      "untrained",
+		SyncStatus:  string(storageModels.SyncStatusSynced),
 		OwnerId:     userId,
 	}
 }
@@ -131,6 +159,21 @@ func UpdateAiBot(ctx context.Context, bot *apiModels.UpdateAiBotReq) (errs.IMErr
 	if bot.Prompts != nil {
 		prompts = *bot.Prompts
 	}
+
+	// Step 1: call agent API first
+	agentCli := newAgentClient()
+	updateReq := map[string]any{
+		"display_name": displayName,
+		"avatar_url":   avatarURL,
+	}
+	_, syncCode, syncErr := agentCli.UpdateTwin(ctx, userId, oldBot.UniqueName, updateReq)
+	if syncErr != nil || (syncCode != 200 && syncCode != 201) {
+		syncErrMsg := fmt.Sprintf("agent UpdateTwin failed: code=%d err=%v", syncCode, syncErr)
+		log.Printf("[UpdateAiBot] %s", syncErrMsg)
+		return errs.IMErrorCode_APP_AIBOT_UpdateBotFailed, nil
+	}
+
+	// Step 2: agent API succeeded, persist to local DB
 	err = storage.UpdateTwin(storageModels.AgentTwin{
 		AppKey:         appkey,
 		UniqueName:     oldBot.UniqueName,
@@ -143,7 +186,7 @@ func UpdateAiBot(ctx context.Context, bot *apiModels.UpdateAiBotReq) (errs.IMErr
 		ActiveVersion:  oldBot.ActiveVersion,
 		TrainingMode:   oldBot.TrainingMode,
 		MaterialsCount: oldBot.MaterialsCount,
-		SyncStatus:     string(storageModels.SyncStatusPending),
+		SyncStatus:     string(storageModels.SyncStatusSynced),
 		OwnerId:        oldBot.OwnerId,
 	})
 	if err != nil {
@@ -154,6 +197,7 @@ func UpdateAiBot(ctx context.Context, bot *apiModels.UpdateAiBotReq) (errs.IMErr
 		return errs.IMErrorCode_APP_AIBOT_UpdateBotFailed, nil
 	}
 	registerBotToIM(appkey, oldBot.BotId, displayName, avatarURL)
+
 	return errs.IMErrorCode_SUCCESS, twinToAPI(current, current.DisplayName, current.AvatarURL, current.Greeting)
 }
 
@@ -169,6 +213,14 @@ func RemoveAiBot(ctx context.Context, botId string) errs.IMErrorCode {
 	if oldBot.OwnerId != userId {
 		return errs.IMErrorCode_APP_AIBOT_NoPermission
 	}
+
+	// Try to delete from agent service first (best-effort)
+	agentCli := newAgentClient()
+	delCode, delErr := agentCli.DeleteTwin(ctx, userId, oldBot.UniqueName)
+	if delErr != nil || (delCode != 200 && delCode != 204) {
+		log.Printf("[RemoveAiBot] agent delete failed: code=%d err=%v, uniqueName=%s", delCode, delErr, oldBot.UniqueName)
+	}
+
 	if err := storage.CreateTwinTombstone(appkey, oldBot.UniqueName, oldBot.OwnerId); err != nil {
 		return errs.IMErrorCode_APP_AIBOT_DelBotFailed
 	}
@@ -215,13 +267,22 @@ func AddAiMaterial(ctx context.Context, uniqueName string, req *apiModels.AiMate
 		return errs.IMErrorCode_APP_AIBOT_NoPermission, nil
 	}
 	materialId := "mat_" + tools.GenerateUUIDShort11()
+	addReq := buildTextOrURLMaterialRequest(materialId, req)
+	if addReq == nil {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
 	source := req.Source
 	if source == "" {
 		source = req.Type
 	}
 	sizeBytes := req.SizeBytes
 	if sizeBytes <= 0 {
-		sizeBytes = int64(len(req.Content))
+		switch req.Type {
+		case "url":
+			sizeBytes = int64(len(req.Url))
+		default:
+			sizeBytes = int64(len(req.Content))
+		}
 	}
 	item := storageModels.AgentMaterial{
 		AppKey:       appkey,
@@ -240,6 +301,21 @@ func AddAiMaterial(ctx context.Context, uniqueName string, req *apiModels.AiMate
 	if err := storage.CreateMaterial(item); err != nil {
 		return errs.IMErrorCode_APP_AIBOT_AddMaterialFailed, nil
 	}
+
+	agentCli := newAgentClient()
+	_, syncCode, syncErr := agentCli.AddMaterial(ctx, userId, uniqueName, addReq)
+	if syncErr != nil || (syncCode != 200 && syncCode != 201) {
+		syncErrMsg := fmt.Sprintf("code=%d err=%v", syncCode, syncErr)
+		log.Printf("[AddAiMaterial] agent sync failed: %s, material=%s", syncErrMsg, materialId)
+		_ = storage.UpdateMaterialSyncError(appkey, materialId, syncErrMsg)
+		item.SyncStatus = string(storageModels.SyncStatusFailed)
+		item.SyncError = syncErrMsg
+	} else {
+		_ = storage.UpdateMaterialSyncStatus(appkey, materialId, string(storageModels.SyncStatusSynced))
+		item.SyncStatus = string(storageModels.SyncStatusSynced)
+		item.SyncError = ""
+	}
+
 	twin.MaterialsCount++
 	_ = storage.UpdateTwin(*twin)
 	return errs.IMErrorCode_SUCCESS, materialToAPI(&item)
@@ -481,6 +557,21 @@ func RemoveAiMaterial(ctx context.Context, uniqueName, materialId string) errs.I
 	if twin.OwnerId != userId {
 		return errs.IMErrorCode_APP_AIBOT_NoPermission
 	}
+	material, err := storage.FindMaterial(appkey, materialId)
+	if err != nil {
+		return errs.IMErrorCode_APP_AIBOT_DelMaterialFailed
+	}
+	if material.UniqueName != uniqueName {
+		return errs.IMErrorCode_APP_AIBOT_DelMaterialFailed
+	}
+
+	agentCli := newAgentClient()
+	delCode, delErr := agentCli.DeleteMaterial(ctx, userId, uniqueName, materialId)
+	if delErr != nil || (delCode != 200 && delCode != 204 && delCode != 404) {
+		log.Printf("[RemoveAiMaterial] agent delete failed: code=%d err=%v, uniqueName=%s materialId=%s", delCode, delErr, uniqueName, materialId)
+		return errs.IMErrorCode_APP_AIBOT_DelMaterialFailed
+	}
+
 	if err := storage.DeleteMaterial(appkey, materialId); err != nil {
 		return errs.IMErrorCode_APP_AIBOT_DelMaterialFailed
 	}
@@ -491,11 +582,151 @@ func RemoveAiMaterial(ctx context.Context, uniqueName, materialId string) errs.I
 	return errs.IMErrorCode_SUCCESS
 }
 
-func normalizeUniqueName(uniqueName, botId string) string {
-	if uniqueName != "" {
-		return uniqueName
+// SyncTwin retries syncing a twin to the agent service.
+func SyncTwin(ctx context.Context, uniqueName string) (errs.IMErrorCode, *apiModels.AiBotInfo) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	userId := ctxs.GetRequesterIdFromCtx(ctx)
+	storage := storages.NewAgentStorage()
+
+	twin, err := storage.FindTwin(appkey, uniqueName)
+	if err != nil {
+		return errs.IMErrorCode_APP_AIBOT_BotNotFound, nil
 	}
-	return strings.ToLower(botId)
+	if twin.OwnerId != userId {
+		return errs.IMErrorCode_APP_AIBOT_NoPermission, nil
+	}
+
+	agentCli := newAgentClient()
+	createReq := map[string]any{
+		"unique_name":  twin.UniqueName,
+		"display_name": twin.DisplayName,
+		"avatar_url":   twin.AvatarURL,
+	}
+	_, syncCode, syncErr := agentCli.CreateTwin(ctx, userId, createReq)
+	if syncErr != nil || (syncCode != 200 && syncCode != 201) {
+		// Try update as fallback (twin may already exist on agent side)
+		updateReq := map[string]any{
+			"display_name": twin.DisplayName,
+			"avatar_url":   twin.AvatarURL,
+		}
+		_, syncCode, syncErr = agentCli.UpdateTwin(ctx, userId, uniqueName, updateReq)
+	}
+	if syncErr != nil || (syncCode != 200 && syncCode != 201) {
+		syncErrMsg := fmt.Sprintf("code=%d err=%v", syncCode, syncErr)
+		log.Printf("[SyncTwin] sync failed: %s, uniqueName=%s", syncErrMsg, uniqueName)
+		twin.SyncStatus = string(storageModels.SyncStatusFailed)
+		twin.SyncError = syncErrMsg
+		_ = storage.UpdateTwin(*twin)
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, agentTwinToAPI(twin)
+	}
+	_ = storage.UpdateTwinSyncStatus(appkey, uniqueName, string(storageModels.SyncStatusSynced))
+	twin.SyncStatus = string(storageModels.SyncStatusSynced)
+	twin.SyncError = ""
+	return errs.IMErrorCode_SUCCESS, agentTwinToAPI(twin)
+}
+
+// SyncMaterial retries syncing a single material to the agent service.
+func SyncMaterial(ctx context.Context, uniqueName, materialId string) (errs.IMErrorCode, *apiModels.AiMaterialInfo) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	userId := ctxs.GetRequesterIdFromCtx(ctx)
+	storage := storages.NewAgentStorage()
+
+	item, err := storage.FindMaterial(appkey, materialId)
+	if err != nil {
+		return errs.IMErrorCode_APP_AIBOT_BotNotFound, nil
+	}
+	if item.UniqueName != uniqueName {
+		return errs.IMErrorCode_APP_AIBOT_BotNotFound, nil
+	}
+	twin, err := storage.FindTwin(appkey, uniqueName)
+	if err != nil || twin == nil {
+		return errs.IMErrorCode_APP_AIBOT_BotNotFound, nil
+	}
+	if twin.OwnerId != userId {
+		return errs.IMErrorCode_APP_AIBOT_NoPermission, nil
+	}
+
+	agentCli := newAgentClient()
+	syncCode := 0
+	var syncErr error
+	if item.Type == "file" || item.Type == "image" {
+		syncFile, openErr := os.Open(item.FilePath)
+		if openErr != nil {
+			syncErr = openErr
+		} else {
+			defer syncFile.Close()
+			_, syncCode, syncErr = agentCli.AddMaterialFile(ctx, userId, uniqueName, filepath.Base(item.FilePath), syncFile, item.Title, map[string]string{
+				"id": item.MaterialId,
+			})
+		}
+	} else {
+		addReq := buildTextOrURLMaterialRequest(item.MaterialId, &apiModels.AiMaterialInfo{
+			Type:    item.Type,
+			Title:   item.Title,
+			Source:  item.Source,
+			Content: item.Content,
+			Url:     item.URL,
+		})
+		if addReq == nil {
+			syncErr = fmt.Errorf("invalid material type: %s", item.Type)
+		} else {
+			_, syncCode, syncErr = agentCli.AddMaterial(ctx, userId, uniqueName, addReq)
+		}
+	}
+	if syncErr != nil || (syncCode != 200 && syncCode != 201) {
+		syncErrMsg := fmt.Sprintf("code=%d err=%v", syncCode, syncErr)
+		log.Printf("[SyncMaterial] sync failed: %s, material=%s", syncErrMsg, materialId)
+		item.SyncStatus = string(storageModels.SyncStatusFailed)
+		item.SyncError = syncErrMsg
+		_ = storage.UpdateMaterialSyncError(appkey, materialId, syncErrMsg)
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, materialToAPI(item)
+	}
+	_ = storage.UpdateMaterialSyncStatus(appkey, materialId, string(storageModels.SyncStatusSynced))
+	item.SyncStatus = string(storageModels.SyncStatusSynced)
+	item.SyncError = ""
+	return errs.IMErrorCode_SUCCESS, materialToAPI(item)
+}
+
+// normalizeUniqueName 生成符合 agent API 规则的 unique_name（[a-z][a-z0-9-]{2,31}）。
+func normalizeUniqueName(uniqueName, botId string) string {
+	sanitize := func(raw string) string {
+		var buf strings.Builder
+		for _, r := range strings.ToLower(raw) {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+				buf.WriteRune(r)
+			}
+		}
+		return buf.String()
+	}
+
+	from := botId
+	if uniqueName != "" {
+		from = uniqueName
+	}
+	name := sanitize(from)
+
+	// 确保有效长度
+	if len(name) < 3 {
+		padding := strings.Repeat("0", 3-len(name))
+		name = "a" + name + padding
+	}
+	if len(name) > 32 {
+		name = name[:32]
+		name = strings.TrimRight(name, "-")
+	}
+	// 必须以小写字母开头
+	if name[0] < 'a' || name[0] > 'z' {
+		name = "a" + name
+		if len(name) > 32 {
+			name = name[:32]
+		}
+	}
+	// 以 - 结尾时补 0
+	name = strings.TrimRight(name, "-")
+	if len(name) < 3 {
+		name += strings.Repeat("0", 3-len(name))
+	}
+	return name
 }
 
 func normalizeDisplayName(bot *apiModels.AiBotInfo) string {
@@ -538,6 +769,8 @@ func agentTwinToAPI(item *storageModels.AgentTwin) *apiModels.AiBotInfo {
 		ActiveVersion:  item.ActiveVersion,
 		TrainingMode:   item.TrainingMode,
 		MaterialsCount: item.MaterialsCount,
+		SyncStatus:     item.SyncStatus,
+		SyncError:      item.SyncError,
 		CreatedTime:    item.CreatedTime,
 		UpdatedTime:    item.UpdatedTime,
 	}
@@ -567,6 +800,40 @@ func materialToAPI(item *storageModels.AgentMaterial) *apiModels.AiMaterialInfo 
 		SyncStatus: item.SyncStatus,
 		SyncError:  item.SyncError,
 		CreatedAt:  time.UnixMilli(item.CreatedTime).Format(time.RFC3339),
+	}
+}
+
+func buildTextOrURLMaterialRequest(materialId string, req *apiModels.AiMaterialInfo) map[string]any {
+	if req == nil {
+		return nil
+	}
+	base := map[string]any{}
+	if materialId != "" {
+		base["id"] = materialId
+	}
+	if req.Title != "" {
+		base["title"] = req.Title
+	}
+	if req.Source != "" {
+		base["source"] = req.Source
+	}
+	switch req.Type {
+	case "text":
+		if req.Content == "" {
+			return nil
+		}
+		base["type"] = "text"
+		base["content"] = req.Content
+		return base
+	case "url":
+		if req.Url == "" {
+			return nil
+		}
+		base["type"] = "url"
+		base["url"] = req.Url
+		return base
+	default:
+		return nil
 	}
 }
 
@@ -694,6 +961,36 @@ func UploadAiMaterial(ctx context.Context, uniqueName string, file multipart.Fil
 	if err := storage.CreateMaterial(item); err != nil {
 		os.Remove(savePath)
 		return errs.IMErrorCode_APP_AIBOT_AddMaterialFailed, nil
+	}
+
+	agentCli := newAgentClient()
+	syncFile, err := os.Open(savePath)
+	if err != nil {
+		syncErrMsg := fmt.Sprintf("open saved file failed: %v", err)
+		log.Printf("[UploadAiMaterial] %s, material=%s", syncErrMsg, materialId)
+		item.SyncStatus = string(storageModels.SyncStatusFailed)
+		item.SyncError = syncErrMsg
+		_ = storage.UpdateMaterialSyncError(appkey, materialId, syncErrMsg)
+		twin.MaterialsCount++
+		_ = storage.UpdateTwin(*twin)
+		return errs.IMErrorCode_SUCCESS, materialToAPI(&item)
+	}
+	defer syncFile.Close()
+
+	// Sync material to agent service so it's available for training
+	_, syncCode, syncErr := agentCli.AddMaterialFile(ctx, userId, uniqueName, header.Filename, syncFile, title, map[string]string{
+		"id": materialId,
+	})
+	if syncErr != nil || (syncCode != 200 && syncCode != 201) {
+		syncErrMsg := fmt.Sprintf("code=%d err=%v", syncCode, syncErr)
+		log.Printf("[UploadAiMaterial] agent sync failed: %s, material=%s", syncErrMsg, materialId)
+		item.SyncStatus = string(storageModels.SyncStatusFailed)
+		item.SyncError = syncErrMsg
+		_ = storage.UpdateMaterialSyncError(appkey, materialId, syncErrMsg)
+	} else {
+		item.SyncStatus = string(storageModels.SyncStatusSynced)
+		item.SyncError = ""
+		storage.UpdateMaterialSyncStatus(appkey, materialId, item.SyncStatus)
 	}
 
 	twin.MaterialsCount++

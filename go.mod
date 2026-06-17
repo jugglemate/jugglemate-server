@@ -3,7 +3,7 @@ module github.com/juggleim/jugglechat-server-ai
 go 1.25.0
 
 require (
-	github.com/aliyun/aliyun-oss-go-sdk v3.0.2+incompatible
+	github.com/aliyun/aliyun-oss-go-sdk v2.2.10+incompatible
 	github.com/gin-gonic/gin v1.10.1
 	github.com/google/uuid v1.6.0
 	github.com/juggleim/imserver-sdk-go v1.0.14

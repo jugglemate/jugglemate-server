@@ -95,29 +95,31 @@ type AgentEvaluation struct {
 }
 
 type AgentMessage struct {
-	ID             int64
-	AppKey         string
-	UniqueName     string
-	CustomerId     string
-	IMMsgId        string
-	AgentMessageId string
-	SessionId      string
-	Role           string
-	Text           string
-	Fallback       bool
+	ID               int64
+	AppKey           string
+	UniqueName       string
+	CustomerId       string
+	IMMsgId          string
+	AgentMessageId   string
+	SessionId        string
+	Role             string
+	Text             string
+	Fallback         bool
 	SuggestionStatus string
-	Source         string
-	Platform       string
-	ConverType     int
-	RawPayload     string
-	MsgTime        int64
-	UpdatedTime    int64
-	CreatedTime    int64
+	PendingSource    string
+	Source           string
+	Platform         string
+	ConverType       int
+	RawPayload       string
+	MsgTime          int64
+	UpdatedTime      int64
+	CreatedTime      int64
 }
 
 type AgentStorage interface {
 	CreateTwin(item AgentTwin) error
 	UpdateTwin(item AgentTwin) error
+	UpdateTwinSyncStatus(appkey, uniqueName, status string) error
 	DeleteTwin(appkey, uniqueName string) error
 	FindTwin(appkey, uniqueName string) (*AgentTwin, error)
 	FindTwinByBotId(appkey, botId string) (*AgentTwin, error)
@@ -127,7 +129,10 @@ type AgentStorage interface {
 	HasTwinTombstone(appkey, uniqueName string) (bool, error)
 
 	CreateMaterial(item AgentMaterial) error
+	UpdateMaterialSyncStatus(appkey, materialId, status string) error
+	UpdateMaterialSyncError(appkey, materialId, syncError string) error
 	DeleteMaterial(appkey, materialId string) error
+	FindMaterial(appkey, materialId string) (*AgentMaterial, error)
 	QryMaterials(appkey, uniqueName string, startId, limit int64) ([]*AgentMaterial, error)
 
 	UpsertJob(item AgentJob) error
@@ -152,9 +157,11 @@ type AgentStorage interface {
 	// AgentSession
 	CreateSession(item AgentSession) error
 	UpdateSession(item AgentSession) error
+	UpdateSessionLastMsgAt(appkey, sessionId string, lastMsgAt int64) error
 	FindSession(appkey, sessionId string) (*AgentSession, error)
 	FindSessionByCustomerAgent(appkey, customerId, uniqueName string, status int) (*AgentSession, error)
 	FindSessionByConv(appkey, platformConvId, uniqueName string) (*AgentSession, error)
+	FindSessionByConvId(appkey, platformConvId string) (*AgentSession, error)
 	QrySessionsByAgent(appkey, uniqueName string, startId, limit int64) ([]*AgentSession, error)
 	QrySessionsByOperator(appkey, operatorId string, status int, startId, limit int64) ([]*AgentSession, error)
 

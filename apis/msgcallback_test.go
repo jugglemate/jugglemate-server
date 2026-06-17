@@ -1,8 +1,13 @@
 package apis
 
 import (
+	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestMsgCallbackBodyParse(t *testing.T) {
@@ -30,5 +35,28 @@ func TestMsgCallbackBodyParse(t *testing.T) {
 	msg := body.Payload[0]
 	if msg.Sender != "userid1" || msg.Receiver != "userid2" || msg.MsgContent != "Hello, world!" {
 		t.Fatalf("unexpected msg: %+v", msg)
+	}
+}
+
+func TestMsgCallbackForwardRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	group := router.Group("/botmsgs")
+	group.POST("/forward", MsgCallbackForward)
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"event_type": "heartbeat",
+		"timestamp":  1713456000000,
+		"payload":    []any{},
+	})
+	resp, err := http.Post(ts.URL+"/botmsgs/forward", "application/json", bytes.NewBuffer(reqBody))
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %d", resp.StatusCode)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -34,7 +35,14 @@ func TestMain(m *testing.M) {
 	group.Use(apis.Validate)
 	routers.Route(group)
 
-	testServer = httptest.NewServer(testRouter)
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		fmt.Printf("Test listener failed: %v\n", err)
+		os.Exit(1)
+	}
+	testServer = httptest.NewUnstartedServer(testRouter)
+	testServer.Listener = listener
+	testServer.Start()
 
 	code := m.Run()
 	testServer.Close()

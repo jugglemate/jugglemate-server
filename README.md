@@ -737,6 +737,8 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 
 这是 IM Server 回调入口，不是客户端直调接口。
 
+临时转发入口：`POST /botmsgs/forward`，Node 服务可以把收到的原始消息体原样转发到这里，服务端会走同一套回调处理流程。
+
 #### Request
 
 ```json

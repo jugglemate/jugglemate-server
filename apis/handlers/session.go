@@ -1,14 +1,19 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/juggleim/jugglechat-server-ai/apis/models"
+	"github.com/juggleim/jugglechat-server-ai/commons/agentclient"
+	"github.com/juggleim/jugglechat-server-ai/commons/agentconfig"
 	"github.com/juggleim/jugglechat-server-ai/storages"
 	stomodels "github.com/juggleim/jugglechat-server-ai/storages/models"
 )
@@ -42,6 +47,7 @@ func GetSession(c *gin.Context) {
 			Fallback:         m.Fallback,
 			Source:           m.Source,
 			SuggestionStatus: m.SuggestionStatus,
+			PendingSource:    m.PendingSource,
 			MsgTime:          m.MsgTime,
 			CreatedTime:      m.CreatedTime,
 		})
@@ -93,6 +99,9 @@ func TakeoverSession(c *gin.Context) {
 
 	sess.OperatorId = operatorId
 	sess.AutoMode = req.AutoMode
+	if req.AutoMode == 0 {
+		sess.UniqueName = "" // 人工回复时解绑 agent
+	}
 	if sess.Status == 0 {
 		sess.Status = 1
 	}
@@ -113,23 +122,20 @@ func TakeoverSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": info})
 }
 
-// LookupSession 按 IM 会话维度查询 session（conv_id = platform_conv_id）
+// LookupSession 按 session_id 查找 session（用于前端"点击会话"时回显状态）
 func LookupSession(c *gin.Context) {
 	appkey := getAppkey(c)
-	convId := c.Query("conv_id")
-	uniqueName := c.Query("unique_name")
-	log.Printf("[LookupSession] conv_id=%s, unique_name=%s, appkey=%s", convId, uniqueName, appkey)
-	if convId == "" || uniqueName == "" {
-		log.Printf("[LookupSession] missing params: conv_id=%q, unique_name=%q", convId, uniqueName)
-		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "conv_id and unique_name required"})
+	sessionId := c.Query("session_id")
+	if sessionId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "session_id required"})
 		return
 	}
 
 	as := storages.NewAgentStorage()
-	sess, err := as.FindSessionByConv(appkey, convId, uniqueName)
+	sess, err := as.FindSession(appkey, sessionId)
 	if err != nil || sess == nil {
-		log.Printf("[LookupSession] session not found: conv_id=%s, unique_name=%s, err=%v", convId, uniqueName, err)
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "session not found"})
+		log.Printf("[LookupSession] not found: session_id=%s, err=%v", sessionId, err)
+		c.JSON(http.StatusOK, gin.H{"code": 0, "data": nil})
 		return
 	}
 
@@ -140,6 +146,7 @@ func LookupSession(c *gin.Context) {
 		Status:     sess.Status,
 		AutoMode:   sess.AutoMode,
 		MsgCount:   sess.MsgCount,
+		Agent:      getAgentSnapshot(as, appkey, sess.UniqueName),
 	}})
 }
 
@@ -327,6 +334,234 @@ func ListAgentFeedbacks(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": resp})
+}
+
+// ==================== Create / Update Session Agent ====================
+
+// CreateSession 点击会话时调用：查 session 是否存在，不存在则创建，返回 session + agent 快照
+func CreateSession(c *gin.Context) {
+	appkey := getAppkey(c)
+	var req models.CreateSessionReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "参数格式错误"})
+		return
+	}
+	if req.ConvId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "conv_id required"})
+		return
+	}
+	if req.UniqueName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "unique_name required"})
+		return
+	}
+
+	as := storages.NewAgentStorage()
+
+	// 先查找是否已存在
+	sess, err := as.FindSessionByConv(appkey, req.ConvId, req.UniqueName)
+	if err == nil && sess != nil {
+		// 已存在，直接返回 + agent 快照
+		info := buildSessionInfo(sess)
+		info.Agent = getAgentSnapshot(as, appkey, sess.UniqueName)
+		c.JSON(http.StatusOK, gin.H{"code": 0, "data": info, "created": false})
+		return
+	}
+
+	// 不存在，创建新 session
+	now := time.Now().UnixMilli()
+	sessionId := req.ConvId + "_" + req.ConvType
+	newSess := stomodels.AgentSession{
+		AppKey:         appkey,
+		SessionId:      sessionId,
+		UniqueName:     req.UniqueName,
+		CustomerId:     req.CustomerId,
+		Platform:       req.Platform,
+		PlatformConvId: req.ConvId,
+		Status:         0,
+		AutoMode:       req.AutoMode,
+		FirstMsgAt:     now,
+		LastMsgAt:      now,
+	}
+	if err := as.CreateSession(newSess); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "创建 session 失败: " + err.Error()})
+		return
+	}
+
+	info := buildSessionInfo(&newSess)
+	info.Agent = getAgentSnapshot(as, appkey, newSess.UniqueName)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": info, "created": true})
+}
+
+// UpdateSessionAgent 点击 agent 时调用：更新 session 绑定的 agent
+func UpdateSessionAgent(c *gin.Context) {
+	appkey := getAppkey(c)
+	sessionId := c.Param("session_id")
+
+	var req models.UpdateSessionAgentReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "参数格式错误"})
+		return
+	}
+	if req.UniqueName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "unique_name required"})
+		return
+	}
+
+	as := storages.NewAgentStorage()
+	sess, err := as.FindSession(appkey, sessionId)
+	if err != nil || sess == nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "msg": "session not found"})
+		return
+	}
+
+	sess.UniqueName = req.UniqueName
+	if err := as.UpdateSession(*sess); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "更新失败: " + err.Error()})
+		return
+	}
+
+	info := buildSessionInfo(sess)
+	info.Agent = getAgentSnapshot(as, appkey, sess.UniqueName)
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": info})
+}
+
+// SessionChat 前端给大模型发消息，调用 /v1/twins/{unique_name}/chat
+func SessionChat(c *gin.Context) {
+	appkey := getAppkey(c)
+	sessionId := c.Param("session_id")
+
+	var req models.SessionChatReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "参数格式错误"})
+		return
+	}
+	if req.Message == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "message required"})
+		return
+	}
+
+	as := storages.NewAgentStorage()
+	sess, err := as.FindSession(appkey, sessionId)
+	if err != nil || sess == nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "msg": "session not found"})
+		return
+	}
+
+	// 保存用户消息
+	customerMsg := stomodels.AgentMessage{
+		AppKey:     appkey,
+		UniqueName: sess.UniqueName,
+		CustomerId: sess.CustomerId,
+		SessionId:  sessionId,
+		Role:       "customer",
+		Text:       req.Message,
+		Platform:   sess.Platform,
+		MsgTime:    time.Now().UnixMilli(),
+	}
+	if err := as.CreateMessage(customerMsg); err != nil {
+		log.Printf("[SessionChat] SaveMessage(customer) failed: %v", err)
+	}
+
+	// 调用 agent Chat API
+	client := newAgentClient()
+	chatCtx := context.Background()
+	resp, _, chatErr := client.Chat(chatCtx, sess.CustomerId, "jim", sess.UniqueName, agentclient.ChatRequest{Message: req.Message})
+
+	reply := "抱歉，助手暂时无法回复，请稍后再试。"
+	fallback := true
+	agentMsgID := ""
+	if chatErr != nil {
+		log.Printf("[SessionChat] agent Chat error: code=<see client log> err=%v", chatErr)
+	} else if resp == nil {
+		log.Printf("[SessionChat] agent Chat returned nil response (no error but nil struct)")
+	} else if resp.Reply == "" {
+		log.Printf("[SessionChat] agent Chat returned empty reply: message_id=%s session_id=%s fallback=%v",
+			resp.MessageID, resp.SessionID, resp.Fallback)
+	} else {
+		reply = resp.Reply
+		fallback = resp.Fallback
+		agentMsgID = resp.MessageID
+	}
+
+	// 保存 agent 回复
+	twinMsg := stomodels.AgentMessage{
+		AppKey:     appkey,
+		UniqueName: sess.UniqueName,
+		CustomerId: sess.CustomerId,
+		SessionId:  sessionId,
+		Role:       "twin",
+		Text:       reply,
+		Fallback:   fallback,
+		Source:     "agent",
+		Platform:   sess.Platform,
+		MsgTime:    time.Now().UnixMilli(),
+	}
+	if agentMsgID != "" {
+		twinMsg.AgentMessageId = agentMsgID
+	}
+	if err := as.CreateMessage(twinMsg); err != nil {
+		log.Printf("[SessionChat] CreateMessage(twin) failed: %v", err)
+	}
+
+	// 更新 session 最后消息时间 — 使用精准更新避免清空 unique_name
+	_ = as.UpdateSessionLastMsgAt(appkey, sessionId, time.Now().UnixMilli())
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "data": models.SessionChatResp{
+		MessageID: agentMsgID,
+		SessionID: sessionId,
+		Reply:     reply,
+		Fallback:  fallback,
+		CreatedAt: fmt.Sprintf("%d", time.Now().UnixMilli()),
+	}})
+}
+
+// ==================== Helpers ====================
+
+func newAgentClient() *agentclient.Client {
+	return agentclient.New(agentclient.Config{
+		BaseURL:       strings.TrimRight(agentconfig.BaseURL(), "/"),
+		Timeout:       agentconfig.Timeout(),
+		Authorization: agentconfig.Authorization(),
+		TwinsToken:    agentconfig.TwinsToken(),
+	})
+}
+
+func buildSessionInfo(sess *stomodels.AgentSession) *models.AgentSessionInfo {
+	return &models.AgentSessionInfo{
+		SessionId:      sess.SessionId,
+		UniqueName:     sess.UniqueName,
+		CustomerId:     sess.CustomerId,
+		Platform:       sess.Platform,
+		PlatformConvId: sess.PlatformConvId,
+		OperatorId:     sess.OperatorId,
+		Status:         sess.Status,
+		AutoMode:       sess.AutoMode,
+		MsgCount:       sess.MsgCount,
+		Tags:           sess.Tags,
+		Summary:        sess.Summary,
+		FirstMsgAt:     sess.FirstMsgAt,
+		LastMsgAt:      sess.LastMsgAt,
+		ClosedAt:       sess.ClosedAt,
+		CreatedTime:    sess.CreatedTime,
+		UpdatedTime:    sess.UpdatedTime,
+	}
+}
+
+func getAgentSnapshot(as stomodels.AgentStorage, appkey, uniqueName string) *models.AgentSnapshot {
+	if uniqueName == "" {
+		return nil
+	}
+	twin, err := as.FindTwin(appkey, uniqueName)
+	if err != nil || twin == nil {
+		return &models.AgentSnapshot{UniqueName: uniqueName}
+	}
+	return &models.AgentSnapshot{
+		UniqueName:  twin.UniqueName,
+		DisplayName: twin.DisplayName,
+		AvatarURL:   twin.AvatarURL,
+		Greeting:    twin.Greeting,
+		Status:      twin.Status,
+	}
 }
 
 func getAppkey(c *gin.Context) string {

@@ -1,5 +1,38 @@
 package models
 
+type CreateSessionReq struct {
+	ConvId     string `json:"conv_id"`
+	ConvType   string `json:"conv_type"`
+	UniqueName string `json:"unique_name"`
+	CustomerId string `json:"customer_id"`
+	Platform   string `json:"platform"`
+	AutoMode   int    `json:"auto_mode"`
+}
+
+type UpdateSessionAgentReq struct {
+	UniqueName string `json:"unique_name"`
+}
+
+type SessionChatReq struct {
+	Message string `json:"message"`
+}
+
+type SessionChatResp struct {
+	MessageID string `json:"message_id"`
+	SessionID string `json:"session_id"`
+	Reply     string `json:"reply"`
+	Fallback  bool   `json:"fallback"`
+	CreatedAt string `json:"created_at"`
+}
+
+type AgentSnapshot struct {
+	UniqueName  string `json:"unique_name"`
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
+	Greeting    string `json:"greeting"`
+	Status      string `json:"status"`
+}
+
 type AgentSessionInfo struct {
 	SessionId      string           `json:"session_id"`
 	UniqueName     string           `json:"unique_name"`
@@ -15,6 +48,7 @@ type AgentSessionInfo struct {
 	FirstMsgAt     int64            `json:"first_msg_at"`
 	LastMsgAt      int64            `json:"last_msg_at"`
 	ClosedAt       int64            `json:"closed_at"`
+	Agent          *AgentSnapshot   `json:"agent,omitempty"`
 	Messages       []*AgentMessageVO `json:"messages,omitempty"`
 	CreatedTime    int64            `json:"created_time"`
 	UpdatedTime    int64            `json:"updated_time"`
@@ -27,6 +61,7 @@ type AgentMessageVO struct {
 	Fallback         bool   `json:"fallback"`
 	Source           string `json:"source"`
 	SuggestionStatus string `json:"suggestion_status"`
+	PendingSource    string `json:"pending_source"`
 	MsgTime          int64  `json:"msg_time"`
 	CreatedTime      int64  `json:"created_time"`
 }
@@ -37,11 +72,12 @@ type AgentSessionInfos struct {
 }
 
 type LookupSessionInfo struct {
-	SessionId  string `json:"session_id"`
-	UniqueName string `json:"unique_name"`
-	Status     int    `json:"status"`
-	AutoMode   int    `json:"auto_mode"`
-	MsgCount   int    `json:"msg_count"`
+	SessionId  string         `json:"session_id"`
+	UniqueName string         `json:"unique_name"`
+	Status     int            `json:"status"`
+	AutoMode   int            `json:"auto_mode"`
+	MsgCount   int            `json:"msg_count"`
+	Agent      *AgentSnapshot `json:"agent,omitempty"`
 }
 
 type ToggleTakeoverReq struct {

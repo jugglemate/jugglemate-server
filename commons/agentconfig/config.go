@@ -2,11 +2,9 @@ package agentconfig
 
 import (
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
-	"github.com/juggleim/jugglechat-server-ai/commons/configures"
 	"gopkg.in/yaml.v3"
 )
 
@@ -15,6 +13,7 @@ type configFile struct {
 		BaseURL        string `yaml:"baseURL"`
 		TimeoutSeconds int    `yaml:"timeoutSeconds"`
 		Authorization  string `yaml:"authorization"`
+		Token          string `yaml:"token"`
 	} `yaml:"agentServer"`
 }
 
@@ -25,10 +24,7 @@ var (
 
 func BaseURL() string {
 	readConfigOnce()
-	if cfg.AgentServer.BaseURL != "" {
-		return cfg.AgentServer.BaseURL
-	}
-	return configures.Config.BotConnector.Domain
+	return cfg.AgentServer.BaseURL
 }
 
 func Timeout() time.Duration {
@@ -44,12 +40,16 @@ func Authorization() string {
 	return cfg.AgentServer.Authorization
 }
 
+func TwinsToken() string {
+	readConfigOnce()
+	return cfg.AgentServer.Token
+}
+
 func readConfigOnce() {
 	cfgOnce.Do(func() {
 		configPath := os.Getenv("CONFIG_PATH")
 		if configPath == "" {
-			execDir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
-			configPath = filepath.Join(execDir, "conf", "config.yml")
+			configPath = "conf/config.yml"
 		}
 		bs, err := os.ReadFile(configPath)
 		if err != nil {

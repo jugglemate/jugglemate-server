@@ -38,9 +38,17 @@ type msgCallbackMsg struct {
 }
 
 func MsgCallback(ctx *gin.Context) {
+	handleMsgCallback(ctx, "im")
+}
+
+func MsgCallbackForward(ctx *gin.Context) {
+	handleMsgCallback(ctx, "node")
+}
+
+func handleMsgCallback(ctx *gin.Context, source string) {
 	bodyBytes, err := io.ReadAll(ctx.Request.Body)
 	if err != nil {
-		log.Printf("[MsgCallback] read request body err: %v", err)
+		log.Printf("[MsgCallback:%s] read request body err: %v", source, err)
 		responses.SuccessHttpResp(ctx, nil)
 		return
 	}
@@ -48,46 +56,59 @@ func MsgCallback(ctx *gin.Context) {
 
 	var body msgCallbackBody
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
-		log.Printf("[MsgCallback] unmarshal err: %v, raw=%s", err, string(bodyBytes))
+		log.Printf("[MsgCallback:%s] unmarshal err: %v, raw=%s", source, err, string(bodyBytes))
 		responses.SuccessHttpResp(ctx, nil)
 		return
 	}
 	if body.EventType != "message" {
-		log.Printf("[MsgCallback] non-message event ignored: event_type=%s, payload_count=%d", body.EventType, len(body.Payload))
+		log.Printf("[MsgCallback:%s] non-message event ignored: event_type=%s, payload_count=%d", source, body.EventType, len(body.Payload))
 		responses.SuccessHttpResp(ctx, nil)
 		return
 	}
 
 	appkey := getAppKey(ctx)
-	log.Printf("[MsgCallback] received: appkey=%s, event_type=%s, payload_count=%d", appkey, body.EventType, len(body.Payload))
+	log.Printf("[MsgCallback:%s] received: appkey=%s, event_type=%s, payload_count=%d", source, appkey, body.EventType, len(body.Payload))
 
 	storage := storages.NewAgentStorage()
 	sdk := imsdk.GetImSdk(appkey)
 	client := agentclient.New(agentclient.Config{
-		BaseURL:      strings.TrimRight(agentconfig.BaseURL(), "/"),
-		Timeout:      agentconfig.Timeout(),
+		BaseURL:       strings.TrimRight(agentconfig.BaseURL(), "/"),
+		Timeout:       agentconfig.Timeout(),
 		Authorization: agentconfig.Authorization(),
+		TwinsToken:    agentconfig.TwinsToken(),
 	})
 	// use detached context so chat calls survive beyond request timeout
 	chatCtx := context.Background()
 	for i, item := range body.Payload {
-		log.Printf("[MsgCallback] [%d/%d] msg_type=%s, sender=%s, receiver=%s, conver_type=%d, msg_id=%s, content_len=%d",
+		log.Printf("[MsgCallback:%s] [%d/%d] msg_type=%s, sender=%s, receiver=%s, conver_type=%d, msg_id=%s, content_len=%d",
+			source,
 			i+1, len(body.Payload), item.MsgType, item.Sender, item.Receiver, item.ConverType, item.MsgID, len(item.MsgContent))
 
 		if item.MsgType != "text" {
-			log.Printf("[MsgCallback] [%d] skip: msg_type=%s not text", i+1, item.MsgType)
+			log.Printf("[MsgCallback:%s] [%d] skip: msg_type=%s not text", source, i+1, item.MsgType)
 			continue
 		}
 		if item.MsgContent == "" || item.MsgID == "" {
-			log.Printf("[MsgCallback] [%d] skip: empty content or msg_id", i+1)
+			log.Printf("[MsgCallback:%s] [%d] skip: empty content or msg_id", source, i+1)
 			continue
 		}
-		twin, err := storage.FindTwinByAnyKey(appkey, item.Receiver)
+
+		// 按 session_id 规则构造：会话ID + "_" + 会话类型
+		sessionId := item.Sender + "_" + fmt.Sprint(item.ConverType)
+		sess, err := storage.FindSession(appkey, sessionId)
+		if err != nil || sess == nil || sess.UniqueName == "" {
+			log.Printf("[MsgCallback:%s] [%d] skip: session not found or no agent bound, session_id=%s, err=%v", source, i+1, sessionId, err)
+			continue
+		}
+		log.Printf("[MsgCallback:%s] [%d] session found: session_id=%s, unique_name=%s, auto_mode=%d", source, i+1, sess.SessionId, sess.UniqueName, sess.AutoMode)
+
+		// 验证 twin 存在
+		twin, err := storage.FindTwin(appkey, sess.UniqueName)
 		if err != nil || twin == nil {
-			log.Printf("[MsgCallback] [%d] skip: FindTwinByAnyKey(receiver=%s) twin not found, err=%v", i+1, item.Receiver, err)
+			log.Printf("[MsgCallback:%s] [%d] skip: FindTwin(unique_name=%s) not found, err=%v", source, i+1, sess.UniqueName, err)
 			continue
 		}
-		log.Printf("[MsgCallback] [%d] found twin: unique_name=%s, bot_id=%s", i+1, twin.UniqueName, twin.BotId)
+		log.Printf("[MsgCallback:%s] [%d] twin found: unique_name=%s, bot_id=%s", source, i+1, twin.UniqueName, twin.BotId)
 
 		// 幂等：检查是否已处理过（customer 消息存在即跳过）
 		existMsgs, _ := storage.QryMessagesByIM(appkey, item.MsgID)
@@ -99,99 +120,110 @@ func MsgCallback(ctx *gin.Context) {
 			}
 		}
 		if alreadyDone {
-			log.Printf("[MsgCallback] [%d] skip: idempotent (customer msg exists for msg_id=%s)", i+1, item.MsgID)
+			log.Printf("[MsgCallback:%s] [%d] skip: idempotent (customer msg exists for msg_id=%s)", source, i+1, item.MsgID)
 			continue
 		}
 
-		// 会话管理：按 IM 会话维度（receiver 作为会话 ID）查找或创建会话
-		sess, sessErr := services.MsgCallbackService.FindOrCreateSession(appkey, twin.UniqueName, item.Sender, item.Platform, item.Receiver)
-		if sessErr != nil {
-			log.Printf("[MsgCallback] [%d] FindOrCreateSession failed: unique_name=%s, sender=%s, platform_conv_id=%s, err=%v",
-				i+1, twin.UniqueName, item.Sender, item.Receiver, sessErr)
-		}
-		if sess != nil {
-			log.Printf("[MsgCallback] [%d] session: session_id=%s, auto_mode=%d, status=%d", i+1, sess.SessionId, sess.AutoMode, sess.Status)
-			_, saveErr := services.MsgCallbackService.SaveMessage(appkey, twin.UniqueName, item.Sender, sess.SessionId, item.MsgID, "customer", item.MsgContent, item.Platform)
-			if saveErr != nil {
-				log.Printf("[MsgCallback] [%d] SaveMessage(customer) failed: %v", i+1, saveErr)
-			}
-		} else {
-			log.Printf("[MsgCallback] [%d] session is nil, proceeding without session", i+1)
+		// 保存用户消息
+		sessionID := sess.SessionId
+		autoMode := sess.AutoMode
+		_, saveErr := services.MsgCallbackService.SaveMessage(appkey, sess.UniqueName, item.Sender, sessionID, item.MsgID, "customer", item.MsgContent, item.Platform)
+		if saveErr != nil {
+			log.Printf("[MsgCallback:%s] [%d] SaveMessage(customer) failed: %v", source, i+1, saveErr)
 		}
 
-		log.Printf("[MsgCallback] [%d] calling agent Chat: sender=%s, unique_name=%s, text=%q",
-			i+1, item.Sender, twin.UniqueName, item.MsgContent)
+		// auto_mode 路由：0=人工（不调大模型），1=协助（调大模型+通知运营），2=自动（调大模型+发用户）
+		if autoMode == 0 {
+			log.Printf("[MsgCallback:%s] [%d] skip: auto_mode=0 (manual), no LLM call", source, i+1)
+			continue
+		}
+
+		log.Printf("[MsgCallback:%s] [%d] calling agent Chat: sender=%s, unique_name=%s, text=%q",
+			source, i+1, item.Sender, twin.UniqueName, item.MsgContent)
 		resp, _, chatErr := client.Chat(chatCtx, item.Sender, "jim", twin.UniqueName, agentclient.ChatRequest{Message: item.MsgContent})
 		fallback := true
 		reply := "抱歉，助手暂时无法回复，请稍后再试。"
 		if chatErr != nil {
-			log.Printf("[MsgCallback] [%d] agent Chat error: %v", i+1, chatErr)
+			log.Printf("[MsgCallback:%s] [%d] agent Chat error: %v", source, i+1, chatErr)
 		} else if resp == nil {
-			log.Printf("[MsgCallback] [%d] agent Chat returned nil response", i+1)
+			log.Printf("[MsgCallback:%s] [%d] agent Chat returned nil response", source, i+1)
 		} else {
-			log.Printf("[MsgCallback] [%d] agent Chat success: reply_len=%d, fallback=%v", i+1, len(resp.Reply), resp.Fallback)
-			reply = resp.Reply
+			log.Printf("[MsgCallback:%s] [%d] agent Chat success: reply=%q, fallback=%v, message_id=%s", source, i+1, resp.Reply, resp.Fallback, resp.MessageID)
+			if resp.Reply != "" {
+				reply = resp.Reply
+			}
 			fallback = resp.Fallback
 		}
 		agentMsgID := ""
-		sessionID := ""
 		if resp != nil {
 			agentMsgID = resp.MessageID
-			sessionID = resp.SessionID
-		}
-		if sess != nil {
-			sessionID = sess.SessionId
 		}
 
-		// takeover 判断：auto_mode=1 → 直接发IM；auto_mode=0 → 存pending建议不发送
-		shouldSend := true
-		suggestionStatus := ""
-		if sess == nil || services.MsgCallbackService.ShouldAutoReply(sess) {
-			// auto mode: 直接回复
-			log.Printf("[MsgCallback] [%d] auto mode: sending reply via IM", i+1)
-		} else {
-			// manual mode: 存为pending，不发IM
-			shouldSend = false
-			suggestionStatus = "pending"
-			log.Printf("[MsgCallback] [%d] manual mode: storing as pending suggestion", i+1)
+		// pending 标识：assist=协助模式建议，auto=自动模式已发送
+		isAuto := autoMode == 2
+		pendingSource := "assist"
+		if isAuto {
+			pendingSource = "auto"
 		}
 
 		msgRecord := storageModels.AgentMessage{
-			AppKey:            appkey,
-			UniqueName:        twin.UniqueName,
-			CustomerId:        item.Sender,
-			IMMsgId:           item.MsgID,
-			AgentMessageId:    agentMsgID,
-			SessionId:         sessionID,
-			Role:              "twin",
-			Text:              reply,
-			Fallback:          fallback,
-			Source:            "agent",
-			Platform:          item.Platform,
-			ConverType:        item.ConverType,
-			RawPayload:        string(bodyBytes),
-			SuggestionStatus:  suggestionStatus,
-			MsgTime:           item.MsgTime,
+			AppKey:           appkey,
+			UniqueName:       twin.UniqueName,
+			CustomerId:       item.Sender,
+			IMMsgId:          item.MsgID,
+			AgentMessageId:   agentMsgID,
+			SessionId:        sessionID,
+			Role:             "twin",
+			Text:             reply,
+			Fallback:         fallback,
+			Source:           "agent",
+			Platform:         item.Platform,
+			ConverType:       item.ConverType,
+			RawPayload:       string(bodyBytes),
+			SuggestionStatus: "pending",
+			PendingSource:    pendingSource,
+			MsgTime:          item.MsgTime,
 		}
 		if err := storage.CreateMessage(msgRecord); err != nil {
-			log.Printf("[MsgCallback] [%d] CreateMessage(twin) failed: %v", i+1, err)
+			log.Printf("[MsgCallback:%s] [%d] CreateMessage(twin) failed: %v", source, i+1, err)
 		} else {
-			log.Printf("[MsgCallback] [%d] twin message saved: session_id=%s, status=%s", i+1, sessionID, suggestionStatus)
+			log.Printf("[MsgCallback:%s] [%d] twin message saved: session_id=%s, pending_source=%s", source, i+1, sessionID, pendingSource)
 		}
 
-		if shouldSend && sdk != nil {
-			sendResp, _, sendErr := sdk.SendPrivateMsg(juggleimsdk.Message{
-				SenderId:   twin.BotId,
-				TargetIds:  []string{item.Sender},
-				MsgType:    "jg:text",
-				MsgContent: fmt.Sprintf(`{"content":%q}`, reply),
-				IsStorage:  boolPtr(true),
-				IsCount:    boolPtr(true),
-			})
-			if sendErr != nil {
-				log.Printf("[MsgCallback] [%d] SendPrivateMsg failed: resp=%v, err=%v", i+1, sendResp, sendErr)
+		if sdk != nil {
+			if isAuto {
+				// 自动模式：以客服身份回复用户
+				log.Printf("[MsgCallback:%s] [%d] auto mode: sending reply to customer", source, i+1)
+				sendResp, _, sendErr := sdk.SendPrivateMsg(juggleimsdk.Message{
+					SenderId:   item.Receiver,
+					TargetIds:  []string{item.Sender},
+					MsgType:    "jg:text",
+					MsgContent: fmt.Sprintf(`{"content":%q}`, reply),
+					IsStorage:  boolPtr(true),
+					IsCount:    boolPtr(true),
+				})
+				if sendErr != nil {
+					log.Printf("[MsgCallback:%s] [%d] SendPrivateMsg(customer) failed: resp=%v, err=%v", source, i+1, sendResp, sendErr)
+				} else {
+					log.Printf("[MsgCallback:%s] [%d] reply sent via IM: sender=%s -> target=%s", source, i+1, item.Receiver, item.Sender)
+				}
 			} else {
-				log.Printf("[MsgCallback] [%d] reply sent via IM: sender=%s -> target=%s", i+1, twin.BotId, item.Sender)
+				// 协助模式：以 agentMsgBot 身份通知运营，消息体嵌入 session 标记
+				log.Printf("[MsgCallback:%s] [%d] assist mode: sending IM notification to operator via agentMsgBot", source, i+1)
+				notifyContent := fmt.Sprintf("[session:%s|agent:%s] %s", sessionID, twin.UniqueName, reply)
+				sendResp, _, sendErr := sdk.SendPrivateMsg(juggleimsdk.Message{
+					SenderId:   "agentMsgBot",
+					TargetIds:  []string{item.Receiver},
+					MsgType:    "jg:text",
+					MsgContent: fmt.Sprintf(`{"content":%q}`, notifyContent),
+					IsStorage:  boolPtr(true),
+					IsCount:    boolPtr(true),
+				})
+				if sendErr != nil {
+					log.Printf("[MsgCallback:%s] [%d] SendPrivateMsg(operator) failed: resp=%v, err=%v", source, i+1, sendResp, sendErr)
+				} else {
+					log.Printf("[MsgCallback:%s] [%d] notification sent via IM: sender=agentMsgBot -> target=%s", source, i+1, item.Receiver)
+				}
 			}
 		}
 	}

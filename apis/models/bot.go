@@ -19,6 +19,8 @@ type AiBotInfo struct {
 	ActiveVersion  string `json:"active_version"`
 	TrainingMode   string `json:"training_mode"`
 	MaterialsCount int    `json:"materials_count"`
+	SyncStatus     string `json:"sync_status"`
+	SyncError      string `json:"sync_error,omitempty"`
 	CreatedTime    int64  `json:"created_time"`
 	UpdatedTime    int64  `json:"updated_time"`
 }

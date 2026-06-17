@@ -1,9 +1,13 @@
 package agentclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"time"
@@ -12,10 +16,11 @@ import (
 )
 
 type Config struct {
-	BaseURL      string
-	Timeout      time.Duration
-	OwnerID      string
+	BaseURL       string
+	Timeout       time.Duration
+	OwnerID       string
 	Authorization string // Bearer token
+	TwinsToken    string // /twins 接口专用 token
 }
 
 type Client struct {
@@ -167,8 +172,44 @@ func (c *Client) DeleteTwin(ctx context.Context, ownerID, uniqueName string) (in
 }
 
 func (c *Client) AddMaterial(ctx context.Context, ownerID, uniqueName string, req map[string]any) (*Material, int, error) {
+	return c.AddMaterialJSON(ctx, ownerID, uniqueName, req)
+}
+
+func (c *Client) AddMaterialJSON(ctx context.Context, ownerID, uniqueName string, req map[string]any) (*Material, int, error) {
 	var out Material
 	code, err := c.requestJSON(ctx, http.MethodPost, fmt.Sprintf("/twins/%s/materials", uniqueName), ownerID, req, &out)
+	return &out, code, err
+}
+
+func (c *Client) AddMaterialFile(ctx context.Context, ownerID, uniqueName, fileName string, file io.Reader, title string, extraFields map[string]string) (*Material, int, error) {
+	var out Material
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	if title != "" {
+		_ = writer.WriteField("title", title)
+	}
+	if extraFields != nil {
+		for k, v := range extraFields {
+			_ = writer.WriteField(k, v)
+		}
+	}
+	part, err := writer.CreateFormFile("file", fileName)
+	if err != nil {
+		return nil, 0, err
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return nil, 0, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, 0, err
+	}
+
+	headers := map[string]string{
+		"X-Owner-Id":   ownerID,
+		"Content-Type": writer.FormDataContentType(),
+	}
+	code, err := c.requestBytesWithHeaders(ctx, http.MethodPost, fmt.Sprintf("/twins/%s/materials", uniqueName), headers, buf.Bytes(), &out)
 	return &out, code, err
 }
 
@@ -249,6 +290,15 @@ func (c *Client) Chat(ctx context.Context, customerID, customerSource, uniqueNam
 		headers["X-Customer-Source"] = customerSource
 	}
 	code, err := c.requestJSONWithHeaders(ctx, http.MethodPost, fmt.Sprintf("/twins/%s/chat", uniqueName), headers, req, &out)
+	if err != nil {
+		log.Printf("[agentclient] Chat error: unique_name=%s code=%d err=%v", uniqueName, code, err)
+	} else if out.Reply == "" {
+		log.Printf("[agentclient] Chat returned empty reply: unique_name=%s code=%d message_id=%s session_id=%s fallback=%v created_at=%s",
+			uniqueName, code, out.MessageID, out.SessionID, out.Fallback, out.CreatedAt)
+	} else {
+		log.Printf("[agentclient] chat response parsed: code=%d message_id=%s session_id=%s reply=%q fallback=%v created_at=%s",
+			code, out.MessageID, out.SessionID, out.Reply, out.Fallback, out.CreatedAt)
+	}
 	return &out, code, err
 }
 
@@ -268,24 +318,89 @@ func (c *Client) requestJSONWithHeaders(ctx context.Context, method, path string
 	if headers == nil {
 		headers = make(map[string]string)
 	}
-	if c.cfg.Authorization != "" {
+	if strings.HasPrefix(path, "/twins/") || path == "/twins" {
+		token := c.cfg.TwinsToken
+		log.Printf("[agentclient] cfg: %s", c.cfg)
+		log.Printf("[agentclient] TwinsToken: %s", token)
+		if token != "" {
+			headers["Authorization"] = "Bearer " + token
+		}
+	} else if c.cfg.Authorization != "" {
 		headers["Authorization"] = "Bearer " + c.cfg.Authorization
 	}
+	log.Printf("[agentclient]   %s", headers)
 	body := ""
 	if req != nil {
 		body = tools.ToJson(req)
+		headers["Content-Type"] = "application/json"
 	}
 	fullURL := strings.TrimRight(c.cfg.BaseURL, "/") + path
+	log.Printf("[agentclient] %s %s", method, fullURL)
+	for k, v := range headers {
+		log.Printf("[agentclient]   %s: %s", k, v)
+	}
+	if body != "" {
+		log.Printf("[agentclient]   body: %s", body)
+	}
 	respBody, code, err := tools.HttpDoBytesWithTimeout(method, fullURL, headers, body, c.cfg.Timeout)
 	if err != nil {
+		log.Printf("[agentclient] HTTP request failed: %s %s err=%v", method, fullURL, err)
 		return code, err
+	}
+	if code < 200 || code >= 300 {
+		log.Printf("[agentclient] non-200 HTTP status: %s %s code=%d body=%s", method, fullURL, code, string(respBody))
+	}
+	if len(respBody) == 0 {
+		log.Printf("[agentclient] empty response body: %s %s code=%d", method, fullURL, code)
+	}
+	if strings.Contains(path, "/chat") {
+		log.Printf("[agentclient] chat raw response: code=%d body=%s", code, string(respBody))
 	}
 	if out != nil && len(respBody) > 0 {
 		if err := json.Unmarshal(respBody, out); err != nil {
+			log.Printf("[agentclient] json unmarshal failed: %s %s err=%v body=%s", method, fullURL, err, string(respBody))
 			return code, err
 		}
 	}
 	return code, nil
+}
+
+func (c *Client) requestBytesWithHeaders(ctx context.Context, method, path string, headers map[string]string, body []byte, out any) (int, error) {
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	if strings.HasPrefix(path, "/twins") && c.cfg.TwinsToken != "" {
+		headers["Authorization"] = "Bearer " + c.cfg.TwinsToken
+	} else if c.cfg.Authorization != "" {
+		headers["Authorization"] = "Bearer " + c.cfg.Authorization
+	}
+
+	fullURL := strings.TrimRight(c.cfg.BaseURL, "/") + path
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	client := &http.Client{Timeout: c.cfg.Timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp.StatusCode, err
+	}
+	if out != nil && len(respBody) > 0 {
+		if err := json.Unmarshal(respBody, out); err != nil {
+			return resp.StatusCode, err
+		}
+	}
+	return resp.StatusCode, nil
 }
 
 func (c *Client) BaseURL() string {

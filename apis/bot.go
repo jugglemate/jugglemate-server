@@ -265,3 +265,35 @@ func UploadAiMaterial(ctx *gin.Context) {
 	}
 	responses.SuccessHttpResp(ctx, material)
 }
+
+func SyncTwin(ctx *gin.Context) {
+	uniqueName := ctx.Param("unique_name")
+	if uniqueName == "" {
+		uniqueName = ctx.Query("unique_name")
+	}
+	if uniqueName == "" {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	code, twin := services.SyncTwin(ctxs.ToCtx(ctx), uniqueName)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, twin)
+}
+
+func SyncMaterial(ctx *gin.Context) {
+	uniqueName := ctx.Param("unique_name")
+	materialId := ctx.Param("material_id")
+	if uniqueName == "" || materialId == "" {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	code, material := services.SyncMaterial(ctxs.ToCtx(ctx), uniqueName, materialId)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, material)
+}

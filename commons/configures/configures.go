@@ -27,10 +27,6 @@ type AppConfig struct {
 
 	AiBotCallbackUrl string `yaml:"aiBotCallbackUrl"`
 
-	BotConnector struct {
-		Domain string `yaml:"domain"`
-	} `yaml:"botConnector"`
-
 	// OSS 统一上传配置
 	Oss OssConfig `yaml:"oss"`
 

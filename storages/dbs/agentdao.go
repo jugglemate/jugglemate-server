@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/juggleim/jugglechat-server-ai/storages/models"
 	"github.com/juggleim/jugglechat-server-ai/commons/dbcommons"
+	"github.com/juggleim/jugglechat-server-ai/storages/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -120,24 +120,25 @@ type AgentEvaluationDao struct {
 func (AgentEvaluationDao) TableName() string { return "agent_evaluations" }
 
 type AgentMessageDao struct {
-	ID             int64           `gorm:"primary_key"`
-	AppKey         string          `gorm:"app_key"`
-	UniqueName     string          `gorm:"unique_name"`
-	CustomerId     string          `gorm:"customer_id"`
-	IMMsgId        string          `gorm:"im_msg_id"`
-	AgentMessageId string          `gorm:"agent_message_id"`
-	SessionId      string          `gorm:"session_id"`
-	Role           string          `gorm:"role"`
-	Text           string          `gorm:"text"`
-	Fallback       bool            `gorm:"fallback"`
-	SuggestionStatus string `gorm:"suggestion_status"`
-	Source         string          `gorm:"source"`
-	Platform       string          `gorm:"platform"`
-	ConverType     int             `gorm:"conver_type"`
-	RawPayload     json.RawMessage `gorm:"raw_payload"`
-	MsgTime        *time.Time      `gorm:"msg_time"`
-	UpdatedTime    time.Time       `gorm:"updated_time"`
-	CreatedTime    time.Time       `gorm:"created_time"`
+	ID               int64           `gorm:"primary_key"`
+	AppKey           string          `gorm:"app_key"`
+	UniqueName       string          `gorm:"unique_name"`
+	CustomerId       string          `gorm:"customer_id"`
+	IMMsgId          string          `gorm:"im_msg_id"`
+	AgentMessageId   string          `gorm:"agent_message_id"`
+	SessionId        string          `gorm:"session_id"`
+	Role             string          `gorm:"role"`
+	Text             string          `gorm:"text"`
+	Fallback         bool            `gorm:"fallback"`
+	SuggestionStatus string          `gorm:"suggestion_status"`
+	PendingSource    string          `gorm:"pending_source"`
+	Source           string          `gorm:"source"`
+	Platform         string          `gorm:"platform"`
+	ConverType       int             `gorm:"conver_type"`
+	RawPayload       json.RawMessage `gorm:"raw_payload"`
+	MsgTime          *time.Time      `gorm:"msg_time"`
+	UpdatedTime      time.Time       `gorm:"updated_time"`
+	CreatedTime      time.Time       `gorm:"created_time"`
 }
 
 func (AgentMessageDao) TableName() string { return "agent_messages" }
@@ -164,6 +165,15 @@ func (d *AgentDao) UpdateTwin(item models.AgentTwin) error {
 	return dbcommons.GetDb().Model(&AgentTwinDao{}).
 		Where("app_key=? and unique_name=? and owner_id=?", item.AppKey, item.UniqueName, item.OwnerId).
 		Updates(updates).Error
+}
+
+func (d *AgentDao) UpdateTwinSyncStatus(appkey, uniqueName, status string) error {
+	return dbcommons.GetDb().Model(&AgentTwinDao{}).
+		Where("app_key=? and unique_name=?", appkey, uniqueName).
+		Updates(map[string]interface{}{
+			"sync_status":    status,
+			"last_synced_at": time.Now(),
+		}).Error
 }
 
 func (d *AgentDao) DeleteTwin(appkey, uniqueName string) error {
@@ -234,8 +244,36 @@ func (d *AgentDao) CreateMaterial(item models.AgentMaterial) error {
 	return dbcommons.GetDb().Create(agentMaterialToDao(item)).Error
 }
 
+func (d *AgentDao) UpdateMaterialSyncStatus(appkey, materialId string, status string) error {
+	return dbcommons.GetDb().Model(&AgentMaterialDao{}).
+		Where("app_key=? and material_id=?", appkey, materialId).
+		Updates(map[string]interface{}{
+			"sync_status":    status,
+			"last_synced_at": time.Now(),
+		}).Error
+}
+
+func (d *AgentDao) UpdateMaterialSyncError(appkey, materialId, syncError string) error {
+	return dbcommons.GetDb().Model(&AgentMaterialDao{}).
+		Where("app_key=? and material_id=?", appkey, materialId).
+		Updates(map[string]interface{}{
+			"sync_status":    string(models.SyncStatusFailed),
+			"sync_error":     syncError,
+			"last_synced_at": time.Now(),
+		}).Error
+}
+
 func (d *AgentDao) DeleteMaterial(appkey, materialId string) error {
 	return dbcommons.GetDb().Where("app_key=? and material_id=?", appkey, materialId).Delete(&AgentMaterialDao{}).Error
+}
+
+func (d *AgentDao) FindMaterial(appkey, materialId string) (*models.AgentMaterial, error) {
+	var item AgentMaterialDao
+	err := dbcommons.GetDb().Where("app_key=? and material_id=?", appkey, materialId).Take(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return agentMaterialFromDao(item), nil
 }
 
 func (d *AgentDao) QryMaterials(appkey, uniqueName string, startId, limit int64) ([]*models.AgentMaterial, error) {
@@ -431,6 +469,13 @@ func milliToTimePtr(ms int64) *time.Time {
 	}
 	t := time.UnixMilli(ms)
 	return &t
+}
+
+func orTimePtr(a *time.Time, b *time.Time) *time.Time {
+	if a != nil {
+		return a
+	}
+	return b
 }
 
 func timePtrToMilli(t *time.Time) int64 {
@@ -643,6 +688,7 @@ func agentEvaluationFromDao(item AgentEvaluationDao) *models.AgentEvaluation {
 }
 
 func agentMessageToDao(item models.AgentMessage) *AgentMessageDao {
+	now := time.Now()
 	return &AgentMessageDao{
 		AppKey:           item.AppKey,
 		UniqueName:       item.UniqueName,
@@ -654,11 +700,14 @@ func agentMessageToDao(item models.AgentMessage) *AgentMessageDao {
 		Text:             item.Text,
 		Fallback:         item.Fallback,
 		SuggestionStatus: item.SuggestionStatus,
+		PendingSource:    item.PendingSource,
 		Source:           item.Source,
 		Platform:         item.Platform,
 		ConverType:       item.ConverType,
 		RawPayload:       jsonStringToData(item.RawPayload),
 		MsgTime:          milliToTimePtr(item.MsgTime),
+		CreatedTime:      now,
+		UpdatedTime:      now,
 	}
 }
 
@@ -675,6 +724,7 @@ func agentMessageFromDao(item AgentMessageDao) *models.AgentMessage {
 		Text:             item.Text,
 		Fallback:         item.Fallback,
 		SuggestionStatus: item.SuggestionStatus,
+		PendingSource:    item.PendingSource,
 		Source:           item.Source,
 		Platform:         item.Platform,
 		ConverType:       item.ConverType,
@@ -734,6 +784,7 @@ type AgentSessionDao struct {
 func (AgentSessionDao) TableName() string { return "agent_sessions" }
 
 func (d *AgentDao) CreateSession(item models.AgentSession) error {
+	now := time.Now()
 	return dbcommons.GetDb().Create(&AgentSessionDao{
 		AppKey:         item.AppKey,
 		SessionId:      item.SessionId,
@@ -747,9 +798,11 @@ func (d *AgentDao) CreateSession(item models.AgentSession) error {
 		MsgCount:       item.MsgCount,
 		Tags:           json.RawMessage(item.Tags),
 		Summary:        item.Summary,
-		FirstMsgAt:     milliToTimePtr(item.FirstMsgAt),
-		LastMsgAt:      milliToTimePtr(item.LastMsgAt),
+		FirstMsgAt:     orTimePtr(milliToTimePtr(item.FirstMsgAt), &now),
+		LastMsgAt:      orTimePtr(milliToTimePtr(item.LastMsgAt), &now),
 		ClosedAt:       milliToTimePtr(item.ClosedAt),
+		CreatedTime:    now,
+		UpdatedTime:    now,
 	}).Error
 }
 
@@ -758,6 +811,7 @@ func (d *AgentDao) UpdateSession(item models.AgentSession) error {
 		Where("app_key=? and session_id=?", item.AppKey, item.SessionId).
 		Updates(map[string]interface{}{
 			"operator_id": item.OperatorId,
+			"unique_name": item.UniqueName,
 			"status":      item.Status,
 			"auto_mode":   item.AutoMode,
 			"msg_count":   item.MsgCount,
@@ -765,6 +819,16 @@ func (d *AgentDao) UpdateSession(item models.AgentSession) error {
 			"last_msg_at": milliToTimePtr(item.LastMsgAt),
 			"closed_at":   milliToTimePtr(item.ClosedAt),
 		}).Error
+}
+
+// UpdateSessionLastMsgAt only updates the last message timestamp, leaving
+// all other fields (unique_name, auto_mode, etc.) untouched. This prevents
+// the GORM Updates(map) zero-value pitfall where an empty unique_name would
+// silently clear the agent binding.
+func (d *AgentDao) UpdateSessionLastMsgAt(appkey, sessionId string, lastMsgAt int64) error {
+	return dbcommons.GetDb().Model(&AgentSessionDao{}).
+		Where("app_key=? and session_id=?", appkey, sessionId).
+		Update("last_msg_at", milliToTimePtr(lastMsgAt)).Error
 }
 
 func (d *AgentDao) FindSession(appkey, sessionId string) (*models.AgentSession, error) {
@@ -831,6 +895,38 @@ func (d *AgentDao) FindSessionByConv(appkey, platformConvId, uniqueName string) 
 	var item AgentSessionDao
 	err := dbcommons.GetDb().
 		Where("app_key=? and platform_conv_id=? and unique_name=? and status<>2", appkey, platformConvId, uniqueName).
+		Order("id desc").
+		Take(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return &models.AgentSession{
+		ID:             item.ID,
+		AppKey:         item.AppKey,
+		SessionId:      item.SessionId,
+		UniqueName:     item.UniqueName,
+		CustomerId:     item.CustomerId,
+		Platform:       item.Platform,
+		PlatformConvId: item.PlatformConvId,
+		OperatorId:     item.OperatorId,
+		Status:         item.Status,
+		AutoMode:       item.AutoMode,
+		MsgCount:       item.MsgCount,
+		Tags:           string(item.Tags),
+		Summary:        item.Summary,
+		FirstMsgAt:     timePtrToMilli(item.FirstMsgAt),
+		LastMsgAt:      timePtrToMilli(item.LastMsgAt),
+		ClosedAt:       timePtrToMilli(item.ClosedAt),
+		UpdatedTime:    item.UpdatedTime.UnixMilli(),
+		CreatedTime:    item.CreatedTime.UnixMilli(),
+	}, nil
+}
+
+// FindSessionByConvId 按 conv_id 查找任意 agent 的 session（不限制 unique_name，用于前端回显）
+func (d *AgentDao) FindSessionByConvId(appkey, platformConvId string) (*models.AgentSession, error) {
+	var item AgentSessionDao
+	err := dbcommons.GetDb().
+		Where("app_key=? and platform_conv_id=? and status<>2", appkey, platformConvId).
 		Order("id desc").
 		Take(&item).Error
 	if err != nil {
