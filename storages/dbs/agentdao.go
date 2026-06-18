@@ -71,6 +71,7 @@ type AgentJobDao struct {
 	ID             int64           `gorm:"primary_key"`
 	AppKey         string          `gorm:"app_key"`
 	JobId          string          `gorm:"job_id"`
+	AgentJobId     string          `gorm:"agent_job_id"`
 	UniqueName     string          `gorm:"unique_name"`
 	Type           string          `gorm:"type"`
 	Status         string          `gorm:"status"`
@@ -294,10 +295,31 @@ func (d *AgentDao) QryMaterials(appkey, uniqueName string, startId, limit int64)
 }
 
 func (d *AgentDao) UpsertJob(item models.AgentJob) error {
+	now := time.Now()
+	dao := agentJobToDao(item)
+	dao.UpdatedTime = now
 	return dbcommons.GetDb().Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "app_key"}, {Name: "job_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"unique_name", "type", "status", "progress", "result_json", "error_code", "error_message", "agent_created_at", "started_at", "finished_at"}),
-	}).Create(agentJobToDao(item)).Error
+		DoUpdates: clause.AssignmentColumns([]string{"agent_job_id", "unique_name", "type", "status", "progress", "result_json", "error_code", "error_message", "agent_created_at", "started_at", "finished_at", "updated_time"}),
+	}).Create(dao).Error
+}
+
+func (d *AgentDao) UpdateJobAgentID(appkey, jobId, agentJobId string) error {
+	return dbcommons.GetDb().Model(&AgentJobDao{}).
+		Where("app_key=? and job_id=?", appkey, jobId).
+		Update("agent_job_id", agentJobId).Error
+}
+
+func (d *AgentDao) UpdateJobStatus(appkey, jobId, status, msg string) error {
+	updates := map[string]interface{}{
+		"status": status,
+	}
+	if msg != "" {
+		updates["error_message"] = msg
+	}
+	return dbcommons.GetDb().Model(&AgentJobDao{}).
+		Where("app_key=? and job_id=?", appkey, jobId).
+		Updates(updates).Error
 }
 
 func (d *AgentDao) FindJob(appkey, jobId string) (*models.AgentJob, error) {
@@ -307,6 +329,22 @@ func (d *AgentDao) FindJob(appkey, jobId string) (*models.AgentJob, error) {
 		return nil, err
 	}
 	return agentJobFromDao(item), nil
+}
+
+func (d *AgentDao) FindJobsByIDs(appkey string, jobIds []string) ([]*models.AgentJob, error) {
+	if len(jobIds) == 0 {
+		return []*models.AgentJob{}, nil
+	}
+	var items []AgentJobDao
+	err := dbcommons.GetDb().Where("app_key=? and job_id IN ?", appkey, jobIds).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.AgentJob, 0, len(items))
+	for _, item := range items {
+		ret = append(ret, agentJobFromDao(item))
+	}
+	return ret, nil
 }
 
 func (d *AgentDao) QryJobs(appkey, uniqueName, jobType, status string, startId, limit int64) ([]*models.AgentJob, error) {
@@ -593,9 +631,11 @@ func agentMaterialFromDao(item AgentMaterialDao) *models.AgentMaterial {
 }
 
 func agentJobToDao(item models.AgentJob) *AgentJobDao {
+	now := time.Now()
 	return &AgentJobDao{
 		AppKey:         item.AppKey,
 		JobId:          item.JobId,
+		AgentJobId:     item.AgentJobId,
 		UniqueName:     item.UniqueName,
 		Type:           item.Type,
 		Status:         item.Status,
@@ -606,6 +646,8 @@ func agentJobToDao(item models.AgentJob) *AgentJobDao {
 		AgentCreatedAt: milliToTimePtr(item.AgentCreatedAt),
 		StartedAt:      milliToTimePtr(item.StartedAt),
 		FinishedAt:     milliToTimePtr(item.FinishedAt),
+		CreatedTime:    now,
+		UpdatedTime:    now,
 	}
 }
 
@@ -614,6 +656,7 @@ func agentJobFromDao(item AgentJobDao) *models.AgentJob {
 		ID:             item.ID,
 		AppKey:         item.AppKey,
 		JobId:          item.JobId,
+		AgentJobId:     item.AgentJobId,
 		UniqueName:     item.UniqueName,
 		Type:           item.Type,
 		Status:         item.Status,

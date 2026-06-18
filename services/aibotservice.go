@@ -321,16 +321,16 @@ func AddAiMaterial(ctx context.Context, uniqueName string, req *apiModels.AiMate
 	return errs.IMErrorCode_SUCCESS, materialToAPI(&item)
 }
 
-func StartTraining(ctx context.Context, uniqueName, mode string) (errs.IMErrorCode, *apiModels.AiBotInfo) {
+func StartTraining(ctx context.Context, uniqueName, mode string) (errs.IMErrorCode, *apiModels.AiBotInfo, string) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
 	storage := storages.NewAgentStorage()
 	twin, err := storage.FindTwin(appkey, uniqueName)
 	if err != nil {
-		return errs.IMErrorCode_APP_AIBOT_BotNotFound, nil
+		return errs.IMErrorCode_APP_AIBOT_BotNotFound, nil, ""
 	}
 	if twin.OwnerId != userId {
-		return errs.IMErrorCode_APP_AIBOT_NoPermission, nil
+		return errs.IMErrorCode_APP_AIBOT_NoPermission, nil, ""
 	}
 	if mode == "" {
 		mode = "mind"
@@ -339,7 +339,7 @@ func StartTraining(ctx context.Context, uniqueName, mode string) (errs.IMErrorCo
 	case "mind", "memory", "skill":
 		// valid modes
 	default:
-		return errs.IMErrorCode_APP_AIBOT_DEFAULT, nil
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, nil, ""
 	}
 	jobID := "job_" + tools.GenerateUUIDShort11()
 	progress := 0
@@ -351,7 +351,7 @@ func StartTraining(ctx context.Context, uniqueName, mode string) (errs.IMErrorCo
 		Status:     "queued",
 		Progress:   &progress,
 	}); err != nil {
-		return errs.IMErrorCode_APP_AIBOT_DEFAULT, nil
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, nil, ""
 	}
 	version := "v1"
 	versions, err := storage.QryVersions(appkey, uniqueName, 0, 100)
@@ -389,11 +389,33 @@ func StartTraining(ctx context.Context, uniqueName, mode string) (errs.IMErrorCo
 		MaterialsCount: twin.MaterialsCount,
 		SyncStatus:     string(storageModels.SyncStatusPending),
 	})
+
+	// Call agent service to actually start training
+	agentCli := newAgentClient()
+	agentJob, code, agentErr := agentCli.StartTraining(ctx, userId, uniqueName, map[string]any{"mode": mode})
+	if agentErr != nil || (code != 200 && code != 202) {
+		errMsg := fmt.Sprintf("agent StartTraining failed: code=%d err=%v", code, agentErr)
+		log.Printf("[StartTraining] %s", errMsg)
+		_ = storage.UpdateJobStatus(appkey, jobID, "failed", errMsg)
+		current, _ := storage.FindTwin(appkey, uniqueName)
+		if current != nil {
+			return errs.IMErrorCode_APP_AIBOT_DEFAULT, twinToAPI(current, current.DisplayName, current.AvatarURL, current.Greeting), jobID
+		}
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, nil, jobID
+	}
+
+	// Write back agent's real job_id and update status
+	_ = storage.UpdateJobAgentID(appkey, jobID, agentJob.JobID)
+	_ = storage.UpdateJobStatus(appkey, jobID, agentJob.Status, "")
+
+	// Start background polling to sync job status from agent service
+	go backgroundPollJob(appkey, jobID, agentJob.JobID, userId, 10*time.Minute)
+
 	current, err := storage.FindTwin(appkey, uniqueName)
 	if err != nil {
-		return errs.IMErrorCode_SUCCESS, twinToAPI(twin, twin.DisplayName, twin.AvatarURL, twin.Greeting)
+		return errs.IMErrorCode_SUCCESS, twinToAPI(twin, twin.DisplayName, twin.AvatarURL, twin.Greeting), jobID
 	}
-	return errs.IMErrorCode_SUCCESS, twinToAPI(current, current.DisplayName, current.AvatarURL, current.Greeting)
+	return errs.IMErrorCode_SUCCESS, twinToAPI(current, current.DisplayName, current.AvatarURL, current.Greeting), jobID
 }
 
 func ListJobs(ctx context.Context, uniqueName, status, jobType string, limit int64, offset string) (errs.IMErrorCode, *apiModels.AiBotInfos) {
@@ -475,6 +497,16 @@ func ActivateVersion(ctx context.Context, uniqueName, version string) (errs.IMEr
 	if err := storage.SetActiveVersion(appkey, uniqueName, version); err != nil {
 		return errs.IMErrorCode_APP_AIBOT_UpdateBotFailed, nil
 	}
+
+	// Also activate on agent service side
+	agentCli := newAgentClient()
+	_, code, agentErr := agentCli.ActivateVersion(ctx, userId, uniqueName, version)
+	if agentErr != nil || (code != 200 && code != 201) {
+		log.Printf("[ActivateVersion] agent activate failed: uniqueName=%s version=%s code=%d err=%v",
+			uniqueName, version, code, agentErr)
+		return errs.IMErrorCode_APP_AIBOT_UpdateBotFailed, nil
+	}
+
 	current, err := storage.FindTwin(appkey, uniqueName)
 	if err != nil {
 		return errs.IMErrorCode_APP_AIBOT_DEFAULT, nil
@@ -855,6 +887,63 @@ func extractVersionSeq(v string) int {
 	return tools.ToInt(v[1:])
 }
 
+// QueryJobStatus looks up a local job and syncs its status from the agent service.
+func QueryJobStatus(ctx context.Context, uniqueName, jobId string) (errs.IMErrorCode, *apiModels.AiBotInfo) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	userId := ctxs.GetRequesterIdFromCtx(ctx)
+	storage := storages.NewAgentStorage()
+
+	twin, err := storage.FindTwin(appkey, uniqueName)
+	if err != nil {
+		return errs.IMErrorCode_APP_AIBOT_BotNotFound, nil
+	}
+	if twin.OwnerId != userId {
+		return errs.IMErrorCode_APP_AIBOT_NoPermission, nil
+	}
+
+	job, err := storage.FindJob(appkey, jobId)
+	if err != nil {
+		return errs.IMErrorCode_APP_AIBOT_BotNotFound, nil
+	}
+
+	// If we have an agent-side job ID, sync latest status from agent
+	if job.AgentJobId != "" {
+		agentCli := newAgentClient()
+		agentJob, code, agentErr := agentCli.GetJob(ctx, userId, job.AgentJobId)
+		if agentErr == nil && (code == 200) && agentJob != nil {
+			// Update local job status from agent
+			resultJSON := tools.ToJson(agentJob.Result)
+			_ = storage.UpsertJob(storageModels.AgentJob{
+				AppKey:     appkey,
+				JobId:      jobId,
+				AgentJobId: job.AgentJobId,
+				UniqueName: uniqueName,
+				Type:       "training",
+				Status:     agentJob.Status,
+				Progress:   agentJob.Progress,
+				ResultJSON: resultJSON,
+			})
+			job.Status = agentJob.Status
+			job.ResultJSON = resultJSON
+			if agentJob.Progress != nil {
+				job.Progress = agentJob.Progress
+			}
+		}
+	}
+
+	return errs.IMErrorCode_SUCCESS, &apiModels.AiBotInfo{
+		BotId:          job.JobId,
+		UniqueName:     job.UniqueName,
+		Nickname:       job.Type,
+		DisplayName:    job.Status,
+		Greeting:       job.ResultJSON,
+		Prompts:        job.ErrorMessage,
+		AvatarURL:      job.AgentJobId,
+		CreatedTime:    job.CreatedTime,
+		UpdatedTime:    job.UpdatedTime,
+	}
+}
+
 func registerBotToIM(appkey, botId, nickname, avatar string) {
 	sdk := imsdk.GetImSdk(appkey)
 	if sdk != nil {
@@ -868,6 +957,110 @@ func registerBotToIM(appkey, botId, nickname, avatar string) {
 			},
 		})
 	}
+}
+
+// backgroundPollJob periodically syncs job status from agent service to local DB.
+func backgroundPollJob(appkey, localJobID, agentJobID, userId string, timeout time.Duration) {
+	if agentJobID == "" {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				log.Printf("[backgroundPollJob] timeout: localJobID=%s agentJobID=%s", localJobID, agentJobID)
+				storage := storages.NewAgentStorage()
+				_ = storage.UpdateJobStatus(appkey, localJobID, "failed", "polling timeout")
+				return
+			}
+
+			agentCli := newAgentClient()
+			job, code, err := agentCli.GetJob(context.Background(), userId, agentJobID)
+			if err != nil || code != 200 || job == nil {
+				log.Printf("[backgroundPollJob] GetJob failed: localJobID=%s agentJobID=%s code=%d err=%v", localJobID, agentJobID, code, err)
+				continue
+			}
+
+			storage := storages.NewAgentStorage()
+			resultJSON := tools.ToJson(job.Result)
+			_ = storage.UpsertJob(storageModels.AgentJob{
+				AppKey:     appkey,
+				JobId:      localJobID,
+				AgentJobId: agentJobID,
+				Type:       "training",
+				Status:     job.Status,
+				Progress:   job.Progress,
+				ResultJSON: resultJSON,
+			})
+
+			if job.Status == "succeeded" || job.Status == "failed" {
+				log.Printf("[backgroundPollJob] terminal: localJobID=%s agentJobID=%s status=%s", localJobID, agentJobID, job.Status)
+				return
+			}
+		}
+	}
+}
+
+// BatchQueryJobStatusRequest is the request body for batch querying job statuses.
+type BatchQueryJobStatusRequest struct {
+	JobIds []string `json:"job_ids"`
+}
+
+// BatchQueryJobStatus queries multiple local jobs and syncs non-terminal ones from agent service.
+func BatchQueryJobStatus(ctx context.Context, req *BatchQueryJobStatusRequest) (errs.IMErrorCode, []map[string]interface{}) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	userId := ctxs.GetRequesterIdFromCtx(ctx)
+	storage := storages.NewAgentStorage()
+
+	if len(req.JobIds) == 0 {
+		return errs.IMErrorCode_SUCCESS, []map[string]interface{}{}
+	}
+
+	jobs, err := storage.FindJobsByIDs(appkey, req.JobIds)
+	if err != nil {
+		log.Printf("[BatchQueryJobStatus] FindJobsByIDs failed: err=%v", err)
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, nil
+	}
+
+	agentCli := newAgentClient()
+	results := make([]map[string]interface{}, 0, len(jobs))
+
+	for _, job := range jobs {
+		// If job has an agent-side ID and is not terminal, sync from agent
+		if job.AgentJobId != "" && job.Status != "succeeded" && job.Status != "failed" {
+			agentJob, code, agentErr := agentCli.GetJob(ctx, userId, job.AgentJobId)
+			if agentErr == nil && code == 200 && agentJob != nil {
+				resultJSON := tools.ToJson(agentJob.Result)
+				_ = storage.UpsertJob(storageModels.AgentJob{
+					AppKey:     appkey,
+					JobId:      job.JobId,
+					AgentJobId: job.AgentJobId,
+					Type:       "training",
+					Status:     agentJob.Status,
+					Progress:   agentJob.Progress,
+					ResultJSON: resultJSON,
+				})
+				job.Status = agentJob.Status
+				job.ResultJSON = resultJSON
+			}
+		}
+
+		results = append(results, map[string]interface{}{
+			"job_id":      job.JobId,
+			"unique_name": job.UniqueName,
+			"type":        job.Type,
+			"status":      job.Status,
+			"progress":    job.Progress,
+			"result":      job.ResultJSON,
+			"error_msg":   job.ErrorMessage,
+		})
+	}
+
+	return errs.IMErrorCode_SUCCESS, results
 }
 
 // UploadAiMaterial handles file upload for agent training materials.

@@ -250,6 +250,11 @@ func (c *Client) ListJobs(ctx context.Context, ownerID, uniqueName, query string
 func (c *Client) GetJob(ctx context.Context, ownerID, jobID string) (*Job, int, error) {
 	var out Job
 	code, err := c.requestJSON(ctx, http.MethodGet, fmt.Sprintf("/jobs/%s", jobID), ownerID, nil, &out)
+	if err != nil {
+		log.Printf("[agentclient] GET /jobs/%s response error: code=%d err=%v", jobID, code, err)
+	} else {
+		log.Printf("[agentclient] GET /jobs/%s response: %s", jobID, tools.ToJson(out))
+	}
 	return &out, code, err
 }
 
@@ -318,12 +323,13 @@ func (c *Client) requestJSONWithHeaders(ctx context.Context, method, path string
 	if headers == nil {
 		headers = make(map[string]string)
 	}
-	if strings.HasPrefix(path, "/twins/") || path == "/twins" {
+	if (strings.HasPrefix(path, "/twins/") || path == "/twins") ||
+		(strings.HasPrefix(path, "/jobs/") || path == "/jobs") {
 		token := c.cfg.TwinsToken
-		log.Printf("[agentclient] cfg: %s", c.cfg)
-		log.Printf("[agentclient] TwinsToken: %s", token)
 		if token != "" {
 			headers["Authorization"] = "Bearer " + token
+		} else if c.cfg.Authorization != "" {
+			headers["Authorization"] = "Bearer " + c.cfg.Authorization
 		}
 	} else if c.cfg.Authorization != "" {
 		headers["Authorization"] = "Bearer " + c.cfg.Authorization
@@ -342,6 +348,7 @@ func (c *Client) requestJSONWithHeaders(ctx context.Context, method, path string
 	if body != "" {
 		log.Printf("[agentclient]   body: %s", body)
 	}
+	log.Printf("[agentclient] %s %s timeout=%v", method, fullURL, c.cfg.Timeout)
 	respBody, code, err := tools.HttpDoBytesWithTimeout(method, fullURL, headers, body, c.cfg.Timeout)
 	if err != nil {
 		log.Printf("[agentclient] HTTP request failed: %s %s err=%v", method, fullURL, err)
@@ -353,8 +360,8 @@ func (c *Client) requestJSONWithHeaders(ctx context.Context, method, path string
 	if len(respBody) == 0 {
 		log.Printf("[agentclient] empty response body: %s %s code=%d", method, fullURL, code)
 	}
-	if strings.Contains(path, "/chat") {
-		log.Printf("[agentclient] chat raw response: code=%d body=%s", code, string(respBody))
+	if strings.Contains(path, "/chat") || strings.Contains(path, "/jobs") {
+		log.Printf("[agentclient] %s %s raw response: code=%d body=%s", method, path, code, string(respBody))
 	}
 	if out != nil && len(respBody) > 0 {
 		if err := json.Unmarshal(respBody, out); err != nil {
@@ -369,13 +376,19 @@ func (c *Client) requestBytesWithHeaders(ctx context.Context, method, path strin
 	if headers == nil {
 		headers = make(map[string]string)
 	}
-	if strings.HasPrefix(path, "/twins") && c.cfg.TwinsToken != "" {
-		headers["Authorization"] = "Bearer " + c.cfg.TwinsToken
+	if (strings.HasPrefix(path, "/twins/") || path == "/twins") ||
+		(strings.HasPrefix(path, "/jobs/") || path == "/jobs") {
+		if c.cfg.TwinsToken != "" {
+			headers["Authorization"] = "Bearer " + c.cfg.TwinsToken
+		} else if c.cfg.Authorization != "" {
+			headers["Authorization"] = "Bearer " + c.cfg.Authorization
+		}
 	} else if c.cfg.Authorization != "" {
 		headers["Authorization"] = "Bearer " + c.cfg.Authorization
 	}
 
 	fullURL := strings.TrimRight(c.cfg.BaseURL, "/") + path
+	log.Printf("[agentclient] %s %s timeout=%v", method, fullURL, c.cfg.Timeout)
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, bytes.NewReader(body))
 	if err != nil {
 		return 0, err

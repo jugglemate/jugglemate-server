@@ -27,3 +27,6 @@ CREATE TABLE `agent_messages` (
   KEY `idx_agent_message_agent` (`app_key`,`agent_message_id`),
   KEY `idx_suggestion` (`app_key`,`session_id`,`suggestion_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- agent_jobs 表新增 agent_job_id 列，用于存储 agent 服务返回的真实 job_id
+ALTER TABLE `agent_jobs` ADD COLUMN IF NOT EXISTS `agent_job_id` VARCHAR(64) DEFAULT '' AFTER `job_id`;

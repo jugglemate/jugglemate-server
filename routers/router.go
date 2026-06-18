@@ -22,6 +22,8 @@ func Route(group *gin.RouterGroup) {
 	group.POST("/aibots/:unique_name/materials/:material_id/sync", apis.SyncMaterial)
 	group.POST("/aibots/:unique_name/training", apis.StartTraining)
 	group.GET("/aibots/:unique_name/jobs", apis.ListJobs)
+	group.GET("/aibots/:unique_name/jobs/:job_id", apis.QueryJobStatus)
+	group.POST("/aibots/jobs/batch_status", apis.BatchQueryJobStatus)
 	group.GET("/aibots/:unique_name/versions", apis.ListVersions)
 	group.POST("/aibots/:unique_name/versions/:version/activate", apis.ActivateVersion)
 	group.GET("/aibots/:unique_name/versions/current", apis.GetCurrentVersion)

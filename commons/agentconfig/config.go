@@ -1,6 +1,7 @@
 package agentconfig
 
 import (
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -29,10 +30,14 @@ func BaseURL() string {
 
 func Timeout() time.Duration {
 	readConfigOnce()
+	var result time.Duration
 	if cfg.AgentServer.TimeoutSeconds > 0 {
-		return time.Duration(cfg.AgentServer.TimeoutSeconds) * time.Second
+		result = time.Duration(cfg.AgentServer.TimeoutSeconds) * time.Second
+	} else {
+		result = 5 * time.Second
 	}
-	return 5 * time.Second
+	log.Printf("[agentconfig] Timeout() returns %v", result)
+	return result
 }
 
 func Authorization() string {
@@ -51,10 +56,21 @@ func readConfigOnce() {
 		if configPath == "" {
 			configPath = "conf/config.yml"
 		}
+		log.Printf("[agentconfig] reading config from: %s", configPath)
 		bs, err := os.ReadFile(configPath)
 		if err != nil {
+			log.Printf("[agentconfig] failed to read config: %v", err)
 			return
 		}
-		_ = yaml.Unmarshal(bs, &cfg)
+		if err := yaml.Unmarshal(bs, &cfg); err != nil {
+			log.Printf("[agentconfig] failed to unmarshal config: %v", err)
+			return
+		}
+		tokenPreview := cfg.AgentServer.Token
+		if len(tokenPreview) > 8 {
+			tokenPreview = tokenPreview[:8] + "..."
+		}
+		log.Printf("[agentconfig] loaded agentServer: baseURL=%s timeoutSeconds=%d token=%s",
+			cfg.AgentServer.BaseURL, cfg.AgentServer.TimeoutSeconds, tokenPreview)
 	})
 }

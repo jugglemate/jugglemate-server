@@ -52,6 +52,7 @@ type AgentJob struct {
 	ID             int64
 	AppKey         string
 	JobId          string
+	AgentJobId     string
 	UniqueName     string
 	Type           string
 	Status         string
@@ -136,7 +137,10 @@ type AgentStorage interface {
 	QryMaterials(appkey, uniqueName string, startId, limit int64) ([]*AgentMaterial, error)
 
 	UpsertJob(item AgentJob) error
+	UpdateJobAgentID(appkey, jobId, agentJobId string) error
+	UpdateJobStatus(appkey, jobId, status, msg string) error
 	FindJob(appkey, jobId string) (*AgentJob, error)
+	FindJobsByIDs(appkey string, jobIds []string) ([]*AgentJob, error)
 	QryJobs(appkey, uniqueName, jobType, status string, startId, limit int64) ([]*AgentJob, error)
 
 	UpsertVersion(item AgentVersion) error

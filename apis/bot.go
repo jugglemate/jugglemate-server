@@ -134,12 +134,15 @@ func StartTraining(ctx *gin.Context) {
 		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
 		return
 	}
-	code, twin := services.StartTraining(ctxs.ToCtx(ctx), uniqueName, req.Mode)
+	code, twin, jobId := services.StartTraining(ctxs.ToCtx(ctx), uniqueName, req.Mode)
 	if code != errs.IMErrorCode_SUCCESS {
 		responses.ErrorHttpResp(ctx, code)
 		return
 	}
-	responses.SuccessHttpResp(ctx, twin)
+	responses.SuccessHttpResp(ctx, map[string]interface{}{
+		"twin":   twin,
+		"job_id": jobId,
+	})
 }
 
 func ListJobs(ctx *gin.Context) {
@@ -296,4 +299,35 @@ func SyncMaterial(ctx *gin.Context) {
 		return
 	}
 	responses.SuccessHttpResp(ctx, material)
+}
+
+func QueryJobStatus(ctx *gin.Context) {
+	uniqueName := ctx.Param("unique_name")
+	jobId := ctx.Param("job_id")
+	if uniqueName == "" || jobId == "" {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	code, jobInfo := services.QueryJobStatus(ctxs.ToCtx(ctx), uniqueName, jobId)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, jobInfo)
+}
+
+func BatchQueryJobStatus(ctx *gin.Context) {
+	var req services.BatchQueryJobStatusRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	code, jobs := services.BatchQueryJobStatus(ctxs.ToCtx(ctx), &req)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, map[string]interface{}{
+		"jobs": jobs,
+	})
 }
