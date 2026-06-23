@@ -409,7 +409,7 @@ func StartTraining(ctx context.Context, uniqueName, mode string) (errs.IMErrorCo
 	_ = storage.UpdateJobStatus(appkey, jobID, agentJob.Status, "")
 
 	// Start background polling to sync job status from agent service
-	go backgroundPollJob(appkey, jobID, agentJob.JobID, userId, 10*time.Minute)
+	go backgroundPollJob(appkey, uniqueName, jobID, agentJob.JobID, userId, 10*time.Minute)
 
 	current, err := storage.FindTwin(appkey, uniqueName)
 	if err != nil {
@@ -888,6 +888,7 @@ func extractVersionSeq(v string) int {
 }
 
 // QueryJobStatus looks up a local job and syncs its status from the agent service.
+// When the job is terminal (succeeded/failed), it also updates twin status and syncs versions.
 func QueryJobStatus(ctx context.Context, uniqueName, jobId string) (errs.IMErrorCode, *apiModels.AiBotInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -911,22 +912,60 @@ func QueryJobStatus(ctx context.Context, uniqueName, jobId string) (errs.IMError
 		agentCli := newAgentClient()
 		agentJob, code, agentErr := agentCli.GetJob(ctx, userId, job.AgentJobId)
 		if agentErr == nil && (code == 200) && agentJob != nil {
-			// Update local job status from agent
+			// Parse time fields from agent response
 			resultJSON := tools.ToJson(agentJob.Result)
+			agentCreatedAt := parseTimeToMilli(agentJob.CreatedAt)
+			startedAt := parseTimeToMilli(agentJob.StartedAt)
+			finishedAt := parseTimeToMilli(agentJob.FinishedAt)
+
 			_ = storage.UpsertJob(storageModels.AgentJob{
-				AppKey:     appkey,
-				JobId:      jobId,
-				AgentJobId: job.AgentJobId,
-				UniqueName: uniqueName,
-				Type:       "training",
-				Status:     agentJob.Status,
-				Progress:   agentJob.Progress,
-				ResultJSON: resultJSON,
+				AppKey:         appkey,
+				JobId:          jobId,
+				AgentJobId:     job.AgentJobId,
+				UniqueName:     uniqueName,
+				Type:           "training",
+				Status:         agentJob.Status,
+				Progress:       agentJob.Progress,
+				ResultJSON:     resultJSON,
+				AgentCreatedAt: agentCreatedAt,
+				StartedAt:      startedAt,
+				FinishedAt:     finishedAt,
 			})
 			job.Status = agentJob.Status
 			job.ResultJSON = resultJSON
 			if agentJob.Progress != nil {
 				job.Progress = agentJob.Progress
+			}
+
+			// On terminal state, update twin and sync versions (same as backgroundPollJob)
+			switch agentJob.Status {
+			case "succeeded":
+				log.Printf("[QueryJobStatus] job succeeded, updating twin and syncing versions: uniqueName=%s jobId=%s", uniqueName, jobId)
+				twin.Status = "trained"
+				_ = storage.UpdateTwin(*twin)
+
+				versions, vCode, vErr := agentCli.ListVersions(ctx, userId, uniqueName)
+				if vErr == nil && vCode == 200 {
+					for _, v := range versions {
+						_ = storage.UpsertVersion(storageModels.AgentVersion{
+							AppKey:         appkey,
+							UniqueName:     uniqueName,
+							Version:        v.Version,
+							Mode:           v.Mode,
+							Active:         v.Active,
+							TrainingJobId:  v.TrainingJobID,
+							MaterialsCount: v.MaterialsCount,
+							AgentCreatedAt: parseTimeToMilli(v.CreatedAt),
+						})
+					}
+					log.Printf("[QueryJobStatus] synced %d versions from agent", len(versions))
+				} else {
+					log.Printf("[QueryJobStatus] ListVersions failed: code=%d err=%v", vCode, vErr)
+				}
+			case "failed":
+				log.Printf("[QueryJobStatus] job failed: uniqueName=%s jobId=%s err=%v", uniqueName, jobId, agentJob.Error)
+				twin.Status = "training_failed"
+				_ = storage.UpdateTwin(*twin)
 			}
 		}
 	}
@@ -960,7 +999,8 @@ func registerBotToIM(appkey, botId, nickname, avatar string) {
 }
 
 // backgroundPollJob periodically syncs job status from agent service to local DB.
-func backgroundPollJob(appkey, localJobID, agentJobID, userId string, timeout time.Duration) {
+// On job completion, it also updates the twin status and syncs version data.
+func backgroundPollJob(appkey, uniqueName, localJobID, agentJobID, userId string, timeout time.Duration) {
 	if agentJobID == "" {
 		return
 	}
@@ -975,6 +1015,11 @@ func backgroundPollJob(appkey, localJobID, agentJobID, userId string, timeout ti
 				log.Printf("[backgroundPollJob] timeout: localJobID=%s agentJobID=%s", localJobID, agentJobID)
 				storage := storages.NewAgentStorage()
 				_ = storage.UpdateJobStatus(appkey, localJobID, "failed", "polling timeout")
+				// Update twin status to failed
+				if twin, findErr := storage.FindTwin(appkey, uniqueName); findErr == nil {
+					twin.Status = "training_failed"
+					_ = storage.UpdateTwin(*twin)
+				}
 				return
 			}
 
@@ -985,24 +1030,82 @@ func backgroundPollJob(appkey, localJobID, agentJobID, userId string, timeout ti
 				continue
 			}
 
-			storage := storages.NewAgentStorage()
+			// Parse time fields from agent response
 			resultJSON := tools.ToJson(job.Result)
+			agentCreatedAt := parseTimeToMilli(job.CreatedAt)
+			startedAt := parseTimeToMilli(job.StartedAt)
+			finishedAt := parseTimeToMilli(job.FinishedAt)
+
+			storage := storages.NewAgentStorage()
 			_ = storage.UpsertJob(storageModels.AgentJob{
-				AppKey:     appkey,
-				JobId:      localJobID,
-				AgentJobId: agentJobID,
-				Type:       "training",
-				Status:     job.Status,
-				Progress:   job.Progress,
-				ResultJSON: resultJSON,
+				AppKey:         appkey,
+				JobId:          localJobID,
+				AgentJobId:     agentJobID,
+				UniqueName:     uniqueName,
+				Type:           "training",
+				Status:         job.Status,
+				Progress:       job.Progress,
+				ResultJSON:     resultJSON,
+				AgentCreatedAt: agentCreatedAt,
+				StartedAt:      startedAt,
+				FinishedAt:     finishedAt,
 			})
 
-			if job.Status == "succeeded" || job.Status == "failed" {
-				log.Printf("[backgroundPollJob] terminal: localJobID=%s agentJobID=%s status=%s", localJobID, agentJobID, job.Status)
+			if job.Status == "succeeded" {
+				log.Printf("[backgroundPollJob] succeeded: localJobID=%s agentJobID=%s", localJobID, agentJobID)
+
+				// Update twin status to trained
+				twin, findErr := storage.FindTwin(appkey, uniqueName)
+				if findErr == nil {
+					twin.Status = "trained"
+					_ = storage.UpdateTwin(*twin)
+				}
+
+				// Sync versions from agent service
+				versions, vCode, vErr := agentCli.ListVersions(context.Background(), userId, uniqueName)
+				if vErr == nil && vCode == 200 {
+					for _, v := range versions {
+						_ = storage.UpsertVersion(storageModels.AgentVersion{
+							AppKey:         appkey,
+							UniqueName:     uniqueName,
+							Version:        v.Version,
+							Mode:           v.Mode,
+							Active:         v.Active,
+							TrainingJobId:  v.TrainingJobID,
+							MaterialsCount: v.MaterialsCount,
+							AgentCreatedAt: parseTimeToMilli(v.CreatedAt),
+						})
+					}
+					log.Printf("[backgroundPollJob] synced %d versions from agent", len(versions))
+				} else {
+					log.Printf("[backgroundPollJob] ListVersions failed: code=%d err=%v", vCode, vErr)
+				}
+				return
+			}
+
+			if job.Status == "failed" {
+				log.Printf("[backgroundPollJob] failed: localJobID=%s agentJobID=%s err=%v", localJobID, agentJobID, job.Error)
+				twin, findErr := storage.FindTwin(appkey, uniqueName)
+				if findErr == nil {
+					twin.Status = "training_failed"
+					_ = storage.UpdateTwin(*twin)
+				}
 				return
 			}
 		}
 	}
+}
+
+// parseTimeToMilli parses an ISO 8601 / RFC3339 time string to Unix milliseconds.
+func parseTimeToMilli(s string) int64 {
+	if s == "" {
+		return 0
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return 0
+	}
+	return t.UnixMilli()
 }
 
 // BatchQueryJobStatusRequest is the request body for batch querying job statuses.

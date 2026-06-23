@@ -357,7 +357,7 @@ func CreateSession(c *gin.Context) {
 
 	as := storages.NewAgentStorage()
 
-	// 先查找是否已存在
+	// 先查找是否已存在（status != 2 的活跃 session）
 	sess, err := as.FindSessionByConv(appkey, req.ConvId, req.UniqueName)
 	if err == nil && sess != nil {
 		// 已存在，直接返回 + agent 快照
@@ -367,9 +367,26 @@ func CreateSession(c *gin.Context) {
 		return
 	}
 
-	// 不存在，创建新 session
-	now := time.Now().UnixMilli()
+	// 不存在活跃 session，检查是否有已关闭的（status=2）
 	sessionId := req.ConvId + "_" + req.ConvType
+	closedSess, _ := as.FindSession(appkey, sessionId)
+	if closedSess != nil && closedSess.Status == 2 {
+		// 复活已关闭的 session
+		closedSess.Status = 0
+		closedSess.AutoMode = req.AutoMode
+		closedSess.LastMsgAt = time.Now().UnixMilli()
+		if err := as.UpdateSession(*closedSess); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "复活 session 失败: " + err.Error()})
+			return
+		}
+		info := buildSessionInfo(closedSess)
+		info.Agent = getAgentSnapshot(as, appkey, closedSess.UniqueName)
+		c.JSON(http.StatusOK, gin.H{"code": 0, "data": info, "created": false, "resurrected": true})
+		return
+	}
+
+	// 完全不存在，创建新 session
+	now := time.Now().UnixMilli()
 	newSess := stomodels.AgentSession{
 		AppKey:         appkey,
 		SessionId:      sessionId,
