@@ -1,4 +1,4 @@
-module github.com/juggleim/jugglechat-server-ai
+module github.com/juggleim/jugglemate-server
 
 go 1.25.0
 

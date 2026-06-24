@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/juggleim/jugglechat-server-ai/commons/dbcommons"
-	"github.com/juggleim/jugglechat-server-ai/storages/models"
+	"github.com/juggleim/jugglemate-server/commons/dbcommons"
+	"github.com/juggleim/jugglemate-server/storages/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

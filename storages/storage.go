@@ -1,8 +1,8 @@
 package storages
 
 import (
-	"github.com/juggleim/jugglechat-server-ai/storages/dbs"
-	"github.com/juggleim/jugglechat-server-ai/storages/models"
+	"github.com/juggleim/jugglemate-server/storages/dbs"
+	"github.com/juggleim/jugglemate-server/storages/models"
 )
 
 func NewAiBotStorage() models.IAiBotStorage {

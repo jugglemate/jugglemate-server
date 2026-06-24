@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/juggleim/jugglechat-server-ai/commons/dbcommons"
-	"github.com/juggleim/jugglechat-server-ai/commons/tools"
+	"github.com/juggleim/jugglemate-server/commons/dbcommons"
+	"github.com/juggleim/jugglemate-server/commons/tools"
 	"gorm.io/gorm"
 )
 
@@ -15,6 +15,7 @@ type UserDao struct {
 	Nickname     string    `gorm:"nickname"`
 	UserPortrait string    `gorm:"user_portrait"`
 	LoginAccount string    `gorm:"login_account"`
+	Email        string    `gorm:"email"`
 	LoginPass    string    `gorm:"login_pass"`
 	Status       int       `gorm:"status"`
 	ImToken      string    `gorm:"im_token"`

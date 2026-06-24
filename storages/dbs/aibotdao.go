@@ -3,8 +3,8 @@ package dbs
 import (
 	"time"
 
-	"github.com/juggleim/jugglechat-server-ai/storages/models"
-	"github.com/juggleim/jugglechat-server-ai/commons/dbcommons"
+	"github.com/juggleim/jugglemate-server/commons/dbcommons"
+	"github.com/juggleim/jugglemate-server/storages/models"
 )
 
 type AiBotDao struct {

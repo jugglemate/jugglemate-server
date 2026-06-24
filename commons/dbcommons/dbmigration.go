@@ -1,4 +1,4 @@
-package dbmigrations
+package dbcommons
 
 import (
 	"bufio"
@@ -7,8 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/juggleim/jugglechat-server-ai/commons/dbcommons"
-	"github.com/juggleim/jugglechat-server-ai/commons/tools"
+	"github.com/juggleim/jugglemate-server/commons/tools"
 )
 
 //go:embed sqls/*
@@ -21,7 +20,7 @@ const (
 func Upgrade() {
 	// upgrade jchat db
 	var currVersion int64 = 0
-	dao := dbcommons.GlobalConfDao{}
+	dao := GlobalConfDao{}
 	conf, err := dao.FindByKey(JChatAiDbVersionKey)
 	if err == nil && conf != nil {
 		ver, err := tools.String2Int64(conf.ConfValue)
@@ -54,7 +53,7 @@ func Upgrade() {
 				err := executeSqlFile(sqlFileName)
 				if err == nil {
 					fmt.Println("[DbMigration]execute sql file success:", sqlFileName)
-					dao.Upsert(dbcommons.GlobalConfDao{
+					dao.Upsert(GlobalConfDao{
 						ConfKey:   JChatAiDbVersionKey,
 						ConfValue: fmt.Sprintf("%d", ver),
 					})
@@ -78,7 +77,7 @@ func executeSqlFile(fileName string) error {
 		if query == "" {
 			return nil
 		}
-		if err := dbcommons.GetDb().Exec(query).Error; err != nil {
+		if err := GetDb().Exec(query).Error; err != nil {
 			fmt.Println("[DbMigration_Err]Execute sql error:", err, query)
 			return err
 		}

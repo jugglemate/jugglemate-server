@@ -10,13 +10,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/juggleim/imserver-sdk-go"
-	"github.com/juggleim/jugglechat-server-ai/commons/agentclient"
-	"github.com/juggleim/jugglechat-server-ai/commons/agentconfig"
-	"github.com/juggleim/jugglechat-server-ai/commons/imsdk"
-	"github.com/juggleim/jugglechat-server-ai/commons/responses"
-	"github.com/juggleim/jugglechat-server-ai/services"
-	"github.com/juggleim/jugglechat-server-ai/storages"
-	storageModels "github.com/juggleim/jugglechat-server-ai/storages/models"
+	"github.com/juggleim/jugglemate-server/commons/agentclient"
+	"github.com/juggleim/jugglemate-server/commons/agentconfig"
+	"github.com/juggleim/jugglemate-server/commons/imsdk"
+	"github.com/juggleim/jugglemate-server/commons/responses"
+	"github.com/juggleim/jugglemate-server/services"
+	"github.com/juggleim/jugglemate-server/storages"
+	storageModels "github.com/juggleim/jugglemate-server/storages/models"
 )
 
 type msgCallbackBody struct {

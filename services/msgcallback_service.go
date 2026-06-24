@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/juggleim/jugglechat-server-ai/storages"
-	stomodels "github.com/juggleim/jugglechat-server-ai/storages/models"
+	"github.com/juggleim/jugglemate-server/storages"
+	stomodels "github.com/juggleim/jugglemate-server/storages/models"
 )
 
 var MsgCallbackService = &msgCallbackService{}

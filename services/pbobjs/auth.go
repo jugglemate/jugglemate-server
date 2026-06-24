@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"time"
 
-	"github.com/juggleim/jugglechat-server-ai/commons/tools"
+	"github.com/juggleim/jugglemate-server/commons/tools"
 )
 
 type ApiKey struct {

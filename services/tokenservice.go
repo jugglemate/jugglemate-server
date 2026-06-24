@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/juggleim/jugglechat-server-ai/commons/tools"
-	"github.com/juggleim/jugglechat-server-ai/services/pbobjs"
+	"github.com/juggleim/jugglemate-server/commons/tools"
+	"github.com/juggleim/jugglemate-server/services/pbobjs"
 )
 
 type ImToken struct {

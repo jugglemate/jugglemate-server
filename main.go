@@ -8,12 +8,11 @@ import (
 	"syscall"
 
 	"github.com/gin-gonic/gin"
-	"github.com/juggleim/jugglechat-server-ai/apis"
-	"github.com/juggleim/jugglechat-server-ai/commons/configures"
-	"github.com/juggleim/jugglechat-server-ai/commons/dbcommons"
-	"github.com/juggleim/jugglechat-server-ai/commons/dbmigrations"
-	"github.com/juggleim/jugglechat-server-ai/commons/imsdk"
-	"github.com/juggleim/jugglechat-server-ai/routers"
+	"github.com/juggleim/jugglemate-server/apis"
+	"github.com/juggleim/jugglemate-server/commons/configures"
+	"github.com/juggleim/jugglemate-server/commons/dbcommons"
+	"github.com/juggleim/jugglemate-server/commons/imsdk"
+	"github.com/juggleim/jugglemate-server/routers"
 )
 
 func main() {
@@ -48,7 +47,7 @@ func main() {
 		return
 	}
 	// upgrade db
-	dbmigrations.Upgrade()
+	dbcommons.Upgrade()
 
 	httpServer := gin.Default()
 	httpServer.Use(corsHandler())

@@ -2,13 +2,14 @@ package routers
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/juggleim/jugglechat-server-ai/apis"
-	"github.com/juggleim/jugglechat-server-ai/apis/handlers"
+	"github.com/juggleim/jugglemate-server/apis"
+	"github.com/juggleim/jugglemate-server/apis/handlers"
 )
 
 func Route(group *gin.RouterGroup) {
 	group.POST("/user/login", apis.Login)
 	group.POST("/user/register", apis.Register)
+
 	group.POST("/aibots/add", apis.CreateAiBot)
 	group.POST("/aibots/update", apis.UpdateAiBot)
 	group.POST("/aibots/remove", apis.RemoveAiBot)

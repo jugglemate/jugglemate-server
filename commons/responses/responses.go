@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/juggleim/jugglechat-server-ai/commons/errs"
+	"github.com/juggleim/jugglemate-server/commons/errs"
 )
 
 func ErrorHttpResp(ctx *gin.Context, code errs.IMErrorCode) {

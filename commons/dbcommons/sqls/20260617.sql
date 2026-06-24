@@ -1,6 +1,36 @@
--- ============================================================
--- Agent Twin 体系建表 (替代旧 aibots)
--- ============================================================
+CREATE TABLE IF NOT EXISTS `aibots` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `bot_id` varchar(32) DEFAULT NULL,
+  `bot_name` varchar(50) DEFAULT NULL,
+  `bot_portrait` varchar(200) DEFAULT NULL,
+  `prompts` text,
+  `owner_id` varchar(32) DEFAULT NULL,
+  `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
+  `app_key` varchar(20) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_botid` (`app_key`,`bot_id`),
+  KEY `idx_owner` (`app_key`,`owner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` varchar(64) NOT NULL,
+  `nickname` varchar(128) NOT NULL DEFAULT '',
+  `user_portrait` varchar(512) NOT NULL DEFAULT '',
+  `login_account` varchar(64) NOT NULL DEFAULT '',
+  `email` varchar(128) NOT NULL DEFAULT '',
+  `login_pass` varchar(128) NOT NULL DEFAULT '',
+  `status` int NOT NULL DEFAULT 1,
+  `im_token` varchar(512) NOT NULL DEFAULT '',
+  `created_time` timestamp DEFAULT CURRENT_TIMESTAMP,
+  `updated_time` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `app_key` varchar(64) NOT NULL DEFAULT '',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_app_account` (`app_key`,`login_account`),
+  UNIQUE KEY `uk_app_userid` (`app_key`,`user_id`),
+  KEY `idx_app_key` (`app_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `agent_twins` (
   `id` bigint NOT NULL AUTO_INCREMENT,
@@ -18,7 +48,7 @@ CREATE TABLE IF NOT EXISTS `agent_twins` (
   `materials_count` int DEFAULT 0,
   `sync_status` varchar(20) DEFAULT 'pending',
   `sync_error` varchar(500) DEFAULT '',
-  `last_synced_at` datetime(3) NULL,
+  `last_synced_at` datetime(3) DEFAULT NULL,
   `domain` varchar(32) DEFAULT '' COMMENT '业务域: order/pre_sale/complaint/general',
   `auto_reply_enabled` tinyint NOT NULL DEFAULT 0 COMMENT '是否开启自动回复',
   `confidence_threshold` float NOT NULL DEFAULT 0.75 COMMENT '自动回复置信度阈值',
@@ -32,9 +62,6 @@ CREATE TABLE IF NOT EXISTS `agent_twins` (
   KEY `idx_owner` (`app_key`,`owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- ============================================================
--- Agent 删除墓碑 (防止 unique_name 重用)
--- ============================================================
 CREATE TABLE IF NOT EXISTS `agent_twin_tombstones` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `app_key` varchar(20) NOT NULL,
@@ -45,9 +72,6 @@ CREATE TABLE IF NOT EXISTS `agent_twin_tombstones` (
   UNIQUE KEY `uniq_tomb` (`app_key`,`unique_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- ============================================================
--- 训练素材
--- ============================================================
 CREATE TABLE IF NOT EXISTS `agent_materials` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `app_key` varchar(20) NOT NULL,
@@ -62,7 +86,7 @@ CREATE TABLE IF NOT EXISTS `agent_materials` (
   `size_bytes` bigint DEFAULT 0,
   `sync_status` varchar(20) DEFAULT 'pending',
   `sync_error` varchar(500) DEFAULT '',
-  `last_synced_at` datetime(3) NULL,
+  `last_synced_at` datetime(3) DEFAULT NULL,
   `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
@@ -70,13 +94,11 @@ CREATE TABLE IF NOT EXISTS `agent_materials` (
   KEY `idx_twin_material` (`app_key`,`unique_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- ============================================================
--- 训练/评估任务
--- ============================================================
 CREATE TABLE IF NOT EXISTS `agent_jobs` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `app_key` varchar(20) NOT NULL,
   `job_id` varchar(48) NOT NULL,
+  `agent_job_id` varchar(64) DEFAULT '',
   `unique_name` varchar(64) NOT NULL,
   `type` varchar(32) DEFAULT NULL,
   `status` varchar(32) DEFAULT NULL,
@@ -84,9 +106,9 @@ CREATE TABLE IF NOT EXISTS `agent_jobs` (
   `result_json` json DEFAULT NULL,
   `error_code` varchar(32) DEFAULT '',
   `error_message` varchar(500) DEFAULT '',
-  `agent_created_at` datetime(3) NULL,
-  `started_at` datetime(3) NULL,
-  `finished_at` datetime(3) NULL,
+  `agent_created_at` datetime(3) DEFAULT NULL,
+  `started_at` datetime(3) DEFAULT NULL,
+  `finished_at` datetime(3) DEFAULT NULL,
   `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
@@ -94,9 +116,6 @@ CREATE TABLE IF NOT EXISTS `agent_jobs` (
   KEY `idx_twin_job` (`app_key`,`unique_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- ============================================================
--- Agent 版本
--- ============================================================
 CREATE TABLE IF NOT EXISTS `agent_versions` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `app_key` varchar(20) NOT NULL,
@@ -106,7 +125,7 @@ CREATE TABLE IF NOT EXISTS `agent_versions` (
   `active` tinyint(1) DEFAULT 0,
   `training_job_id` varchar(48) DEFAULT NULL,
   `materials_count` int DEFAULT 0,
-  `agent_created_at` datetime(3) NULL,
+  `agent_created_at` datetime(3) DEFAULT NULL,
   `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
@@ -114,9 +133,6 @@ CREATE TABLE IF NOT EXISTS `agent_versions` (
   KEY `idx_active_version` (`app_key`,`unique_name`,`active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- ============================================================
--- Agent 评估
--- ============================================================
 CREATE TABLE IF NOT EXISTS `agent_evaluations` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `app_key` varchar(20) NOT NULL,
@@ -126,45 +142,40 @@ CREATE TABLE IF NOT EXISTS `agent_evaluations` (
   `overall_score` double DEFAULT NULL,
   `dimensions_json` json DEFAULT NULL,
   `summary_md` text,
-  `agent_created_at` datetime(3) NULL,
+  `agent_created_at` datetime(3) DEFAULT NULL,
   `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_eval` (`app_key`,`evaluation_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- ============================================================
--- Agent 消息记录
--- ============================================================
 CREATE TABLE IF NOT EXISTS `agent_messages` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `app_key` varchar(20) NOT NULL,
-  `unique_name` varchar(64) NOT NULL,
-  `customer_id` varchar(32) NOT NULL,
-  `im_msg_id` varchar(64) DEFAULT NULL,
-  `agent_message_id` varchar(64) DEFAULT '',
-  `session_id` varchar(32) DEFAULT '',
-  `role` varchar(16) NOT NULL COMMENT 'customer/twin',
-  `text` text,
-  `fallback` tinyint(1) DEFAULT 0,
-  `source` varchar(32) DEFAULT '',
-  `platform` varchar(32) DEFAULT '',
-  `conver_type` int DEFAULT 0,
-  `raw_payload` json DEFAULT NULL,
+  `unique_name` varchar(32) NOT NULL,
+  `customer_id` varchar(64) NOT NULL,
+  `im_msg_id` varchar(128) DEFAULT NULL,
+  `agent_message_id` varchar(64) DEFAULT NULL,
+  `session_id` varchar(64) DEFAULT NULL,
+  `role` varchar(16) NOT NULL,
+  `text` mediumtext NOT NULL,
+  `fallback` tinyint(1) NOT NULL DEFAULT 0,
   `suggestion_status` varchar(16) DEFAULT '' COMMENT '空=非建议/pending=待审核/adopted=已采纳/edited=已编辑/rejected=已拒绝',
-  `msg_time` datetime(3) NULL,
+  `pending_source` varchar(16) DEFAULT '' COMMENT 'assist=协助模式生成/auto=自动模式发送',
+  `source` varchar(32) DEFAULT NULL,
+  `platform` varchar(32) DEFAULT NULL,
+  `conver_type` int DEFAULT NULL,
+  `raw_payload` json DEFAULT NULL,
+  `msg_time` datetime(3) DEFAULT NULL,
   `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   KEY `idx_im_msg` (`app_key`,`im_msg_id`),
-  KEY `idx_session` (`app_key`,`session_id`),
-  KEY `idx_twin_customer` (`app_key`,`unique_name`,`customer_id`),
+  KEY `idx_agent_message_twin_customer` (`app_key`,`unique_name`,`customer_id`,`id`),
+  KEY `idx_agent_message_agent` (`app_key`,`agent_message_id`),
   KEY `idx_suggestion` (`app_key`,`session_id`,`suggestion_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- ============================================================
--- Agent 会话表 (新增)
--- ============================================================
 CREATE TABLE IF NOT EXISTS `agent_sessions` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `app_key` varchar(20) NOT NULL,
@@ -179,9 +190,9 @@ CREATE TABLE IF NOT EXISTS `agent_sessions` (
   `msg_count` int DEFAULT 0 COMMENT '消息计数',
   `tags` json DEFAULT NULL COMMENT '标签',
   `summary` text COMMENT '会话小结',
-  `first_msg_at` datetime(3) NULL COMMENT '首条消息时间',
-  `last_msg_at` datetime(3) NULL COMMENT '末条消息时间',
-  `closed_at` datetime(3) NULL COMMENT '关闭时间',
+  `first_msg_at` datetime(3) DEFAULT NULL COMMENT '首条消息时间',
+  `last_msg_at` datetime(3) DEFAULT NULL COMMENT '末条消息时间',
+  `closed_at` datetime(3) DEFAULT NULL COMMENT '关闭时间',
   `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
   `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
@@ -190,12 +201,10 @@ CREATE TABLE IF NOT EXISTS `agent_sessions` (
   KEY `idx_agent` (`app_key`,`unique_name`),
   KEY `idx_operator` (`app_key`,`operator_id`),
   KEY `idx_status` (`app_key`,`status`),
-  KEY `idx_last_msg` (`app_key`,`last_msg_at`)
+  KEY `idx_last_msg` (`app_key`,`last_msg_at`),
+  KEY `idx_platform_conv` (`app_key`,`platform_conv_id`,`unique_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- ============================================================
--- Agent 回复反馈表 (新增, 训练闭环核心)
--- ============================================================
 CREATE TABLE IF NOT EXISTS `agent_feedbacks` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `app_key` varchar(20) NOT NULL,
@@ -217,8 +226,3 @@ CREATE TABLE IF NOT EXISTS `agent_feedbacks` (
   KEY `idx_action` (`app_key`,`action`),
   KEY `idx_created` (`app_key`,`created_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
--- ============================================================
--- 迁移版本号
--- ============================================================
-INSERT IGNORE INTO `globalconfs` (`conf_key`,`conf_value`) VALUES ('jchataidb_version','20260614');

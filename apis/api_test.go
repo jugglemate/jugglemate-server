@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/juggleim/jugglechat-server-ai/apis"
-	"github.com/juggleim/jugglechat-server-ai/commons/configures"
-	"github.com/juggleim/jugglechat-server-ai/routers"
+	"github.com/juggleim/jugglemate-server/apis"
+	"github.com/juggleim/jugglemate-server/commons/configures"
+	"github.com/juggleim/jugglemate-server/routers"
 )
 
 var testServer *httptest.Server

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/juggleim/jugglechat-server-ai/commons/tools"
+	"github.com/juggleim/jugglemate-server/commons/tools"
 )
 
 type Config struct {

@@ -2,11 +2,11 @@ package apis
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/juggleim/jugglechat-server-ai/apis/models"
-	"github.com/juggleim/jugglechat-server-ai/commons/ctxs"
-	"github.com/juggleim/jugglechat-server-ai/commons/errs"
-	"github.com/juggleim/jugglechat-server-ai/commons/responses"
-	"github.com/juggleim/jugglechat-server-ai/services"
+	"github.com/juggleim/jugglemate-server/apis/models"
+	"github.com/juggleim/jugglemate-server/commons/ctxs"
+	"github.com/juggleim/jugglemate-server/commons/errs"
+	"github.com/juggleim/jugglemate-server/commons/responses"
+	"github.com/juggleim/jugglemate-server/services"
 )
 
 func Login(ctx *gin.Context) {

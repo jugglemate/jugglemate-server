@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"regexp"
 
-	apiModels "github.com/juggleim/jugglechat-server-ai/apis/models"
-	"github.com/juggleim/jugglechat-server-ai/commons/configures"
-	"github.com/juggleim/jugglechat-server-ai/commons/ctxs"
-	"github.com/juggleim/jugglechat-server-ai/commons/errs"
-	"github.com/juggleim/jugglechat-server-ai/commons/imsdk"
-	"github.com/juggleim/jugglechat-server-ai/commons/tools"
-	"github.com/juggleim/jugglechat-server-ai/storages/dbs"
+	apiModels "github.com/juggleim/jugglemate-server/apis/models"
+	"github.com/juggleim/jugglemate-server/commons/configures"
+	"github.com/juggleim/jugglemate-server/commons/ctxs"
+	"github.com/juggleim/jugglemate-server/commons/errs"
+	"github.com/juggleim/jugglemate-server/commons/imsdk"
+	"github.com/juggleim/jugglemate-server/commons/tools"
+	"github.com/juggleim/jugglemate-server/storages/dbs"
 
 	juggleimsdk "github.com/juggleim/imserver-sdk-go"
 )

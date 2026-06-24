@@ -4,11 +4,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/juggleim/jugglechat-server-ai/commons/ctxs"
-	"github.com/juggleim/jugglechat-server-ai/commons/errs"
-	"github.com/juggleim/jugglechat-server-ai/commons/responses"
-	"github.com/juggleim/jugglechat-server-ai/commons/tools"
-	"github.com/juggleim/jugglechat-server-ai/services"
+	"github.com/juggleim/jugglemate-server/commons/ctxs"
+	"github.com/juggleim/jugglemate-server/commons/errs"
+	"github.com/juggleim/jugglemate-server/commons/responses"
+	"github.com/juggleim/jugglemate-server/commons/tools"
+	"github.com/juggleim/jugglemate-server/services"
 )
 
 const (

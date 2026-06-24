@@ -13,17 +13,17 @@ import (
 	"sync"
 	"time"
 
-	apiModels "github.com/juggleim/jugglechat-server-ai/apis/models"
-	"github.com/juggleim/jugglechat-server-ai/commons/agentclient"
-	"github.com/juggleim/jugglechat-server-ai/commons/agentconfig"
-	"github.com/juggleim/jugglechat-server-ai/commons/configures"
-	"github.com/juggleim/jugglechat-server-ai/commons/ctxs"
-	"github.com/juggleim/jugglechat-server-ai/commons/errs"
-	"github.com/juggleim/jugglechat-server-ai/commons/imsdk"
-	"github.com/juggleim/jugglechat-server-ai/commons/oss"
-	"github.com/juggleim/jugglechat-server-ai/commons/tools"
-	"github.com/juggleim/jugglechat-server-ai/storages"
-	storageModels "github.com/juggleim/jugglechat-server-ai/storages/models"
+	apiModels "github.com/juggleim/jugglemate-server/apis/models"
+	"github.com/juggleim/jugglemate-server/commons/agentclient"
+	"github.com/juggleim/jugglemate-server/commons/agentconfig"
+	"github.com/juggleim/jugglemate-server/commons/configures"
+	"github.com/juggleim/jugglemate-server/commons/ctxs"
+	"github.com/juggleim/jugglemate-server/commons/errs"
+	"github.com/juggleim/jugglemate-server/commons/imsdk"
+	"github.com/juggleim/jugglemate-server/commons/oss"
+	"github.com/juggleim/jugglemate-server/commons/tools"
+	"github.com/juggleim/jugglemate-server/storages"
+	storageModels "github.com/juggleim/jugglemate-server/storages/models"
 
 	juggleimsdk "github.com/juggleim/imserver-sdk-go"
 )
@@ -971,15 +971,15 @@ func QueryJobStatus(ctx context.Context, uniqueName, jobId string) (errs.IMError
 	}
 
 	return errs.IMErrorCode_SUCCESS, &apiModels.AiBotInfo{
-		BotId:          job.JobId,
-		UniqueName:     job.UniqueName,
-		Nickname:       job.Type,
-		DisplayName:    job.Status,
-		Greeting:       job.ResultJSON,
-		Prompts:        job.ErrorMessage,
-		AvatarURL:      job.AgentJobId,
-		CreatedTime:    job.CreatedTime,
-		UpdatedTime:    job.UpdatedTime,
+		BotId:       job.JobId,
+		UniqueName:  job.UniqueName,
+		Nickname:    job.Type,
+		DisplayName: job.Status,
+		Greeting:    job.ResultJSON,
+		Prompts:     job.ErrorMessage,
+		AvatarURL:   job.AgentJobId,
+		CreatedTime: job.CreatedTime,
+		UpdatedTime: job.UpdatedTime,
 	}
 }
 

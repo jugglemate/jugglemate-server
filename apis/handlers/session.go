@@ -11,11 +11,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/juggleim/jugglechat-server-ai/apis/models"
-	"github.com/juggleim/jugglechat-server-ai/commons/agentclient"
-	"github.com/juggleim/jugglechat-server-ai/commons/agentconfig"
-	"github.com/juggleim/jugglechat-server-ai/storages"
-	stomodels "github.com/juggleim/jugglechat-server-ai/storages/models"
+	"github.com/juggleim/jugglemate-server/apis/models"
+	"github.com/juggleim/jugglemate-server/commons/agentclient"
+	"github.com/juggleim/jugglemate-server/commons/agentconfig"
+	"github.com/juggleim/jugglemate-server/storages"
+	stomodels "github.com/juggleim/jugglemate-server/storages/models"
 )
 
 // ==================== Session ====================
