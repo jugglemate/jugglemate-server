@@ -11,7 +11,7 @@ import (
 	"github.com/juggleim/jugglemate-server/apis"
 	"github.com/juggleim/jugglemate-server/commons/configures"
 	"github.com/juggleim/jugglemate-server/commons/dbcommons"
-	"github.com/juggleim/jugglemate-server/commons/imsdk"
+	"github.com/juggleim/jugglemate-server/commons/logs"
 	"github.com/juggleim/jugglemate-server/routers"
 )
 
@@ -21,29 +21,29 @@ func main() {
 		fmt.Println("Init Configures failed", err)
 		return
 	}
+	//init log
+	logs.InitLogs()
+	// // init IMSDK provider
+	// imsdk.RegisterAppInfoProvider(func(appkey string) (string, string, bool) {
+	// 	// For now, use configured default appkey/secret
+	// 	// In production, this could read from database
+	// 	if appkey == configures.Config.AppKey {
+	// 		return configures.Config.AppSecret, configures.Config.ImApiDomain, true
+	// 	}
+	// 	return "", "", false
+	// })
 
-	// init IMSDK provider
-	imsdk.RegisterAppInfoProvider(func(appkey string) (string, string, bool) {
-		// For now, use configured default appkey/secret
-		// In production, this could read from database
-		if appkey == configures.Config.AppKey {
-			return configures.Config.AppSecret, configures.Config.ImApiDomain, true
-		}
-		return "", "", false
-	})
-
-	// init Validate secure key provider
-	apis.RegisterSecureKeyProvider(func(appkey string) string {
-		if appkey == configures.Config.AppKey {
-			return configures.Config.AppSecret
-		}
-		return ""
-	})
+	// // init Validate secure key provider
+	// apis.RegisterSecureKeyProvider(func(appkey string) string {
+	// 	if appkey == configures.Config.AppKey {
+	// 		return configures.Config.AppSecret
+	// 	}
+	// 	return ""
+	// })
 
 	// init mysql
-	dbCfg := configures.Config.Mysql
-	if err := dbcommons.InitMysqlWithConfig(dbCfg.User, dbCfg.Password, dbCfg.Address, dbCfg.DbName, dbCfg.Debug); err != nil {
-		fmt.Println("Init Mysql failed.", err)
+	if err := dbcommons.InitMysql(); err != nil {
+		logs.Error("Init Mysql failed.", err)
 		return
 	}
 	// upgrade db

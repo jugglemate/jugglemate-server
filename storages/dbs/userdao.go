@@ -6,6 +6,7 @@ import (
 
 	"github.com/juggleim/jugglemate-server/commons/dbcommons"
 	"github.com/juggleim/jugglemate-server/commons/tools"
+	"github.com/juggleim/jugglemate-server/storages/models"
 	"gorm.io/gorm"
 )
 
@@ -17,6 +18,7 @@ type UserDao struct {
 	LoginAccount string    `gorm:"login_account"`
 	Email        string    `gorm:"email"`
 	LoginPass    string    `gorm:"login_pass"`
+	Role         int       `gorm:"role"`
 	Status       int       `gorm:"status"`
 	ImToken      string    `gorm:"im_token"`
 	CreatedTime  time.Time `gorm:"created_time"`
@@ -28,7 +30,25 @@ func (UserDao) TableName() string {
 	return "users"
 }
 
-func (d *UserDao) FindByAccount(appkey, account string) (*UserDao, error) {
+func (d *UserDao) toModel() *models.User {
+	return &models.User{
+		ID:           d.ID,
+		UserId:       d.UserId,
+		Nickname:     d.Nickname,
+		UserPortrait: d.UserPortrait,
+		LoginAccount: d.LoginAccount,
+		Email:        d.Email,
+		LoginPass:    d.LoginPass,
+		Role:         models.UserRole(d.Role),
+		Status:       d.Status,
+		ImToken:      d.ImToken,
+		CreatedTime:  d.CreatedTime.UnixMilli(),
+		UpdatedTime:  d.UpdatedTime.UnixMilli(),
+		AppKey:       d.AppKey,
+	}
+}
+
+func (d *UserDao) FindByAccount(appkey, account string) (*models.User, error) {
 	var item UserDao
 	err := dbcommons.GetDb().Where("app_key=? and login_account=?", appkey, account).Take(&item).Error
 	if err != nil {
@@ -37,10 +57,10 @@ func (d *UserDao) FindByAccount(appkey, account string) (*UserDao, error) {
 		}
 		return nil, err
 	}
-	return &item, nil
+	return item.toModel(), nil
 }
 
-func (d *UserDao) FindByUserId(appkey, userId string) (*UserDao, error) {
+func (d *UserDao) FindByUserId(appkey, userId string) (*models.User, error) {
 	var item UserDao
 	err := dbcommons.GetDb().Where("app_key=? and user_id=?", appkey, userId).Take(&item).Error
 	if err != nil {
@@ -49,18 +69,36 @@ func (d *UserDao) FindByUserId(appkey, userId string) (*UserDao, error) {
 		}
 		return nil, err
 	}
-	return &item, nil
+	return item.toModel(), nil
 }
 
-func (d *UserDao) Create(item *UserDao) error {
-	// Set times if not already set
-	if item.CreatedTime.IsZero() {
-		item.CreatedTime = time.Now()
+func (d *UserDao) Create(item models.User) error {
+	dao := &UserDao{
+		UserId:       item.UserId,
+		Nickname:     item.Nickname,
+		UserPortrait: item.UserPortrait,
+		LoginAccount: item.LoginAccount,
+		Email:        item.Email,
+		LoginPass:    item.LoginPass,
+		Role:         int(item.Role),
+		Status:       item.Status,
+		ImToken:      item.ImToken,
+		AppKey:       item.AppKey,
 	}
-	if item.UpdatedTime.IsZero() {
-		item.UpdatedTime = time.Now()
+	if item.CreatedTime > 0 {
+		dao.CreatedTime = time.UnixMilli(item.CreatedTime)
+	} else {
+		dao.CreatedTime = time.Now()
 	}
-	return dbcommons.GetDb().Create(item).Error
+	if item.UpdatedTime > 0 {
+		dao.UpdatedTime = time.UnixMilli(item.UpdatedTime)
+	} else {
+		dao.UpdatedTime = time.Now()
+	}
+	if dao.Role == 0 {
+		dao.Role = int(models.UserRoleCustomerService)
+	}
+	return dbcommons.GetDb().Create(dao).Error
 }
 
 func (d *UserDao) UpdateImToken(appkey, userId, imToken string) error {
@@ -72,7 +110,7 @@ func (d *UserDao) UpdateImToken(appkey, userId, imToken string) error {
 		}).Error
 }
 
-func (d *UserDao) FindByAccountWithAppkey(account, appkey string) (*UserDao, error) {
+func (d *UserDao) FindByAccountWithAppkey(account, appkey string) (*models.User, error) {
 	var item UserDao
 	err := dbcommons.GetDb().Where("login_account=? and app_key=?", account, appkey).Take(&item).Error
 	if err != nil {
@@ -81,7 +119,7 @@ func (d *UserDao) FindByAccountWithAppkey(account, appkey string) (*UserDao, err
 		}
 		return nil, err
 	}
-	return &item, nil
+	return item.toModel(), nil
 }
 
 func GenerateUserId() string {

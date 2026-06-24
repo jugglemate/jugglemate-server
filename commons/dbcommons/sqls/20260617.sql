@@ -1,3 +1,71 @@
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` varchar(64) NOT NULL,
+  `nickname` varchar(128) NOT NULL DEFAULT '',
+  `user_portrait` varchar(512) NOT NULL DEFAULT '',
+  `login_account` varchar(64) NOT NULL DEFAULT '',
+  `email` varchar(128) NOT NULL DEFAULT '',
+  `login_pass` varchar(128) NOT NULL DEFAULT '',
+  `role` tinyint NOT NULL DEFAULT 1,
+  `status` int NOT NULL DEFAULT 1,
+  `im_token` varchar(512) NOT NULL DEFAULT '',
+  `created_time` timestamp DEFAULT CURRENT_TIMESTAMP,
+  `updated_time` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `app_key` varchar(64) NOT NULL DEFAULT '',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_app_account` (`app_key`,`login_account`),
+  UNIQUE KEY `uk_app_email` (`app_key`,`email`),
+  UNIQUE KEY `uk_app_userid` (`app_key`,`user_id`),
+  KEY `idx_app_key` (`app_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `customers` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `customer_id` varchar(32) DEFAULT NULL,
+  `nickname` varchar(50) DEFAULT NULL,
+  `avator` varchar(200) DEFAULT NULL,
+  `phone` varchar(50) DEFAULT NULL,
+  `email` varchar(50) DEFAULT NULL,
+  `app_key` varchar(20) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_id` (`app_key`,`customer_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `tickets` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `ticket_id` varchar(50) DEFAULT '',
+  `customer_id` varchar(32) DEFAULT '',
+  `assignee_id` varchar(32) DEFAULT NULL,
+  `status` tinyint DEFAULT 0,
+  `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `app_key` varchar(20) DEFAULT '',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_ticketid` (`app_key`,`ticket_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `apps` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `app_key` varchar(20) DEFAULT '',
+  `app_secret` varchar(50) DEFAULT '',
+  `app_status` tinyint DEFAULT 0,
+  `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `app_name` varchar(100) DEFAULT '',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_appkey` (`app_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `appexts` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `app_key` varchar(20) DEFAULT NULL,
+  `app_item_key` varchar(50) DEFAULT NULL,
+  `app_item_value` varchar(2048) DEFAULT NULL,
+  `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_key` (`app_key`,`app_item_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS `aibots` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `bot_id` varchar(32) DEFAULT NULL,
@@ -12,25 +80,6 @@ CREATE TABLE IF NOT EXISTS `aibots` (
   UNIQUE KEY `uniq_botid` (`app_key`,`bot_id`),
   KEY `idx_owner` (`app_key`,`owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
-CREATE TABLE IF NOT EXISTS `users` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
-  `user_id` varchar(64) NOT NULL,
-  `nickname` varchar(128) NOT NULL DEFAULT '',
-  `user_portrait` varchar(512) NOT NULL DEFAULT '',
-  `login_account` varchar(64) NOT NULL DEFAULT '',
-  `email` varchar(128) NOT NULL DEFAULT '',
-  `login_pass` varchar(128) NOT NULL DEFAULT '',
-  `status` int NOT NULL DEFAULT 1,
-  `im_token` varchar(512) NOT NULL DEFAULT '',
-  `created_time` timestamp DEFAULT CURRENT_TIMESTAMP,
-  `updated_time` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `app_key` varchar(64) NOT NULL DEFAULT '',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_app_account` (`app_key`,`login_account`),
-  UNIQUE KEY `uk_app_userid` (`app_key`,`user_id`),
-  KEY `idx_app_key` (`app_key`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `agent_twins` (
   `id` bigint NOT NULL AUTO_INCREMENT,

@@ -14,7 +14,7 @@ import (
 var sqlFs embed.FS
 
 const (
-	JChatAiDbVersionKey = "Jchataidb_version"
+	JChatAiDbVersionKey = "jmatedb_version"
 )
 
 func Upgrade() {

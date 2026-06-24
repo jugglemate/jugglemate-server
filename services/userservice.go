@@ -11,7 +11,9 @@ import (
 	"github.com/juggleim/jugglemate-server/commons/errs"
 	"github.com/juggleim/jugglemate-server/commons/imsdk"
 	"github.com/juggleim/jugglemate-server/commons/tools"
+	"github.com/juggleim/jugglemate-server/storages"
 	"github.com/juggleim/jugglemate-server/storages/dbs"
+	storageModels "github.com/juggleim/jugglemate-server/storages/models"
 
 	juggleimsdk "github.com/juggleim/imserver-sdk-go"
 )
@@ -38,8 +40,8 @@ func Register(ctx context.Context, account, password string) (errs.IMErrorCode, 
 		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
 	}
 
-	userDao := &dbs.UserDao{}
-	existing, err := userDao.FindByAccountWithAppkey(account, appkey)
+	userStorage := storages.NewUserStorage()
+	existing, err := userStorage.FindByAccountWithAppkey(account, appkey)
 	if err != nil {
 		return errs.IMErrorCode_APP_USER_EXISTED, nil
 	}
@@ -50,15 +52,16 @@ func Register(ctx context.Context, account, password string) (errs.IMErrorCode, 
 	userId := dbs.GenerateUserId()
 	nickname := fmt.Sprintf("user%05d", tools.RandInt(100000))
 
-	user := &dbs.UserDao{
+	user := storageModels.User{
 		UserId:       userId,
 		Nickname:     nickname,
 		LoginAccount: account,
 		LoginPass:    tools.SHA1(password),
+		Role:         storageModels.UserRoleCustomerService,
 		AppKey:       appkey,
 		Status:       1,
 	}
-	if err := userDao.Create(user); err != nil {
+	if err := userStorage.Create(user); err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
 
@@ -91,7 +94,7 @@ func Register(ctx context.Context, account, password string) (errs.IMErrorCode, 
 	}
 
 	// Save IM token
-	_ = userDao.UpdateImToken(appkey, userId, resp.Token)
+	_ = userStorage.UpdateImToken(appkey, userId, resp.Token)
 
 	return errs.IMErrorCode_SUCCESS, &apiModels.LoginResp{
 		UserId:        userId,
@@ -108,8 +111,8 @@ func Login(ctx context.Context, account, password string) (errs.IMErrorCode, *ap
 		return errs.IMErrorCode_APP_NOT_EXISTED, nil
 	}
 
-	userDao := &dbs.UserDao{}
-	user, err := userDao.FindByAccountWithAppkey(account, appkey)
+	userStorage := storages.NewUserStorage()
+	user, err := userStorage.FindByAccountWithAppkey(account, appkey)
 	if err != nil || user == nil {
 		return errs.IMErrorCode_APP_USER_NOT_EXIST, nil
 	}
@@ -136,7 +139,7 @@ func Login(ctx context.Context, account, password string) (errs.IMErrorCode, *ap
 	}
 
 	// Update and return saved IM token
-	_ = userDao.UpdateImToken(appkey, user.UserId, resp.Token)
+	_ = userStorage.UpdateImToken(appkey, user.UserId, resp.Token)
 
 	return errs.IMErrorCode_SUCCESS, &apiModels.LoginResp{
 		UserId:        user.UserId,
