@@ -1,10 +1,10 @@
 import type { CreateUserRequest, UpdateUserRequest, User } from "./schemas";
 
 export const USER_ENDPOINTS = {
-  list: "/api/users",
-  create: "/api/users",
-  update: (id: string) => `/api/users/${id}`,
-  delete: (id: string) => `/api/users/${id}`,
+  list: "/jmate/console/users",
+  create: "/jmate/console/users",
+  update: (id: string) => `/jmate/console/users/${id}`,
+  delete: (id: string) => `/jmate/console/users/${id}`,
 } as const;
 
 export type { CreateUserRequest, UpdateUserRequest, User };

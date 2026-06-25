@@ -8,6 +8,8 @@ import (
 	"math/rand"
 	"strconv"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 )
 
 func BytesToUInt64(buf []byte) uint64 {
@@ -72,6 +74,15 @@ func ToInt(str string) int {
 		return 0
 	}
 	return int(intVal)
+}
+
+func PbMarshal(obj proto.Message) ([]byte, error) {
+	bytes, err := proto.Marshal(obj)
+	return bytes, err
+}
+func PbUnMarshal(bytes []byte, typeScope proto.Message) error {
+	err := proto.Unmarshal(bytes, typeScope)
+	return err
 }
 
 func JsonMarshal(obj interface{}) ([]byte, error) {

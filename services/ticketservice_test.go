@@ -269,6 +269,18 @@ func (s *mockUserStorage) UpdateImToken(appkey, userId, imToken string) error {
 	return nil
 }
 
+func (s *mockUserStorage) QryByApp(appkey string, filter storageModels.UserListFilter, limit, offset int64) (*storageModels.UserListResult, error) {
+	return &storageModels.UserListResult{}, nil
+}
+
+func (s *mockUserStorage) UpdateUser(appkey, userId string, updates storageModels.UserUpdate) error {
+	return nil
+}
+
+func (s *mockUserStorage) Delete(appkey, userId string) error {
+	return nil
+}
+
 type mockCustomerStorage struct {
 	customers map[string]*storageModels.Customer
 	err       error

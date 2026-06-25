@@ -122,6 +122,106 @@ func (d *UserDao) FindByAccountWithAppkey(account, appkey string) (*models.User,
 	return item.toModel(), nil
 }
 
+func (d *UserDao) QryByApp(appkey string, filter models.UserListFilter, limit, offset int64) (*models.UserListResult, error) {
+	db := dbcommons.GetDb().Model(&UserDao{}).Where("app_key = ?", appkey)
+	if filter.Keyword != "" {
+		kw := "%" + filter.Keyword + "%"
+		db = db.Where("login_account LIKE ? OR nickname LIKE ? OR email LIKE ?", kw, kw, kw)
+	}
+	if filter.Role != nil {
+		db = db.Where("role = ?", int(*filter.Role))
+	}
+
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	orderCol := userSortColumn(filter.SortField)
+	orderDir := "DESC"
+	if filter.SortOrder == "ascend" {
+		orderDir = "ASC"
+	}
+
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var items []UserDao
+	err := db.Order(orderCol + " " + orderDir).Limit(int(limit)).Offset(int(offset)).Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+
+	list := make([]*models.User, 0, len(items))
+	for i := range items {
+		list = append(list, items[i].toModel())
+	}
+	return &models.UserListResult{List: list, Total: total}, nil
+}
+
+func userSortColumn(sortField string) string {
+	switch sortField {
+	case "id":
+		return "user_id"
+	case "username":
+		return "login_account"
+	case "email":
+		return "email"
+	case "roles":
+		return "role"
+	default:
+		return "id"
+	}
+}
+
+func (d *UserDao) UpdateUser(appkey, userId string, updates models.UserUpdate) error {
+	fields := map[string]interface{}{
+		"updated_time": time.Now(),
+	}
+	if updates.LoginAccount != nil {
+		fields["login_account"] = *updates.LoginAccount
+	}
+	if updates.Nickname != nil {
+		fields["nickname"] = *updates.Nickname
+	}
+	if updates.Email != nil {
+		fields["email"] = *updates.Email
+	}
+	if updates.Role != nil {
+		fields["role"] = int(*updates.Role)
+	}
+	if updates.LoginPass != nil {
+		fields["login_pass"] = *updates.LoginPass
+	}
+	result := dbcommons.GetDb().Model(&UserDao{}).
+		Where("app_key=? and user_id=?", appkey, userId).
+		Updates(fields)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (d *UserDao) Delete(appkey, userId string) error {
+	result := dbcommons.GetDb().
+		Where("app_key=? and user_id=?", appkey, userId).
+		Delete(&UserDao{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 func GenerateUserId() string {
 	return "u_" + tools.GenerateUUIDShort11()
 }

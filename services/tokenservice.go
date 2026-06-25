@@ -12,20 +12,22 @@ import (
 	"github.com/juggleim/jugglemate-server/services/pbobjs"
 )
 
-type ImToken struct {
+type JmateToken struct {
 	AppKey    string
 	UserId    string
 	DeviceId  string
 	TokenTime int64
+	Role      int32
 }
 
-func (t ImToken) ToTokenString(secureKey []byte) (string, error) {
+func (t JmateToken) ToTokenString(secureKey []byte) (string, error) {
 	tokenValue := &pbobjs.AuthTokenValue{
 		UserId:    t.UserId,
 		DeviceId:  t.DeviceId,
 		TokenTime: t.TokenTime,
+		Role:      t.Role,
 	}
-	tokenBs, err := tools.JsonMarshal(tokenValue)
+	tokenBs, err := tools.PbMarshal(tokenValue)
 	if err == nil {
 		encryptToken, err := encrypt(tokenBs, secureKey)
 		if err == nil {
@@ -33,7 +35,7 @@ func (t ImToken) ToTokenString(secureKey []byte) (string, error) {
 				Appkey:     t.AppKey,
 				TokenValue: encryptToken,
 			}
-			tokenWrapBs, err := tools.JsonMarshal(tokenWrap)
+			tokenWrapBs, err := tools.PbMarshal(tokenWrap)
 			if err == nil {
 				return base64.URLEncoding.EncodeToString(tokenWrapBs), nil
 			}
@@ -44,11 +46,12 @@ func (t ImToken) ToTokenString(secureKey []byte) (string, error) {
 	return "", err
 }
 
-func GenerateToken(appkey, userId string) (string, error) {
-	t := &ImToken{
+func GenerateToken(appkey, userId string, role int32) (string, error) {
+	t := &JmateToken{
 		AppKey:    appkey,
 		UserId:    userId,
 		TokenTime: time.Now().UnixMilli(),
+		Role:      role,
 	}
 	if appinfo, exist := appinfos.GetAppInfo(appkey); exist && appinfo != nil {
 		if appinfo.AppSecret == "" {
@@ -79,20 +82,20 @@ func ParseTokenString(tokenStr string) (*pbobjs.AuthToken, error) {
 		tokenWrapBs, err = base64.StdEncoding.DecodeString(tokenStr)
 	}
 	if err == nil {
-		err = tools.JsonUnMarshal(tokenWrapBs, tokenWrap)
+		err = tools.PbUnMarshal(tokenWrapBs, tokenWrap)
 	}
 	return tokenWrap, err
 }
 
-func ParseToken(tokenWrap *pbobjs.AuthToken, secureKey []byte) (ImToken, error) {
-	token := ImToken{
+func ParseToken(tokenWrap *pbobjs.AuthToken, secureKey []byte) (JmateToken, error) {
+	token := JmateToken{
 		AppKey: tokenWrap.Appkey,
 	}
 	cryptedToken := tokenWrap.TokenValue
 	tokenBs, err := decrypt(cryptedToken, secureKey)
 	if err == nil {
 		tokenValue := &pbobjs.AuthTokenValue{}
-		err = tools.JsonUnMarshal(tokenBs, tokenValue)
+		err = tools.PbUnMarshal(tokenBs, tokenValue)
 		if err != nil {
 			return token, err
 		}
@@ -102,6 +105,7 @@ func ParseToken(tokenWrap *pbobjs.AuthToken, secureKey []byte) (ImToken, error) 
 		token.UserId = tokenValue.UserId
 		token.DeviceId = tokenValue.DeviceId
 		token.TokenTime = tokenValue.TokenTime
+		token.Role = tokenValue.Role
 	}
 	return token, err
 }
@@ -116,7 +120,7 @@ func CheckApiKey(apiKey string, appkey, secureKey string) bool {
 		return false
 	}
 	var apikey pbobjs.ApiKey
-	err = tools.JsonUnMarshal(decodedBs, &apikey)
+	err = tools.PbUnMarshal(decodedBs, &apikey)
 	if err != nil {
 		return false
 	}
@@ -131,7 +135,7 @@ func GenerateApiKey(appkey, secureKey string) (string, error) {
 		Appkey:      appkey,
 		CreatedTime: time.Now().UnixMilli(),
 	}
-	bs, _ := tools.JsonMarshal(apikey)
+	bs, _ := tools.PbMarshal(apikey)
 	encodedBs, err := tools.AesEncrypt(bs, []byte(secureKey))
 	if err != nil {
 		return "", err

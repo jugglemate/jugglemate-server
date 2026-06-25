@@ -1,1 +1,2 @@
-vp staged
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT" && "$ROOT/node_modules/.bin/vp" staged

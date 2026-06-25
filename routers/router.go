@@ -79,4 +79,9 @@ func corsHandler() gin.HandlerFunc {
 
 func RouteConsole(group *gin.RouterGroup) {
 	group.Use(consoleApis.Validate)
+
+	group.GET("/users", consoleApis.QryUsers)
+	group.POST("/users", consoleApis.CreateUser)
+	group.PUT("/users/:user_id", consoleApis.UpdateUser)
+	group.DELETE("/users/:user_id", consoleApis.DeleteUser)
 }

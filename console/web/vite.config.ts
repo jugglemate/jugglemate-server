@@ -43,7 +43,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 1024,
   },
   staged: {
-    "*": "vp check --fix",
+    "src/**/*.{ts,tsx,css}": "vp check --fix",
   },
   lint: { options: { typeAware: true, typeCheck: true } },
 });

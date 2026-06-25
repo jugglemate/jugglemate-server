@@ -167,14 +167,50 @@ const createUserEmailSchema = z
   })
   .pipe(z.union([z.string().email(), z.null()]));
 
+export const UserRoleValueSchema = z.enum(["admin", "customer"]);
+
+export type UserRoleValue = z.infer<typeof UserRoleValueSchema>;
+
+export const USER_ROLE_OPTIONS = [
+  { label: "Admin", value: "admin" as const },
+  { label: "Customer", value: "customer" as const },
+] as const;
+
 export const CreateUserRequestSchema = z.object({
-  username: z.string().min(1),
+  username: z
+    .string()
+    .min(1)
+    .regex(/^[a-zA-Z0-9]{6,20}$/, "Username must be 6-20 letters or digits"),
+  password: z.string().min(6, "Password must be at least 6 characters").optional(),
   email: createUserEmailSchema,
-  roles: z.array(z.string()).min(1),
+  role: UserRoleValueSchema,
 });
 
 export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
 
-export const UpdateUserRequestSchema = CreateUserRequestSchema.partial();
+export const UpdateUserRequestSchema = CreateUserRequestSchema.omit({ password: true }).partial();
 
 export type UpdateUserRequest = z.infer<typeof UpdateUserRequestSchema>;
+
+export function rolesToFormRole(roles: string[]): UserRoleValue {
+  return roles.includes("admin") ? "admin" : "customer";
+}
+
+export function toCreateUserApiBody(values: CreateUserRequest) {
+  return {
+    username: values.username,
+    password: values.password ?? "",
+    email: values.email ?? "",
+    roles: [values.role],
+  };
+}
+
+export function toUpdateUserApiBody(
+  values: Pick<CreateUserRequest, "username" | "email" | "role">,
+) {
+  return {
+    username: values.username,
+    email: values.email ?? "",
+    roles: [values.role],
+  };
+}

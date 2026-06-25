@@ -4,7 +4,14 @@ import type { TablePaginationConfig } from "antd/es/table/interface";
 import { useMemo, useRef, useState } from "react";
 import { httpClient } from "@/utils/http";
 import { USER_ENDPOINTS } from "@/api/user";
-import { PaginatedResponseSchema, UserSchema, CreateUserRequestSchema } from "@/api/schemas";
+import {
+  PaginatedResponseSchema,
+  UserSchema,
+  CreateUserRequestSchema,
+  rolesToFormRole,
+  toCreateUserApiBody,
+  toUpdateUserApiBody,
+} from "@/api/schemas";
 import type { User, CreateUserRequest } from "@/api/schemas";
 import { z } from "zod/v4";
 import { MoreVertical, Pencil, Trash2 } from "lucide-react";
@@ -34,6 +41,13 @@ export const Route = createFileRoute("/_auth/users/")({
 
 const paginatedUserSchema = PaginatedResponseSchema(UserSchema);
 
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  customer: "Customer",
+};
+
+type UserUpdateInput = CreateUserRequest & { id: string; roles: string[] };
+
 function UsersPage() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
@@ -57,7 +71,7 @@ function UsersPage() {
     setSearch,
   });
 
-  const crudToasts = useCrudToasts<CreateUserRequest, CreateUserRequest & { id: string }>({
+  const crudToasts = useCrudToasts<CreateUserRequest, UserUpdateInput>({
     message,
     resourceKey: "users",
   });
@@ -65,7 +79,7 @@ function UsersPage() {
   const { data, isLoading, createMutation, updateMutation, deleteMutation } = useResourceCRUD<
     { list: User[]; total: number },
     CreateUserRequest,
-    CreateUserRequest & { id: string }
+    UserUpdateInput
   >({
     queryKey: [
       "users",
@@ -89,8 +103,12 @@ function UsersPage() {
       }),
     select: (raw) => paginatedUserSchema.shape.data.parse(raw),
     createFn: (values) =>
-      httpClient.post(USER_ENDPOINTS.create, CreateUserRequestSchema.parse(values)),
-    updateFn: ({ id, ...values }) => httpClient.put(USER_ENDPOINTS.update(id), values),
+      httpClient.post(
+        USER_ENDPOINTS.create,
+        toCreateUserApiBody(CreateUserRequestSchema.parse(values)),
+      ),
+    updateFn: ({ id, username, email, role }) =>
+      httpClient.put(USER_ENDPOINTS.update(id), toUpdateUserApiBody({ username, email, role })),
     deleteFn: (id) => httpClient.delete(USER_ENDPOINTS.delete(id)),
     optimistic: { update: true, delete: true },
     createLifecycle: {
@@ -190,7 +208,7 @@ function UsersPage() {
                 },
               }}
             >
-              {role}
+              {ROLE_LABELS[role] ?? role}
             </Tag>
           ))}
         </Space>
@@ -212,7 +230,11 @@ function UsersPage() {
                 label: "Edit",
                 onClick: () => {
                   setEditingUser(record);
-                  form.setFieldsValue(record);
+                  form.setFieldsValue({
+                    username: record.username,
+                    email: record.email,
+                    role: rolesToFormRole(record.roles),
+                  });
                   setModalOpen(true);
                 },
               },
@@ -302,6 +324,7 @@ function UsersPage() {
         onCreateClick={() => {
           setEditingUser(null);
           form.resetFields();
+          form.setFieldsValue({ role: "customer" });
           setModalOpen(true);
         }}
       />
@@ -347,10 +370,15 @@ function UsersPage() {
           form.resetFields();
         }}
         onFinish={(values) => {
+          const parsed = CreateUserRequestSchema.parse(values);
           if (editingUser) {
-            updateMutation.mutate({ ...values, id: editingUser.id });
+            updateMutation.mutate({
+              id: editingUser.id,
+              ...parsed,
+              roles: [parsed.role],
+            });
           } else {
-            createMutation.mutate(values);
+            createMutation.mutate(parsed);
           }
         }}
       />

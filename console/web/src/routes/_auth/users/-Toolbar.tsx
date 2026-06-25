@@ -1,6 +1,7 @@
 import { Button, Input, Select, theme } from "antd";
 import { Plus, UserRound } from "lucide-react";
 import { forwardRef, useMemo } from "react";
+import { USER_ROLE_OPTIONS } from "@/api/schemas";
 import { FilterToolbar } from "@/components/FilterToolbar";
 
 /** Search + role slot `minWidth` for FilterToolbar collapse math */
@@ -58,10 +59,7 @@ export const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(function Toolbar
             prefix={<UserRound size={token.fontSize} />}
             value={roleValue}
             onChange={(v) => onRoleChange(v ?? "")}
-            options={[
-              { label: "Admin", value: "admin" },
-              { label: "Editor", value: "editor" },
-            ]}
+            options={[...USER_ROLE_OPTIONS]}
           />
         ),
       },

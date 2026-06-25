@@ -94,6 +94,7 @@ func Validate(ctx *gin.Context) {
 				return
 			}
 			ctx.Set(string(ctxs.CtxKey_RequesterId), token.UserId)
+			ctx.Set(string(ctxs.CtxKey_RoleType), int(token.Role))
 			ctx.Set(string(ctxs.CtxKey_UserToken), tokenStr)
 		}
 	}
