@@ -266,8 +266,63 @@ curl -X GET 'http://localhost:8080/jmate/tickets/list?status=9' \
 - 仅状态为 `0`（待处理）的工单可以被认领。
 - 认领成功后，将 `assignee_id` 更新为当前用户 ID，状态更新为 `1`（处理中）。
 - 通过 IM SDK 将当前用户加入 `ticket_id` 对应的群组。
+- 加群成功后，向该群组发送一条工单分配通知消息（见下方「认领通知消息」）。
 - 若 IM 加群失败，服务端会回滚认领状态，工单恢复为待处理。
 - 工单不存在、已关闭、处理中或已被他人认领时，返回参数错误。
+
+### 认领通知消息
+
+认领成功且加群完成后，服务端会通过 IM SDK 向工单群组发送一条通知消息，供客户端展示「工单已被认领」等状态变化。
+
+| 属性 | 值 | 说明 |
+| --- | --- | --- |
+| 消息类型 | `jgm:ticketassign` | 工单分配通知 |
+| 发送方 | 当前认领用户 ID | 即 `Authorization` 对应用户 |
+| 接收群 | `ticket_id` | 工单 ID 即 IM 群组 ID |
+| 是否入库 | 是 | `is_storage = true` |
+| 是否计入未读 | 否 | `is_count = false` |
+
+消息体 `msg_content` 为 JSON 字符串，结构如下：
+
+```json
+{
+  "ticket_id": "3xvJK7Xwq2sTnQp6aLm9Z0",
+  "operator": {
+    "id": "u_123",
+    "nickname": "客服 A",
+    "avatar": "https://example.com/agent.png"
+  },
+  "assignee": {
+    "id": "u_123",
+    "nickname": "客服 A",
+    "avatar": "https://example.com/agent.png"
+  },
+  "assign_type": 0
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `ticket_id` | string | 工单 ID |
+| `operator` | object | 操作人信息。认领场景下为当前认领用户 |
+| `operator.id` | string | 操作人用户 ID |
+| `operator.nickname` | string | 操作人昵称 |
+| `operator.avatar` | string | 操作人头像 |
+| `assignee` | object | 被分配客服信息。认领场景下与 `operator` 相同 |
+| `assignee.id` | string | 客服用户 ID |
+| `assignee.nickname` | string | 客服昵称 |
+| `assignee.avatar` | string | 客服头像 |
+| `assign_type` | int | 分配类型。认领固定为 `0` |
+
+`assign_type` 枚举：
+
+| 值 | 说明 |
+| --- | --- |
+| `0` | 认领 |
+| `1` | 指定用户 |
+| `2` | 指定团队 |
+
+通知消息发送失败不影响认领接口的 HTTP 响应；客户端应以认领接口返回的工单数据为准。
 
 ### 请求示例
 
