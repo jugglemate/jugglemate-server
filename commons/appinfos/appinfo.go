@@ -20,11 +20,10 @@ var PostMode_Normal int = 0
 var PostMode_Friend int = 1
 
 type AppInfo struct {
-	AppName      string
-	AppKey       string
-	AppSecret    string
-	AppSecureKey string
-	AppStatus    int
+	AppName   string
+	AppKey    string
+	AppSecret string
+	AppStatus int
 
 	PostMode int // 0:normal；1:friend
 

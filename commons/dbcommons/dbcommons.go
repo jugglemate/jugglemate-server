@@ -18,7 +18,7 @@ func InitMysql() error {
 		configures.Config.Mysql.User,
 		configures.Config.Mysql.Password,
 		configures.Config.Mysql.Address,
-		configures.Config.Mysql.DbName)
+		configures.Config.Mysql.JmateDb)
 	logMode := logger.Silent
 	if configures.Config.Mysql.Debug {
 		logMode = logger.Info

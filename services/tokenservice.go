@@ -3,6 +3,8 @@ package services
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"log"
 	"time"
 
 	"github.com/juggleim/jugglemate-server/commons/appinfos"
@@ -42,17 +44,24 @@ func (t ImToken) ToTokenString(secureKey []byte) (string, error) {
 	return "", err
 }
 
-func GenerateToken(appkey, userId string) string {
-	token := ""
+func GenerateToken(appkey, userId string) (string, error) {
 	t := &ImToken{
 		AppKey:    appkey,
 		UserId:    userId,
 		TokenTime: time.Now().UnixMilli(),
 	}
 	if appinfo, exist := appinfos.GetAppInfo(appkey); exist && appinfo != nil {
-		token, _ = t.ToTokenString([]byte(appinfo.AppSecret))
+		if appinfo.AppSecret == "" {
+			return "", fmt.Errorf("app secret is empty: appkey=%s", appkey)
+		}
+		token, err := t.ToTokenString([]byte(appinfo.AppSecret))
+		if err != nil {
+			log.Printf("[GenerateToken] failed: appkey=%s userId=%s err=%v", appkey, userId, err)
+			return "", err
+		}
+		return token, nil
 	}
-	return token
+	return "", fmt.Errorf("app not found: appkey=%s", appkey)
 }
 
 func encrypt(dataBs, secureKeyBs []byte) ([]byte, error) {

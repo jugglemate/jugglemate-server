@@ -1,0 +1,21 @@
+@supports not (backdrop-filter: blur(1px)) {
+  .login-page__card.ant-card {
+    background: var(--login-card-fallback-bg) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+/* Keep browser autofill from painting a solid background over the glass card. */
+.login-page__card .ant-input:-webkit-autofill,
+.login-page__card .ant-input:-webkit-autofill:hover,
+.login-page__card .ant-input:-webkit-autofill:focus,
+.login-page__card .ant-input-affix-wrapper input:-webkit-autofill,
+.login-page__card .ant-input-affix-wrapper input:-webkit-autofill:hover,
+.login-page__card .ant-input-affix-wrapper input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ant-color-text, currentColor) !important;
+  caret-color: var(--ant-color-text, currentColor);
+  -webkit-box-shadow: 0 0 0 1000px transparent inset !important;
+  box-shadow: 0 0 0 1000px transparent inset !important;
+  transition: background-color 9999s ease-out 0s;
+}

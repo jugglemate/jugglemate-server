@@ -120,8 +120,8 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 
 | code | 说明 |
 |------|------|
-| 17001 | 参数错误（账号格式错误或密码太短） |
-| 17608 | 用户已存在 |
+| 17004 | 参数错误（账号格式错误或密码太短） |
+| 17011 | 用户已存在 |
 
 ---
 
@@ -162,9 +162,9 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 
 | code | 说明 |
 |------|------|
-| 17001 | 参数错误 |
-| 17609 | 用户不存在 |
-| 17610 | 密码错误 |
+| 17004 | 参数错误 |
+| 17012 | 用户不存在 |
+| 17013 | 密码错误 |
 
 ---
 
@@ -220,8 +220,8 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 
 | code | 说明 |
 |------|------|
-| 17001 | 参数错误 |
-| 17601 | 创建分身失败（可能已存在） |
+| 17005 | 参数错误 |
+| 17604 | 创建分身失败（可能已存在） |
 
 ---
 
@@ -275,10 +275,10 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 
 | code | 说明 |
 |------|------|
-| 17001 | 参数错误（缺少 bot_id） |
+| 17005 | 参数错误（缺少 bot_id） |
 | 17602 | 分身不存在 |
 | 17603 | 无权限（非所有者） |
-| 17604 | 更新分身失败 |
+| 17605 | 更新分身失败 |
 
 ---
 
@@ -310,10 +310,10 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 
 | code | 说明 |
 |------|------|
-| 17001 | 参数错误（缺少 bot_id） |
+| 17005 | 参数错误（缺少 bot_id） |
 | 17602 | 分身不存在 |
 | 17603 | 无权限（非所有者） |
-| 17605 | 删除分身失败 |
+| 17606 | 删除分身失败 |
 
 ---
 
@@ -407,10 +407,10 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 
 | code | 说明 |
 |------|------|
-| 17001 | 参数错误 |
+| 17005 | 参数错误 |
 | 17602 | 分身不存在 |
 | 17603 | 无权限（非所有者） |
-| 17606 | 添加素材失败 |
+| 17607 | 添加素材失败 |
 
 ---
 
@@ -480,10 +480,10 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 
 | code | 说明 |
 |------|------|
-| 17001 | 参数错误（缺少 unique_name 或 material_id） |
+| 17005 | 参数错误（缺少 unique_name 或 material_id） |
 | 17602 | 分身不存在 |
 | 17603 | 无权限（非所有者） |
-| 17607 | 删除素材失败 |
+| 17608 | 删除素材失败 |
 
 ---
 
@@ -535,7 +535,7 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 | 17001 | 参数错误（缺少 unique_name） |
 | 17602 | 分身不存在 |
 | 17603 | 无权限（非所有者） |
-| 17600 | 默认错误（无效的 mode） |
+| 17601 | 默认错误（无效的 mode） |
 
 ---
 
@@ -662,7 +662,7 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 |------|------|
 | 17602 | 分身不存在 |
 | 17603 | 无权限（非所有者） |
-| 17604 | 更新分身失败 |
+| 17605 | 更新分身失败 |
 
 ---
 
@@ -789,18 +789,23 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 | code | 常量 | 说明 |
 |------|------|------|
 | 0 | SUCCESS | 成功 |
-| 17001 | APP_ParamError | 参数错误 |
-| 17008 | APP_USER_EXISTED | 用户已存在 |
-| 17009 | APP_USER_NOT_EXIST | 用户不存在 |
-| 17010 | APP_LOGIN_ERR_PASS | 密码错误 |
-| 17600 | AIBOT_DEFAULT | 默认错误 |
-| 17601 | AIBOT_AddBotFailed | 创建分身失败 |
+| 17001 | APP_APPKEY_REQUIRED | 缺少 appkey |
+| 17002 | APP_NOT_EXISTED | 应用不存在 |
+| 17003 | APP_NOT_LOGIN | 未登录或无权限 |
+| 17004 | APP_REQ_BODY_ILLEGAL | 请求体非法 |
+| 17005 | APP_ParamError | 参数错误 |
+| 17006 | APP_INTERNAL_TIMEOUT | 服务内部错误 |
+| 17011 | APP_USER_EXISTED | 用户已存在 |
+| 17012 | APP_USER_NOT_EXIST | 用户不存在 |
+| 17013 | APP_LOGIN_ERR_PASS | 密码错误 |
+| 17601 | AIBOT_DEFAULT | 默认错误 |
 | 17602 | AIBOT_BotNotFound | 分身不存在 |
 | 17603 | AIBOT_NoPermission | 无权限（非所有者） |
-| 17604 | AIBOT_UpdateBotFailed | 更新分身失败 |
-| 17605 | AIBOT_DelBotFailed | 删除分身失败 |
-| 17606 | AIBOT_AddMaterialFailed | 添加素材失败 |
-| 17607 | AIBOT_DelMaterialFailed | 删除素材失败 |
+| 17604 | AIBOT_AddBotFailed | 创建分身失败 |
+| 17605 | AIBOT_UpdateBotFailed | 更新分身失败 |
+| 17606 | AIBOT_DelBotFailed | 删除分身失败 |
+| 17607 | AIBOT_AddMaterialFailed | 添加素材失败 |
+| 17608 | AIBOT_DelMaterialFailed | 删除素材失败 |
 
 ---
 

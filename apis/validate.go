@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/juggleim/jugglemate-server/commons/appinfos"
 	"github.com/juggleim/jugglemate-server/commons/ctxs"
 	"github.com/juggleim/jugglemate-server/commons/errs"
 	"github.com/juggleim/jugglemate-server/commons/responses"
@@ -63,11 +64,13 @@ func Validate(ctx *gin.Context) {
 			return
 		}
 
-		secureKey := GetSecureKey(appkey)
-		if secureKey == "" {
+		var secureKey string = ""
+		if appinfo, exist := appinfos.GetAppInfo(appkey); !exist || appinfo == nil || appinfo.AppSecret == "" {
 			responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_NOT_EXISTED)
 			ctx.Abort()
 			return
+		} else {
+			secureKey = appinfo.AppSecret
 		}
 
 		if strings.HasPrefix(tokenStr, "Bearer ") {
@@ -94,15 +97,4 @@ func Validate(ctx *gin.Context) {
 			ctx.Set(string(ctxs.CtxKey_UserToken), tokenStr)
 		}
 	}
-}
-
-// GetSecureKey returns the secure key for an appkey
-// In production, this should read from database or config
-var GetSecureKey = func(appkey string) string {
-	return ""
-}
-
-// RegisterSecureKeyProvider registers a function to provide secure key for an appkey
-func RegisterSecureKeyProvider(provider func(appkey string) string) {
-	GetSecureKey = provider
 }

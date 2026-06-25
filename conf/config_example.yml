@@ -8,7 +8,7 @@ mysql:
   user: root
   password: 123456
   address: 127.0.0.1:3306
-  name: jmate_db
+  jmateDb: jmate_db
 
 imApiDomain: http://127.0.0.1:9001
 imAdminDomain: http://127.0.0.1:8090

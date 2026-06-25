@@ -1,12 +1,20 @@
 package routers
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/juggleim/jugglemate-server/apis"
 	"github.com/juggleim/jugglemate-server/apis/handlers"
+	consoleApis "github.com/juggleim/jugglemate-server/console/apis"
 )
 
-func Route(group *gin.RouterGroup) {
+func Route(eng *gin.Engine, prefix string) {
+	eng.Use(corsHandler())
+
+	group := eng.Group("/" + prefix)
+	group.Use(apis.Validate)
+
 	group.POST("/user/login", apis.Login)
 	group.POST("/user/register", apis.Register)
 
@@ -44,9 +52,31 @@ func Route(group *gin.RouterGroup) {
 	group.POST("/aibots/sessions/:session_id/feedback", handlers.SubmitFeedback)
 	group.GET("/aibots/:unique_name/sessions", handlers.ListAgentSessions)
 	group.GET("/aibots/:unique_name/feedbacks", handlers.ListAgentFeedbacks)
+
+	RouteConsole(group.Group("/console"))
 }
 
 func RouteMsgCallback(group *gin.RouterGroup) {
 	group.POST("/msgcallback", apis.MsgCallback)
 	group.POST("/forward", apis.MsgCallbackForward)
+}
+
+func corsHandler() gin.HandlerFunc {
+	return func(context *gin.Context) {
+		method := context.Request.Method
+		context.Writer.Header().Add("Access-Control-Allow-Origin", "*")
+		context.Writer.Header().Add("Access-Control-Allow-Headers", "*")
+		context.Writer.Header().Add("Access-Control-Allow-Methods", "POST, GET, OPTIONS, DELETE, PATCH, PUT")
+		context.Writer.Header().Add("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
+		context.Writer.Header().Add("Access-Control-Allow-Credentials", "true")
+
+		if method == "OPTIONS" {
+			context.AbortWithStatus(http.StatusNoContent)
+		}
+		context.Next()
+	}
+}
+
+func RouteConsole(group *gin.RouterGroup) {
+	group.Use(consoleApis.Validate)
 }

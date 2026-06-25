@@ -2,16 +2,15 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/gin-gonic/gin"
-	"github.com/juggleim/jugglemate-server/apis"
 	"github.com/juggleim/jugglemate-server/commons/configures"
 	"github.com/juggleim/jugglemate-server/commons/dbcommons"
 	"github.com/juggleim/jugglemate-server/commons/logs"
+	"github.com/juggleim/jugglemate-server/console"
 	"github.com/juggleim/jugglemate-server/routers"
 )
 
@@ -50,7 +49,8 @@ func main() {
 	dbcommons.Upgrade()
 
 	httpServer := gin.Default()
-	httpServer.Use(corsHandler())
+	routers.Route(httpServer, "jmate")
+	console.LoadConsoleWeb(httpServer)
 
 	// Serve uploaded static files (avatars, etc.) publicly
 	httpServer.Static("/static", "./data")
@@ -58,9 +58,6 @@ func main() {
 	msgCallbackGrp := httpServer.Group("/botmsgs")
 	routers.RouteMsgCallback(msgCallbackGrp)
 
-	group := httpServer.Group("/jmate")
-	group.Use(apis.Validate)
-	routers.Route(group)
 	go httpServer.Run(fmt.Sprintf(":%d", configures.Config.Port))
 
 	closeChan := make(chan struct{})
@@ -73,20 +70,4 @@ func main() {
 	}()
 
 	<-closeChan
-}
-
-func corsHandler() gin.HandlerFunc {
-	return func(context *gin.Context) {
-		method := context.Request.Method
-		context.Writer.Header().Add("Access-Control-Allow-Origin", "*")
-		context.Writer.Header().Add("Access-Control-Allow-Headers", "*")
-		context.Writer.Header().Add("Access-Control-Allow-Methods", "POST, GET, OPTIONS, DELETE, PATCH, PUT")
-		context.Writer.Header().Add("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
-		context.Writer.Header().Add("Access-Control-Allow-Credentials", "true")
-
-		if method == "OPTIONS" {
-			context.AbortWithStatus(http.StatusNoContent)
-		}
-		context.Next()
-	}
 }

@@ -94,11 +94,17 @@ func Register(ctx context.Context, account, password string) (errs.IMErrorCode, 
 	// Save IM token
 	_ = userStorage.UpdateImToken(appkey, userId, resp.Token)
 
+	authorization, err := GenerateToken(appkey, userId)
+	if err != nil {
+		fmt.Printf("[Register] GenerateToken failed: appkey=%s, userId=%s, err=%v\n", appkey, userId, err)
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+
 	return errs.IMErrorCode_SUCCESS, &apiModels.LoginResp{
 		UserId:        userId,
 		NickName:      nickname,
 		Avatar:        "",
-		Authorization: GenerateToken(appkey, userId),
+		Authorization: authorization,
 		ImToken:       resp.Token,
 	}
 }
@@ -139,11 +145,16 @@ func Login(ctx context.Context, account, password string) (errs.IMErrorCode, *ap
 	// Update and return saved IM token
 	_ = userStorage.UpdateImToken(appkey, user.UserId, resp.Token)
 
+	authorization, err := GenerateToken(appkey, user.UserId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+
 	return errs.IMErrorCode_SUCCESS, &apiModels.LoginResp{
 		UserId:        user.UserId,
 		NickName:      user.Nickname,
 		Avatar:        user.Avator,
-		Authorization: GenerateToken(appkey, user.UserId),
+		Authorization: authorization,
 		ImToken:       resp.Token,
 	}
 }

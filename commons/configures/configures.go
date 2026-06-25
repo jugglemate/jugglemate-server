@@ -18,7 +18,7 @@ type AppConfig struct {
 		User     string `yaml:"user"`
 		Password string `yaml:"password"`
 		Address  string `yaml:"address"`
-		DbName   string `yaml:"name"`
+		JmateDb  string `yaml:"jmateDb"`
 		Debug    bool   `yaml:"debug"`
 	} `yaml:"mysql"`
 
