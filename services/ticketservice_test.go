@@ -138,6 +138,14 @@ func TestClaimTicketSuccess(t *testing.T) {
 	})
 	defer restore()
 
+	var notifyCount int
+	sendTicketAssignedNtfMsgForClaim = func(_ context.Context, msg *TicketAssignedNtfMsg) {
+		notifyCount++
+		if msg.TicketId != "t_1" || msg.AssignType != AssignType_Claim {
+			t.Fatalf("notify msg = %+v", msg)
+		}
+	}
+
 	code, resp := ClaimTicket(ticketTestContext("app_1", "u_1"), "t_1")
 	if code != errs.IMErrorCode_SUCCESS {
 		t.Fatalf("ClaimTicket code = %d, want success", code)
@@ -147,6 +155,9 @@ func TestClaimTicketSuccess(t *testing.T) {
 	}
 	if resp.Ticket == nil || resp.Ticket.TicketId != "t_1" || resp.Ticket.Status != int(storageModels.TicketStatusProcessing) {
 		t.Fatalf("ticket = %+v, want processing t_1", resp.Ticket)
+	}
+	if notifyCount != 1 {
+		t.Fatalf("notifyCount = %d, want 1", notifyCount)
 	}
 }
 

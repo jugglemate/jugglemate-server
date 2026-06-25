@@ -4,6 +4,7 @@ import {
   AuthUserResponseSchema,
   JmateLoginResponseSchema,
   PermissionsListSchema,
+  roleNumberToRoles,
   UserSchema,
   type JmateLoginResponse,
 } from "@/api/schemas";
@@ -26,7 +27,7 @@ export function applyLoginSession(data: JmateLoginResponse): void {
     username: login.nickname || login.user_id,
     avatar: login.avatar || null,
     email: null,
-    roles: ["admin"],
+    roles: roleNumberToRoles(login.role),
     permissions,
   });
   setMenus(filterMenuTreeByPermissions(APP_MENU_TREE, permissions));

@@ -104,6 +104,7 @@ func Register(ctx context.Context, account, password string) (errs.IMErrorCode, 
 		UserId:        userId,
 		NickName:      nickname,
 		Avatar:        "",
+		Role:          int(user.Role),
 		Authorization: authorization,
 		ImToken:       resp.Token,
 	}
@@ -154,6 +155,7 @@ func Login(ctx context.Context, account, password string) (errs.IMErrorCode, *ap
 		UserId:        user.UserId,
 		NickName:      user.Nickname,
 		Avatar:        user.Avator,
+		Role:          int(user.Role),
 		Authorization: authorization,
 		ImToken:       resp.Token,
 	}

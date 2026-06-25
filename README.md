@@ -76,6 +76,7 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
 | user_id | string | 用户 ID |
 | nick_name | string | 用户昵称 |
 | avatar | string | 头像 URL |
+| role | int | 用户角色：`1` 客服，`2` 管理员 |
 | authorization | string | JWT 认证 Token |
 | im_token | string | JuggleIM 连接 Token |
 
@@ -108,6 +109,7 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
     "user_id": "u_xxx",
     "nick_name": "user12345",
     "avatar": "",
+    "role": 1,
     "authorization": "jwt_token",
     "im_token": "juggleim_token"
   }
@@ -150,6 +152,7 @@ JuggleChat 分身 AI 服务的 HTTP API 文档。
     "user_id": "u_xxx",
     "nick_name": "user12345",
     "avatar": "",
+    "role": 1,
     "authorization": "jwt_token",
     "im_token": "juggleim_token"
   }

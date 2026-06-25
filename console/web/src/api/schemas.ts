@@ -33,6 +33,7 @@ export const JmateLoginResponseSchema = z.object({
   user_id: z.string(),
   nickname: z.string(),
   avatar: z.string(),
+  role: z.number().int(),
   authorization: z.string().min(1),
   im_token: z.string().optional().default(""),
 });
@@ -194,6 +195,10 @@ export type UpdateUserRequest = z.infer<typeof UpdateUserRequestSchema>;
 
 export function rolesToFormRole(roles: string[]): UserRoleValue {
   return roles.includes("admin") ? "admin" : "customer";
+}
+
+export function roleNumberToRoles(role: number): UserRoleValue[] {
+  return role === 2 ? ["admin"] : ["customer"];
 }
 
 export function toCreateUserApiBody(values: CreateUserRequest) {
