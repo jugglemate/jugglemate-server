@@ -14,7 +14,7 @@ type UserDao struct {
 	ID           int64     `gorm:"primary_key"`
 	UserId       string    `gorm:"user_id"`
 	Nickname     string    `gorm:"nickname"`
-	UserPortrait string    `gorm:"user_portrait"`
+	Avator       string    `gorm:"avator"`
 	LoginAccount string    `gorm:"login_account"`
 	Email        string    `gorm:"email"`
 	LoginPass    string    `gorm:"login_pass"`
@@ -35,7 +35,7 @@ func (d *UserDao) toModel() *models.User {
 		ID:           d.ID,
 		UserId:       d.UserId,
 		Nickname:     d.Nickname,
-		UserPortrait: d.UserPortrait,
+		Avator:       d.Avator,
 		LoginAccount: d.LoginAccount,
 		Email:        d.Email,
 		LoginPass:    d.LoginPass,
@@ -76,7 +76,7 @@ func (d *UserDao) Create(item models.User) error {
 	dao := &UserDao{
 		UserId:       item.UserId,
 		Nickname:     item.Nickname,
-		UserPortrait: item.UserPortrait,
+		Avator:       item.Avator,
 		LoginAccount: item.LoginAccount,
 		Email:        item.Email,
 		LoginPass:    item.LoginPass,

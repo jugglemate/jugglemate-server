@@ -11,7 +11,7 @@ type User struct {
 	ID           int64
 	UserId       string
 	Nickname     string
-	UserPortrait string
+	Avator       string
 	LoginAccount string
 	Email        string
 	LoginPass    string

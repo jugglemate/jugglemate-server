@@ -58,7 +58,7 @@ func main() {
 	msgCallbackGrp := httpServer.Group("/botmsgs")
 	routers.RouteMsgCallback(msgCallbackGrp)
 
-	group := httpServer.Group("/jim")
+	group := httpServer.Group("/jmate")
 	group.Use(apis.Validate)
 	routers.Route(group)
 	go httpServer.Run(fmt.Sprintf(":%d", configures.Config.Port))

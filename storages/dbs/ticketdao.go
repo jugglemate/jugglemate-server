@@ -13,7 +13,9 @@ import (
 type TicketDao struct {
 	ID          int64     `gorm:"primary_key"`
 	TicketId    string    `gorm:"ticket_id"`
+	SourceId    string    `gorm:"source_id"`
 	CustomerId  string    `gorm:"customer_id"`
+	ChannelId   string    `gorm:"channel_id"`
 	AssigneeId  string    `gorm:"assignee_id"`
 	Status      int       `gorm:"status"`
 	CreatedTime time.Time `gorm:"created_time"`
@@ -29,7 +31,9 @@ func (d *TicketDao) toModel() *models.Ticket {
 	return &models.Ticket{
 		ID:          d.ID,
 		TicketId:    d.TicketId,
+		SourceId:    d.SourceId,
 		CustomerId:  d.CustomerId,
+		ChannelId:   d.ChannelId,
 		AssigneeId:  d.AssigneeId,
 		Status:      models.TicketStatus(d.Status),
 		CreatedTime: d.CreatedTime.UnixMilli(),
@@ -41,7 +45,9 @@ func (d *TicketDao) toModel() *models.Ticket {
 func newTicketDao(item models.Ticket) *TicketDao {
 	dao := &TicketDao{
 		TicketId:   item.TicketId,
+		SourceId:   item.SourceId,
 		CustomerId: item.CustomerId,
+		ChannelId:  item.ChannelId,
 		AssigneeId: item.AssigneeId,
 		Status:     int(item.Status),
 		AppKey:     item.AppKey,
@@ -76,6 +82,8 @@ func (d *TicketDao) Update(item models.Ticket) error {
 		Where("app_key=? and ticket_id=?", item.AppKey, item.TicketId).
 		Updates(map[string]interface{}{
 			"customer_id":  item.CustomerId,
+			"source_id":    item.SourceId,
+			"channel_id":   item.ChannelId,
 			"assignee_id":  item.AssigneeId,
 			"status":       int(item.Status),
 			"updated_time": time.Now(),
@@ -95,6 +103,8 @@ func (d *TicketDao) Upsert(item models.Ticket) error {
 		Columns: []clause.Column{{Name: "app_key"}, {Name: "ticket_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"customer_id",
+			"source_id",
+			"channel_id",
 			"assignee_id",
 			"status",
 			"updated_time",
@@ -122,6 +132,39 @@ func (d *TicketDao) FindByTicketId(appkey, ticketId string) (*models.Ticket, err
 	return item.toModel(), nil
 }
 
+func (d *TicketDao) FindBySource(appkey, sourceId string) (*models.Ticket, error) {
+	var item TicketDao
+	err := dbcommons.GetDb().
+		Where("app_key=? and source_id=?", appkey, sourceId).
+		Order("id desc").
+		Take(&item).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return item.toModel(), nil
+}
+
+func (d *TicketDao) QryAll(appkey string, status *models.TicketStatus, limit, offset int64) ([]*models.Ticket, error) {
+	db := dbcommons.GetDb().Where("app_key=?", appkey)
+	if status != nil {
+		db = db.Where("status=?", int(*status))
+	}
+	return queryTicketsWithOffset(db, limit, offset)
+}
+
+func (d *TicketDao) QryVisible(appkey, assigneeId string, status *models.TicketStatus, limit, offset int64) ([]*models.Ticket, error) {
+	db := dbcommons.GetDb().
+		Where("app_key=?", appkey).
+		Where("(status=? or assignee_id=?)", int(models.TicketStatusPending), assigneeId)
+	if status != nil {
+		db = db.Where("status=?", int(*status))
+	}
+	return queryTicketsWithOffset(db, limit, offset)
+}
+
 func (d *TicketDao) QryByCustomer(appkey, customerId string, startId, limit int64) ([]*models.Ticket, error) {
 	db := dbcommons.GetDb().Where("app_key=? and customer_id=?", appkey, customerId)
 	if startId > 0 {
@@ -141,6 +184,28 @@ func (d *TicketDao) QryByAssignee(appkey, assigneeId string, status int, startId
 	return queryTickets(db, limit)
 }
 
+func (d *TicketDao) QryByChannel(appkey, channelId string, status int, startId, limit int64) ([]*models.Ticket, error) {
+	db := dbcommons.GetDb().Where("app_key=? and channel_id=?", appkey, channelId)
+	if status >= 0 {
+		db = db.Where("status=?", status)
+	}
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	return queryTickets(db, limit)
+}
+
+func (d *TicketDao) QryBySource(appkey, sourceId string, status int, startId, limit int64) ([]*models.Ticket, error) {
+	db := dbcommons.GetDb().Where("app_key=? and source_id=?", appkey, sourceId)
+	if status >= 0 {
+		db = db.Where("status=?", status)
+	}
+	if startId > 0 {
+		db = db.Where("id<?", startId)
+	}
+	return queryTickets(db, limit)
+}
+
 func (d *TicketDao) UpdateStatus(appkey, ticketId string, status models.TicketStatus) error {
 	return dbcommons.GetDb().Model(&TicketDao{}).
 		Where("app_key=? and ticket_id=?", appkey, ticketId).
@@ -151,11 +216,18 @@ func (d *TicketDao) UpdateStatus(appkey, ticketId string, status models.TicketSt
 }
 
 func queryTickets(db *gorm.DB, limit int64) ([]*models.Ticket, error) {
+	return queryTicketsWithOffset(db, limit, 0)
+}
+
+func queryTicketsWithOffset(db *gorm.DB, limit, offset int64) ([]*models.Ticket, error) {
 	if limit <= 0 {
 		limit = 20
 	}
+	if offset < 0 {
+		offset = 0
+	}
 	var items []TicketDao
-	err := db.Order("id desc").Limit(int(limit)).Find(&items).Error
+	err := db.Order("id desc").Limit(int(limit)).Offset(int(offset)).Find(&items).Error
 	if err != nil {
 		return nil, err
 	}

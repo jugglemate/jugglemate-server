@@ -10,6 +10,10 @@ func Route(group *gin.RouterGroup) {
 	group.POST("/user/login", apis.Login)
 	group.POST("/user/register", apis.Register)
 
+	group.POST("/customers/start", apis.StartWebCustom)
+
+	group.GET("/tickets/list", apis.QryTickets)
+
 	group.POST("/aibots/add", apis.CreateAiBot)
 	group.POST("/aibots/update", apis.UpdateAiBot)
 	group.POST("/aibots/remove", apis.RemoveAiBot)

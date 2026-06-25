@@ -20,8 +20,9 @@ const (
 
 // SkipAuthPaths paths that don't require authentication
 var SkipAuthPaths = []string{
-	"/jim/user/register",
-	"/jim/user/login",
+	"/jmate/user/register",
+	"/jmate/user/login",
+	"/jmate/customers/start",
 }
 
 func Validate(ctx *gin.Context) {

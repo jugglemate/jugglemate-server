@@ -25,6 +25,10 @@ func NewCustomerStorage() models.ICustomerStorage {
 	return &dbs.CustomerDao{}
 }
 
+func NewCustomerChannelRelStorage() models.ICustomerChannelRelStorage {
+	return &dbs.CustomerChannelRelDao{}
+}
+
 func NewTicketStorage() models.ITicketStorage {
 	return &dbs.TicketDao{}
 }

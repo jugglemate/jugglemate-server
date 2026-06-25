@@ -73,7 +73,6 @@ func Register(ctx context.Context, account, password string) (errs.IMErrorCode, 
 		return errs.IMErrorCode_APP_NOT_EXISTED, nil
 	}
 	fmt.Printf("[Register] GetImSdk success, calling Register API\n")
-	fmt.Printf("[Register] IM server: %s\n", imsdk.GetServerInfo(appkey))
 	resp, code, _, err := sdk.Register(juggleimsdk.User{
 		UserId:       userId,
 		Nickname:     nickname,
@@ -129,7 +128,7 @@ func Login(ctx context.Context, account, password string) (errs.IMErrorCode, *ap
 	resp, code, _, err := sdk.Register(juggleimsdk.User{
 		UserId:       user.UserId,
 		Nickname:     user.Nickname,
-		UserPortrait: user.UserPortrait,
+		UserPortrait: user.Avator,
 	})
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
@@ -144,7 +143,7 @@ func Login(ctx context.Context, account, password string) (errs.IMErrorCode, *ap
 	return errs.IMErrorCode_SUCCESS, &apiModels.LoginResp{
 		UserId:        user.UserId,
 		NickName:      user.Nickname,
-		Avatar:        user.UserPortrait,
+		Avatar:        user.Avator,
 		Authorization: GenerateToken(appkey, user.UserId, configures.Config.AppSecret),
 		ImToken:       resp.Token,
 	}

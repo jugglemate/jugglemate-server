@@ -1,17 +1,17 @@
 CREATE TABLE IF NOT EXISTS `users` (
   `id` bigint NOT NULL AUTO_INCREMENT,
-  `user_id` varchar(64) NOT NULL,
-  `nickname` varchar(128) NOT NULL DEFAULT '',
-  `user_portrait` varchar(512) NOT NULL DEFAULT '',
+  `user_id` varchar(32) NOT NULL,
+  `nickname` varchar(50) NOT NULL DEFAULT '',
+  `avator` varchar(200) NOT NULL DEFAULT '',
   `login_account` varchar(64) NOT NULL DEFAULT '',
   `email` varchar(128) NOT NULL DEFAULT '',
   `login_pass` varchar(128) NOT NULL DEFAULT '',
   `role` tinyint NOT NULL DEFAULT 1,
   `status` int NOT NULL DEFAULT 1,
   `im_token` varchar(512) NOT NULL DEFAULT '',
-  `created_time` timestamp DEFAULT CURRENT_TIMESTAMP,
-  `updated_time` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `app_key` varchar(64) NOT NULL DEFAULT '',
+  `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `app_key` varchar(20) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_app_account` (`app_key`,`login_account`),
   UNIQUE KEY `uk_app_email` (`app_key`,`email`),
@@ -26,16 +26,32 @@ CREATE TABLE IF NOT EXISTS `customers` (
   `avator` varchar(200) DEFAULT NULL,
   `phone` varchar(50) DEFAULT NULL,
   `email` varchar(50) DEFAULT NULL,
+  `identifier` varchar(255) DEFAULT NULL,
+  `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `app_key` varchar(20) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_id` (`app_key`,`customer_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS `customerchannelrels` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `customer_id` varchar(32) DEFAULT '',
+  `channel_id` varchar(32) DEFAULT '',
+  `source_id` varchar(32) DEFAULT '',
+  `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `app_key` varchar(20) DEFAULT '',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS `tickets` (
   `id` int NOT NULL AUTO_INCREMENT,
   `ticket_id` varchar(50) DEFAULT '',
-  `customer_id` varchar(32) DEFAULT '',
+  `source_id` varchar(32) DEFAULT '',
   `assignee_id` varchar(32) DEFAULT NULL,
+  `customer_id` varchar(32) DEFAULT '',
+  `channel_id` varchar(32) DEFAULT '',
   `status` tinyint DEFAULT 0,
   `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
   `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
