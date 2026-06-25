@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/juggleim/jugglemate-server/commons/appinfos"
 	"github.com/juggleim/jugglemate-server/commons/tools"
 	"github.com/juggleim/jugglemate-server/services/pbobjs"
 )
@@ -41,15 +42,15 @@ func (t ImToken) ToTokenString(secureKey []byte) (string, error) {
 	return "", err
 }
 
-func GenerateToken(appkey, userId string, secureKey string) string {
+func GenerateToken(appkey, userId string) string {
 	token := ""
 	t := &ImToken{
 		AppKey:    appkey,
 		UserId:    userId,
 		TokenTime: time.Now().UnixMilli(),
 	}
-	if secureKey != "" {
-		token, _ = t.ToTokenString([]byte(secureKey))
+	if appinfo, exist := appinfos.GetAppInfo(appkey); exist && appinfo != nil {
+		token, _ = t.ToTokenString([]byte(appinfo.AppSecret))
 	}
 	return token
 }

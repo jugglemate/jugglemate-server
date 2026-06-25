@@ -22,17 +22,13 @@ type AppConfig struct {
 		Debug    bool   `yaml:"debug"`
 	} `yaml:"mysql"`
 
-	ImApiDomain    string `yaml:"imApiDomain"`
+	ImApiDomain   string `yaml:"imApiDomain"`
 	ImAdminDomain string `yaml:"imAdminDomain"`
 
 	AiBotCallbackUrl string `yaml:"aiBotCallbackUrl"`
 
 	// OSS 统一上传配置
 	Oss OssConfig `yaml:"oss"`
-
-	// AppKey 配置
-	AppKey    string `yaml:"appkey"`
-	AppSecret string `yaml:"appSecret"`
 }
 
 // OssConfig 阿里云 OSS 上传配置
