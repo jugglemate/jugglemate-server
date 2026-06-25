@@ -35,4 +35,6 @@ type ITicketStorage interface {
 	QryByChannel(appkey, channelId string, status int, startId, limit int64) ([]*Ticket, error)
 	QryBySource(appkey, sourceId string, status int, startId, limit int64) ([]*Ticket, error)
 	UpdateStatus(appkey, ticketId string, status TicketStatus) error
+	ClaimIfPending(appkey, ticketId, assigneeId string) (*Ticket, error)
+	RevertClaimIfAssignee(appkey, ticketId, assigneeId string) error
 }

@@ -11,6 +11,20 @@ import (
 	"github.com/juggleim/jugglemate-server/services"
 )
 
+func ClaimTicket(ctx *gin.Context) {
+	ticketId := ctx.Param("ticket_id")
+	if ticketId == "" {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	code, resp := services.ClaimTicket(ctxs.ToCtx(ctx), ticketId)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, resp)
+}
+
 func QryTickets(ctx *gin.Context) {
 	req, ok := parseQryTicketsReq(ctx)
 	if !ok {

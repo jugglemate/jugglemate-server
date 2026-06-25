@@ -215,6 +215,33 @@ func (d *TicketDao) UpdateStatus(appkey, ticketId string, status models.TicketSt
 		}).Error
 }
 
+func (d *TicketDao) ClaimIfPending(appkey, ticketId, assigneeId string) (*models.Ticket, error) {
+	result := dbcommons.GetDb().Model(&TicketDao{}).
+		Where("app_key=? and ticket_id=? and status=?", appkey, ticketId, int(models.TicketStatusPending)).
+		Updates(map[string]interface{}{
+			"assignee_id":  assigneeId,
+			"status":       int(models.TicketStatusProcessing),
+			"updated_time": time.Now(),
+		})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+	return d.FindByTicketId(appkey, ticketId)
+}
+
+func (d *TicketDao) RevertClaimIfAssignee(appkey, ticketId, assigneeId string) error {
+	return dbcommons.GetDb().Model(&TicketDao{}).
+		Where("app_key=? and ticket_id=? and assignee_id=? and status=?", appkey, ticketId, assigneeId, int(models.TicketStatusProcessing)).
+		Updates(map[string]interface{}{
+			"assignee_id":  "",
+			"status":       int(models.TicketStatusPending),
+			"updated_time": time.Now(),
+		}).Error
+}
+
 func queryTickets(db *gorm.DB, limit int64) ([]*models.Ticket, error) {
 	return queryTicketsWithOffset(db, limit, 0)
 }

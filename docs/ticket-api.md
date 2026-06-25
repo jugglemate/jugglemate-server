@@ -230,3 +230,117 @@ curl -X GET 'http://localhost:8080/jmate/tickets/list?status=9' \
   "msg": ""
 }
 ```
+
+## 认领工单
+
+将待处理工单分配给当前登录用户，并将该用户加入工单对应的 IM 群组。
+
+### 请求
+
+`POST /jmate/tickets/:ticket_id/claim`
+
+该接口需要登录。
+
+### Headers
+
+| 名称 | 必填 | 说明 |
+| --- | --- | --- |
+| `appkey` | 是 | 当前应用的 appkey |
+| `Authorization` | 是 | 用户登录 token |
+
+### Path 参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `ticket_id` | string | 是 | 要认领的工单 ID，同时作为 IM 群组 ID |
+
+### 权限规则
+
+| 用户角色 | 是否可认领 |
+| --- | --- |
+| 普通客服用户 | 是 |
+| 管理员 | 是 |
+
+### 处理规则
+
+- 仅状态为 `0`（待处理）的工单可以被认领。
+- 认领成功后，将 `assignee_id` 更新为当前用户 ID，状态更新为 `1`（处理中）。
+- 通过 IM SDK 将当前用户加入 `ticket_id` 对应的群组。
+- 若 IM 加群失败，服务端会回滚认领状态，工单恢复为待处理。
+- 工单不存在、已关闭、处理中或已被他人认领时，返回参数错误。
+
+### 请求示例
+
+```bash
+curl -X POST 'http://localhost:8080/jmate/tickets/3xvJK7Xwq2sTnQp6aLm9Z0/claim' \
+  -H 'appkey: app_xxx' \
+  -H 'Authorization: user-token'
+```
+
+### 成功响应
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "ticket": {
+      "ticket_id": "3xvJK7Xwq2sTnQp6aLm9Z0",
+      "source_id": "customer_8mQz6RkV2pXnT4bYcS1aE9",
+      "customer_id": "7nKs4PmQ1xZaT8VcY2eR0b",
+      "customer": {
+        "id": "7nKs4PmQ1xZaT8VcY2eR0b",
+        "nickname": "Alice",
+        "avatar": "https://example.com/customer.png"
+      },
+      "channel_id": "web",
+      "assignee_id": "u_123",
+      "assignee": {
+        "id": "u_123",
+        "nickname": "客服 A",
+        "avatar": "https://example.com/agent.png"
+      },
+      "status": 1,
+      "created_time": 1782360000000,
+      "updated_time": 1782360600000
+    }
+  }
+}
+```
+
+### 响应字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `ticket` | object | 认领后的工单信息 |
+| `ticket.ticket_id` | string | 工单 ID |
+| `ticket.source_id` | string | 访客渠道身份 ID |
+| `ticket.customer_id` | string | 访客 ID |
+| `ticket.customer` | object/null | 访客信息 |
+| `ticket.channel_id` | string | 渠道 ID，例如 `web` |
+| `ticket.assignee_id` | string | 认领后的客服用户 ID，即当前用户 |
+| `ticket.assignee` | object/null | 认领后的客服用户信息 |
+| `ticket.status` | int | 工单状态。认领成功后为 `1`（处理中） |
+| `ticket.created_time` | int64 | 创建时间，毫秒时间戳 |
+| `ticket.updated_time` | int64 | 更新时间，毫秒时间戳 |
+
+### 错误示例
+
+工单不存在或不是待处理状态：
+
+```bash
+curl -X POST 'http://localhost:8080/jmate/tickets/not-exist/claim' \
+  -H 'appkey: app_xxx' \
+  -H 'Authorization: user-token'
+```
+
+响应：
+
+```json
+{
+  "code": 17017,
+  "msg": ""
+}
+```
+
+IM 加群失败时，认领状态会回滚，并返回对应错误码（例如 `17004` 服务内部错误）。

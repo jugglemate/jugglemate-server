@@ -22,3 +22,7 @@ type TicketInfo struct {
 type QryTicketsResp struct {
 	Items []*TicketInfo `json:"items"`
 }
+
+type ClaimTicketResp struct {
+	Ticket *TicketInfo `json:"ticket"`
+}

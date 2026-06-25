@@ -3,9 +3,11 @@ package services
 import (
 	"context"
 
+	juggleimsdk "github.com/juggleim/imserver-sdk-go"
 	apiModels "github.com/juggleim/jugglemate-server/apis/models"
 	"github.com/juggleim/jugglemate-server/commons/ctxs"
 	"github.com/juggleim/jugglemate-server/commons/errs"
+	"github.com/juggleim/jugglemate-server/commons/imsdk"
 	"github.com/juggleim/jugglemate-server/storages"
 	storageModels "github.com/juggleim/jugglemate-server/storages/models"
 )
@@ -14,6 +16,11 @@ var (
 	newUserStorageForTicket     = storages.NewUserStorage
 	newCustomerStorageForTicket = storages.NewCustomerStorage
 	newTicketStorageForQuery    = storages.NewTicketStorage
+	getImSdkForTicketClaim      = imsdk.GetImSdk
+	groupAddMembersForClaim     = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.GroupMembersReq) (juggleimsdk.ApiCode, string, error) {
+		return sdk.GroupAddMembers(req)
+	}
+	sendTicketAssignedNtfMsgForClaim = SendTicketAssignedNtfMsg
 )
 
 func QryTickets(ctx context.Context, req *apiModels.QryTicketsReq) (errs.IMErrorCode, *apiModels.QryTicketsResp) {
@@ -55,6 +62,72 @@ func QryTickets(ctx context.Context, req *apiModels.QryTicketsReq) (errs.IMError
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
 	return errs.IMErrorCode_SUCCESS, resp
+}
+
+func ClaimTicket(ctx context.Context, ticketId string) (errs.IMErrorCode, *apiModels.ClaimTicketResp) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	requesterId := ctxs.GetRequesterIdFromCtx(ctx)
+	if appkey == "" || requesterId == "" || ticketId == "" {
+		return errs.IMErrorCode_APP_NOT_LOGIN, nil
+	}
+
+	user, err := newUserStorageForTicket().FindByUserId(appkey, requesterId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if user == nil {
+		return errs.IMErrorCode_APP_USER_NOT_EXIST, nil
+	}
+	switch user.Role {
+	case storageModels.UserRoleAdmin, storageModels.UserRoleCustomerService:
+	default:
+		return errs.IMErrorCode_APP_NOT_LOGIN, nil
+	}
+
+	ticketStorage := newTicketStorageForQuery()
+	ticket, err := ticketStorage.ClaimIfPending(appkey, ticketId, requesterId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if ticket == nil {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+
+	sdk := getImSdkForTicketClaim(appkey)
+	if sdk == nil {
+		_ = ticketStorage.RevertClaimIfAssignee(appkey, ticketId, requesterId)
+		return errs.IMErrorCode_APP_NOT_EXISTED, nil
+	}
+	code, _, err := groupAddMembersForClaim(sdk, juggleimsdk.GroupMembersReq{
+		GroupId:   ticketId,
+		MemberIds: []string{requesterId},
+	})
+	if err != nil {
+		_ = ticketStorage.RevertClaimIfAssignee(appkey, ticketId, requesterId)
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
+		_ = ticketStorage.RevertClaimIfAssignee(appkey, ticketId, requesterId)
+		return errs.IMErrorCode(code), nil
+	}
+
+	resp, err := ticketsToAPI(appkey, []*storageModels.Ticket{ticket})
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if len(resp.Items) == 0 {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	ticketInfo := resp.Items[0]
+	sendTicketAssignedNtfMsgForClaim(ctx, &TicketAssignedNtfMsg{
+		TicketId:   ticketId,
+		Operator:   ticketInfo.Assignee,
+		Assignee:   ticketInfo.Assignee,
+		AssignType: AssignType_Claim,
+	})
+	return errs.IMErrorCode_SUCCESS, &apiModels.ClaimTicketResp{
+		Ticket: ticketInfo,
+	}
 }
 
 func toTicketStatus(status *int) (*storageModels.TicketStatus, bool) {
