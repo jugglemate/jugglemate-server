@@ -1,4 +1,5 @@
 import { httpClient } from "@/utils/http";
+import i18n from "@/i18n";
 import {
   CreateTelegramInboxRequestSchema,
   CreateWidgetInboxRequestSchema,
@@ -47,14 +48,16 @@ export async function replaceInboxMembers(inboxId: string, userIds: string[]): P
 }
 
 export function inboxChannelLabel(channelType: Inbox["channel_type"]): string {
-  return channelType === "widget" ? "Widget" : "Telegram";
+  return channelType === "widget"
+    ? i18n.t("inboxes.channelWidget")
+    : i18n.t("inboxes.channelTelegram");
 }
 
 export function inboxSubtitle(inbox: Inbox): string {
   if (inbox.channel_type === "telegram") {
     return `@${inbox.channel_conf.bot_name || "telegram"}`;
   }
-  return inbox.channel_conf.welcome_message || "Website widget";
+  return inbox.channel_conf.welcome_message || i18n.t("inboxes.widgetSubtitle");
 }
 
 export type { CreateTelegramInboxRequest, CreateWidgetInboxRequest, Inbox, InboxMember };

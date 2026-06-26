@@ -4,7 +4,7 @@ export const APP_MENU_TREE: MenuItem[] = [
   {
     id: "1",
     kind: "item",
-    name: "Dashboard",
+    name: "menu.dashboard",
     path: "/dashboard",
     icon: "IconLucideLayoutDashboard",
     children: null,
@@ -15,7 +15,7 @@ export const APP_MENU_TREE: MenuItem[] = [
   {
     id: "2",
     kind: "item",
-    name: "Users",
+    name: "menu.users",
     path: "/users",
     icon: "IconLucideUsers",
     children: null,
@@ -26,7 +26,7 @@ export const APP_MENU_TREE: MenuItem[] = [
   {
     id: "3",
     kind: "item",
-    name: "Inboxes",
+    name: "menu.inboxes",
     path: "/inboxes",
     icon: "IconLucideInbox",
     children: null,

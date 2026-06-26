@@ -17,6 +17,7 @@ import { APP_BRAND_NAME, APP_FAVICON_SRC } from "@/utils/constants";
 import { getRegisterErrorMessage } from "@/utils/authErrors";
 import { Aurora } from "@/components/Aurora";
 import { AppFooter } from "@/components/Layout/AppFooter";
+import { useTranslation } from "react-i18next";
 import "../login/index.css";
 
 export const Route = createFileRoute("/register/")({
@@ -30,6 +31,7 @@ export const Route = createFileRoute("/register/")({
 });
 
 function RegisterPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { message } = App.useApp();
   const { token } = theme.useToken();
@@ -37,7 +39,7 @@ function RegisterPage() {
   const registerMutation = useMutation({
     mutationFn: async (values: RegisterFormValues) => {
       if (!getAppKey()) {
-        throw new Error("缺少 appkey，请先通过 ?appkey=xxx 访问控制台");
+        throw new Error(t("auth.missingAppkey"));
       }
       const parsed = RegisterFormSchema.parse(values);
       const body = JmateRegisterRequestSchema.parse({
@@ -49,7 +51,7 @@ function RegisterPage() {
       applyLoginSession(login);
     },
     onSuccess: () => {
-      message.success("注册成功");
+      message.success(t("auth.registerSuccess"));
       void navigate({ to: "/dashboard" });
     },
     onError: (err) => {
@@ -141,46 +143,46 @@ function RegisterPage() {
             >
               <Form.Item
                 name="account"
-                label={<span style={{ fontWeight: 500 }}>账号</span>}
+                label={<span style={{ fontWeight: 500 }}>{t("auth.account")}</span>}
                 rules={[
-                  { required: true, message: "请输入账号" },
+                  { required: true, message: t("auth.accountRequired") },
                   {
                     pattern: /^[a-zA-Z0-9]{6,20}$/,
-                    message: "账号为 6-20 位字母或数字",
+                    message: t("auth.accountPattern"),
                   },
                 ]}
               >
-                <Input placeholder="6-20 位字母或数字" size="large" />
+                <Input placeholder={t("auth.accountPlaceholder")} size="large" />
               </Form.Item>
 
               <Form.Item
                 name="password"
-                label={<span style={{ fontWeight: 500 }}>密码</span>}
+                label={<span style={{ fontWeight: 500 }}>{t("auth.password")}</span>}
                 rules={[
-                  { required: true, message: "请输入密码" },
-                  { min: 6, message: "密码至少 6 位" },
+                  { required: true, message: t("auth.passwordRequired") },
+                  { min: 6, message: t("auth.passwordMin") },
                 ]}
               >
-                <Input.Password placeholder="至少 6 位" size="large" />
+                <Input.Password placeholder={t("auth.passwordPlaceholder")} size="large" />
               </Form.Item>
 
               <Form.Item
                 name="confirmPassword"
-                label={<span style={{ fontWeight: 500 }}>确认密码</span>}
+                label={<span style={{ fontWeight: 500 }}>{t("auth.confirmPassword")}</span>}
                 dependencies={["password"]}
                 rules={[
-                  { required: true, message: "请确认密码" },
+                  { required: true, message: t("auth.confirmPasswordRequired") },
                   ({ getFieldValue }) => ({
                     validator(_, value) {
                       if (!value || getFieldValue("password") === value) {
                         return Promise.resolve();
                       }
-                      return Promise.reject(new Error("两次输入的密码不一致"));
+                      return Promise.reject(new Error(t("auth.passwordMismatch")));
                     },
                   }),
                 ]}
               >
-                <Input.Password placeholder="再次输入密码" size="large" />
+                <Input.Password placeholder={t("auth.confirmPasswordPlaceholder")} size="large" />
               </Form.Item>
 
               <Form.Item style={{ marginBottom: 0, marginTop: token.marginLG }}>
@@ -191,15 +193,15 @@ function RegisterPage() {
                   block
                   size="large"
                 >
-                  注册
+                  {t("auth.register")}
                 </Button>
               </Form.Item>
 
               <Flex justify="center" style={{ marginTop: token.margin }}>
                 <Typography.Text type="secondary">
-                  已有账号？{" "}
+                  {t("auth.hasAccount")}{" "}
                   <Link to="/login" style={{ color: token.colorPrimary }}>
-                    去登录
+                    {t("auth.goLogin")}
                   </Link>
                 </Typography.Text>
               </Flex>

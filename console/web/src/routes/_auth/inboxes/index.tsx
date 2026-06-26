@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod/v4";
+import { useTranslation } from "react-i18next";
 import {
   createTelegramInbox,
   createWidgetInbox,
@@ -78,27 +79,8 @@ async function listUsersForMembers() {
 type FlowStep = 0 | 1 | 2 | 3;
 type CreateChannel = "widget" | "telegram";
 
-const CHANNEL_OPTIONS: Array<{
-  key: CreateChannel;
-  title: string;
-  description: string;
-  icon: typeof Globe;
-}> = [
-  {
-    key: "widget",
-    title: "Website",
-    description: "Chat widget for your website visitors",
-    icon: Globe,
-  },
-  {
-    key: "telegram",
-    title: "Telegram",
-    description: "Connect a Telegram bot to receive messages",
-    icon: Send,
-  },
-];
-
 function InboxesPage() {
+  const { t } = useTranslation();
   const search = Route.useSearch();
   const queryClient = useQueryClient();
   const { message } = App.useApp();
@@ -111,6 +93,30 @@ function InboxesPage() {
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [telegramForm] = Form.useForm<CreateTelegramInboxRequest>();
   const [widgetForm] = Form.useForm<CreateWidgetInboxRequest>();
+
+  const channelOptions = useMemo(
+    () =>
+      [
+        {
+          key: "widget" as const,
+          title: t("inboxes.websiteTitle"),
+          description: t("inboxes.websiteDesc"),
+          icon: Globe,
+        },
+        {
+          key: "telegram" as const,
+          title: t("inboxes.telegramTitle"),
+          description: t("inboxes.telegramDesc"),
+          icon: Send,
+        },
+      ] satisfies Array<{
+        key: CreateChannel;
+        title: string;
+        description: string;
+        icon: typeof Globe;
+      }>,
+    [t],
+  );
 
   const inboxQuery = useQuery({
     queryKey: ["inboxes", search.limit, search.offset],
@@ -137,10 +143,10 @@ function InboxesPage() {
       setActiveInbox(inbox);
       setSelectedUserIds([]);
       setStep(2);
-      message.success("Telegram inbox created");
+      message.success(t("inboxes.telegramCreated"));
     },
     onError: () => {
-      message.error("Failed to create Telegram inbox");
+      message.error(t("inboxes.telegramCreateFailed"));
     },
   });
 
@@ -152,10 +158,10 @@ function InboxesPage() {
       setActiveInbox(inbox);
       setSelectedUserIds([]);
       setStep(2);
-      message.success("Widget inbox created");
+      message.success(t("inboxes.widgetCreated"));
     },
     onError: () => {
-      message.error("Failed to create Widget inbox");
+      message.error(t("inboxes.widgetCreateFailed"));
     },
   });
 
@@ -165,10 +171,10 @@ function InboxesPage() {
       void queryClient.invalidateQueries({ queryKey: ["inboxes"] });
       void queryClient.invalidateQueries({ queryKey: ["inbox-members", activeInbox?.id] });
       setStep(3);
-      message.success("Representatives saved");
+      message.success(t("inboxes.representativesSaved"));
     },
     onError: () => {
-      message.error("Failed to save representatives");
+      message.error(t("inboxes.representativesSaveFailed"));
     },
   });
 
@@ -230,18 +236,18 @@ function InboxesPage() {
 
   const modalTitle =
     step === 0
-      ? "Choose a channel"
+      ? t("inboxes.modalChooseChannel")
       : step === 1
         ? selectedChannel === "widget"
-          ? "Configure Website Inbox"
-          : "Configure Telegram Inbox"
+          ? t("inboxes.modalConfigureWidget")
+          : t("inboxes.modalConfigureTelegram")
         : step === 2
-          ? "Inbox Representatives"
-          : "Setup Complete";
+          ? t("inboxes.modalRepresentatives")
+          : t("inboxes.modalComplete");
 
   const columns: ColumnsType<Inbox> = [
     {
-      title: "Inbox",
+      title: t("inboxes.inbox"),
       dataIndex: "name",
       key: "name",
       render: (_, record) => {
@@ -275,7 +281,7 @@ function InboxesPage() {
       },
     },
     {
-      title: "Channel",
+      title: t("inboxes.channel"),
       dataIndex: "channel_type",
       key: "channel_type",
       render: (channelType: Inbox["channel_type"]) => (
@@ -285,7 +291,7 @@ function InboxesPage() {
       ),
     },
     {
-      title: "Representatives",
+      title: t("inboxes.representatives"),
       dataIndex: "member_count",
       key: "member_count",
       width: 160,
@@ -297,12 +303,12 @@ function InboxesPage() {
       ),
     },
     {
-      title: "Actions",
+      title: t("common.actions"),
       key: "actions",
       width: 160,
       render: (_, record) => (
         <Button onClick={() => openMembers(record)} icon={<Users size={14} aria-hidden />}>
-          Members
+          {t("inboxes.members")}
         </Button>
       ),
     },
@@ -313,14 +319,12 @@ function InboxesPage() {
       <Flex justify="space-between" align="flex-start" gap={token.marginMD} wrap="wrap">
         <Flex vertical gap={token.marginXXS}>
           <Title level={3} style={{ margin: 0 }}>
-            Inboxes
+            {t("inboxes.title")}
           </Title>
-          <Text type="secondary">
-            Create website and Telegram inboxes, then assign customer representatives.
-          </Text>
+          <Text type="secondary">{t("inboxes.subtitle")}</Text>
         </Flex>
         <Button type="primary" icon={<Plus size={16} aria-hidden />} onClick={openCreate}>
-          New Inbox
+          {t("inboxes.newInbox")}
         </Button>
       </Flex>
 
@@ -328,7 +332,7 @@ function InboxesPage() {
         <Flex vertical gap={token.marginMD}>
           <Input.Search
             allowClear
-            placeholder="Search inboxes"
+            placeholder={t("inboxes.searchPlaceholder")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             style={{ maxWidth: 360 }}
@@ -341,7 +345,7 @@ function InboxesPage() {
             pagination={false}
             locale={{
               emptyText: (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No inboxes yet" />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("inboxes.empty")} />
               ),
             }}
           />
@@ -361,16 +365,16 @@ function InboxesPage() {
             size="small"
             current={step}
             items={[
-              { title: "Channel" },
-              { title: "Configure" },
-              { title: "Representatives" },
-              { title: "Finish" },
+              { title: t("inboxes.stepChannel") },
+              { title: t("inboxes.stepConfigure") },
+              { title: t("inboxes.stepRepresentatives") },
+              { title: t("inboxes.stepFinish") },
             ]}
           />
 
           {step === 0 ? (
             <Flex gap={token.marginMD} wrap="wrap">
-              {CHANNEL_OPTIONS.map((channel) => {
+              {channelOptions.map((channel) => {
                 const Icon = channel.icon;
                 return (
                   <Card
@@ -403,29 +407,32 @@ function InboxesPage() {
             >
               <Form.Item
                 name="name"
-                label="Inbox name"
-                rules={[{ required: true, message: "Please enter inbox name" }]}
+                label={t("inboxes.inboxName")}
+                rules={[{ required: true, message: t("inboxes.inboxNameRequired") }]}
               >
-                <Input prefix={<InboxIcon size={14} aria-hidden />} placeholder="Website Support" />
+                <Input
+                  prefix={<InboxIcon size={14} aria-hidden />}
+                  placeholder={t("inboxes.websitePlaceholder")}
+                />
               </Form.Item>
               <Form.Item
                 name="welcome_message"
-                label="Welcome message"
-                extra="Shown to visitors when they start a chat. Optional."
+                label={t("inboxes.welcomeMessage")}
+                extra={t("inboxes.welcomeMessageExtra")}
               >
                 <TextArea
                   rows={3}
-                  placeholder="Hi! How can we help you today?"
+                  placeholder={t("inboxes.welcomePlaceholder")}
                   maxLength={500}
                   showCount
                 />
               </Form.Item>
               <Flex justify="space-between" gap={token.marginSM}>
-                <Button onClick={() => setStep(0)}>Back</Button>
+                <Button onClick={() => setStep(0)}>{t("common.back")}</Button>
                 <Flex gap={token.marginSM}>
-                  <Button onClick={closeModal}>Cancel</Button>
+                  <Button onClick={closeModal}>{t("common.cancel")}</Button>
                   <Button type="primary" htmlType="submit" loading={createWidgetMutation.isPending}>
-                    Create and continue
+                    {t("inboxes.createAndContinue")}
                   </Button>
                 </Flex>
               </Flex>
@@ -440,38 +447,38 @@ function InboxesPage() {
             >
               <Form.Item
                 name="name"
-                label="Inbox name"
-                rules={[{ required: true, message: "Please enter inbox name" }]}
+                label={t("inboxes.inboxName")}
+                rules={[{ required: true, message: t("inboxes.inboxNameRequired") }]}
               >
                 <Input
                   prefix={<InboxIcon size={14} aria-hidden />}
-                  placeholder="Telegram Support"
+                  placeholder={t("inboxes.telegramPlaceholder")}
                 />
               </Form.Item>
               <Form.Item
                 name="bot_name"
-                label="Telegram bot name"
-                rules={[{ required: true, message: "Please enter bot name" }]}
+                label={t("inboxes.botName")}
+                rules={[{ required: true, message: t("inboxes.botNameRequired") }]}
               >
                 <Input placeholder="support_bot" />
               </Form.Item>
               <Form.Item
                 name="bot_token"
-                label="Telegram bot token"
-                rules={[{ required: true, message: "Please enter bot token" }]}
+                label={t("inboxes.botToken")}
+                rules={[{ required: true, message: t("inboxes.botTokenRequired") }]}
               >
                 <Input.Password placeholder="123456:ABC-DEF..." />
               </Form.Item>
               <Flex justify="space-between" gap={token.marginSM}>
-                <Button onClick={() => setStep(0)}>Back</Button>
+                <Button onClick={() => setStep(0)}>{t("common.back")}</Button>
                 <Flex gap={token.marginSM}>
-                  <Button onClick={closeModal}>Cancel</Button>
+                  <Button onClick={closeModal}>{t("common.cancel")}</Button>
                   <Button
                     type="primary"
                     htmlType="submit"
                     loading={createTelegramMutation.isPending}
                   >
-                    Create and continue
+                    {t("inboxes.createAndContinue")}
                   </Button>
                 </Flex>
               </Flex>
@@ -481,13 +488,14 @@ function InboxesPage() {
           {step === 2 ? (
             <Flex vertical gap={token.marginMD}>
               <Text type="secondary">
-                Select users who should handle conversations for {activeInbox?.name ?? "this inbox"}
-                .
+                {t("inboxes.selectRepresentativesHint", {
+                  name: activeInbox?.name ?? t("inboxes.thisInbox"),
+                })}
               </Text>
               <Select
                 mode="multiple"
                 showSearch
-                placeholder="Select representatives"
+                placeholder={t("inboxes.selectRepresentatives")}
                 value={selectedUserIds}
                 onChange={setSelectedUserIds}
                 loading={usersQuery.isLoading || membersQuery.isLoading}
@@ -495,13 +503,13 @@ function InboxesPage() {
                 optionFilterProp="label"
               />
               <Flex justify="flex-end" gap={token.marginSM}>
-                <Button onClick={closeModal}>Cancel</Button>
+                <Button onClick={closeModal}>{t("common.cancel")}</Button>
                 <Button
                   type="primary"
                   loading={membersMutation.isPending}
                   onClick={() => membersMutation.mutate()}
                 >
-                  Save representatives
+                  {t("inboxes.saveRepresentatives")}
                 </Button>
               </Flex>
             </Flex>
@@ -511,8 +519,10 @@ function InboxesPage() {
             <Flex vertical align="center" gap={token.marginMD} style={{ textAlign: "center" }}>
               <CheckCircle2 size={48} color={token.colorSuccess} strokeWidth={1.5} aria-hidden />
               <Flex vertical gap={token.marginXXS}>
-                <Text strong>{activeInbox?.name ?? "Inbox"} is ready</Text>
-                <Text type="secondary">Your inbox and representatives have been saved.</Text>
+                <Text strong>
+                  {t("inboxes.inboxReady", { name: activeInbox?.name ?? t("inboxes.inbox") })}
+                </Text>
+                <Text type="secondary">{t("inboxes.inboxReadyDesc")}</Text>
                 {activeInbox?.channel_type === "widget" ? (
                   <Flex
                     vertical
@@ -527,7 +537,7 @@ function InboxesPage() {
                   >
                     <Flex align="center" justify="center" gap={token.marginXS}>
                       <MessageSquare size={14} aria-hidden />
-                      <Text type="secondary">Inbox ID for /customers/start</Text>
+                      <Text type="secondary">{t("inboxes.inboxIdHint")}</Text>
                     </Flex>
                     <Text code copyable>
                       {activeInbox.id}
@@ -536,7 +546,7 @@ function InboxesPage() {
                 ) : null}
               </Flex>
               <Button type="primary" onClick={closeModal}>
-                Back to inboxes
+                {t("inboxes.backToInboxes")}
               </Button>
             </Flex>
           ) : null}

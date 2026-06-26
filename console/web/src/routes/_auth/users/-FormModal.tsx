@@ -1,7 +1,8 @@
 import { Form, Input, Select } from "antd";
 import type { FormInstance } from "antd/es/form";
 import type { CreateUserRequest, User } from "@/api/schemas";
-import { USER_ROLE_OPTIONS } from "@/api/schemas";
+import { useTranslation } from "react-i18next";
+import { useUserRoleOptions } from "@/hooks/useUserRoleOptions";
 import { BaseFormModal } from "@/components/FormModal";
 
 export type FormModalProps = {
@@ -21,12 +22,15 @@ export function FormModal({
   onCancel,
   onFinish,
 }: FormModalProps) {
+  const { t } = useTranslation();
+  const roleOptions = useUserRoleOptions();
+
   return (
     <BaseFormModal<CreateUserRequest>
       open={open}
-      title={editingUser ? "Edit User" : "New User"}
-      okText="OK"
-      cancelText="Cancel"
+      title={editingUser ? t("users.editUser") : t("users.newUser")}
+      okText={t("common.ok")}
+      cancelText={t("common.cancel")}
       form={form}
       confirmLoading={confirmLoading}
       onCancel={onCancel}
@@ -34,12 +38,12 @@ export function FormModal({
     >
       <Form.Item
         name="username"
-        label="Username"
+        label={t("users.username")}
         rules={[
-          { required: true, message: "Please enter username" },
+          { required: true, message: t("users.usernameRequired") },
           {
             pattern: /^[a-zA-Z0-9]{6,20}$/,
-            message: "Username must be 6-20 letters or digits",
+            message: t("users.usernamePattern"),
           },
         ]}
       >
@@ -48,10 +52,10 @@ export function FormModal({
       {!editingUser ? (
         <Form.Item
           name="password"
-          label="Password"
+          label={t("auth.password")}
           rules={[
-            { required: true, message: "Please enter password" },
-            { min: 6, message: "Password must be at least 6 characters" },
+            { required: true, message: t("users.passwordRequired") },
+            { min: 6, message: t("users.passwordMin") },
           ]}
         >
           <Input.Password />
@@ -59,13 +63,13 @@ export function FormModal({
       ) : null}
       <Form.Item
         name="role"
-        label="Role"
+        label={t("users.rolePlaceholder")}
         initialValue="customer"
-        rules={[{ required: true, message: "Please select a role" }]}
+        rules={[{ required: true, message: t("users.roleRequired") }]}
       >
-        <Select options={[...USER_ROLE_OPTIONS]} />
+        <Select options={[...roleOptions]} />
       </Form.Item>
-      <Form.Item name="email" label="Email">
+      <Form.Item name="email" label={t("users.email")}>
         <Input />
       </Form.Item>
     </BaseFormModal>

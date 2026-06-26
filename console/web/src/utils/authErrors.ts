@@ -1,28 +1,36 @@
 import { ApiError } from "@/utils/http";
+import i18n from "@/i18n";
 
-const AUTH_ERROR_MESSAGES: Record<number, string> = {
-  17001: "缺少 appkey，请先通过 ?appkey=xxx 访问控制台",
-  17002: "应用不存在",
-  17004: "请输入有效的账号和密码",
-  17011: "用户已存在",
-  17012: "用户不存在",
-  17013: "密码错误",
+const AUTH_ERROR_KEYS: Record<number, string> = {
+  17001: "auth.missingAppkey",
+  17002: "auth.appNotFound",
+  17004: "auth.invalidCredentials",
+  17011: "auth.userExists",
+  17012: "auth.userNotFound",
+  17013: "auth.wrongPassword",
 };
 
-export function getAuthErrorMessage(error: unknown, fallback: string): string {
+export function getAuthErrorMessage(error: unknown, fallbackKey: string): string {
   if (error instanceof ApiError) {
-    return AUTH_ERROR_MESSAGES[error.code] ?? `${fallback}（${error.code}）`;
+    const key = AUTH_ERROR_KEYS[error.code];
+    if (key) {
+      return i18n.t(key);
+    }
+    return i18n.t("auth.errorWithCode", {
+      message: i18n.t(fallbackKey),
+      code: error.code,
+    });
   }
   if (error instanceof Error) {
     return error.message;
   }
-  return fallback;
+  return i18n.t(fallbackKey);
 }
 
 export function getLoginErrorMessage(error: unknown): string {
-  return getAuthErrorMessage(error, "登录失败");
+  return getAuthErrorMessage(error, "auth.loginFailed");
 }
 
 export function getRegisterErrorMessage(error: unknown): string {
-  return getAuthErrorMessage(error, "注册失败");
+  return getAuthErrorMessage(error, "auth.registerFailed");
 }

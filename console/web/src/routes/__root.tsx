@@ -1,13 +1,20 @@
 import { useEffect, useMemo } from "react";
 import { createRootRoute, Outlet } from "@tanstack/react-router";
 import { ConfigProvider, App } from "antd";
+import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useSettingsStore } from "@/stores/settings";
 import { useAppTheme } from "@/hooks/useAppTheme";
 import { NotFound } from "@/components/NotFound";
 import { RouteError } from "@/components/RouteError";
+import type { AppLocale } from "@/i18n/types";
 import "@/index.css";
+
+const ANT_LOCALES: Record<AppLocale, typeof zhCN> = {
+  "zh-CN": zhCN,
+  "en-US": enUS,
+};
 
 function AppQueryBridge({ children }: { children: React.ReactNode }) {
   const { message } = App.useApp();
@@ -31,18 +38,19 @@ function AppQueryBridge({ children }: { children: React.ReactNode }) {
 
 function RootComponent() {
   const darkMode = useSettingsStore((s) => s.darkMode);
+  const locale = useSettingsStore((s) => s.locale);
   const configProviderProps = useAppTheme();
 
   useEffect(() => {
-    document.documentElement.lang = "en";
-  }, []);
+    document.documentElement.lang = locale;
+  }, [locale]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
   }, [darkMode]);
 
   return (
-    <ConfigProvider {...configProviderProps} locale={enUS}>
+    <ConfigProvider {...configProviderProps} locale={ANT_LOCALES[locale]}>
       <App>
         <AppQueryBridge>
           <Outlet />

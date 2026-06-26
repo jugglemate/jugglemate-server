@@ -1,9 +1,11 @@
 import { Flex, Typography, theme } from "antd";
+import { useTranslation } from "react-i18next";
 import { GitHub } from "@/components/Icon";
 
 const ANTD_ADMIN_REPO = "https://github.com/zuiidea/antd-admin";
 
 export function AppFooter() {
+  const { t } = useTranslation();
   const { token } = theme.useToken();
   const iconSize = Math.max(12, Math.round(Number(token.fontSizeSM)));
 
@@ -18,7 +20,7 @@ export function AppFooter() {
       }}
     >
       <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM, marginBottom: 0 }}>
-        Powered by
+        {t("common.poweredBy")}
       </Typography.Text>
       <a
         href={ANTD_ADMIN_REPO}

@@ -5,14 +5,17 @@ import { Link, useLocation, useMatches } from "@tanstack/react-router";
 import { Home, PanelLeft, ShieldAlert, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Theme } from "@/components/Icon";
+import { LanguageSwitcher } from "@/components/Layout/LanguageSwitcher";
 
 const { Header: AntHeader } = Layout;
 
-const PATH_LABEL: Record<string, string> = {
-  "/dashboard": "Dashboard",
-  "/users": "Users",
-  "/403": "403",
+const PATH_LABEL_KEY: Record<string, string> = {
+  "/dashboard": "menu.dashboard",
+  "/users": "menu.users",
+  "/inboxes": "menu.inboxes",
+  "/403": "errors.forbiddenTitle",
 };
 
 function normalizePath(pathname: string): string {
@@ -29,6 +32,7 @@ export type HeaderProps = {
 };
 
 export function Header({ showBreadcrumb: showBreadcrumbProp = true }: HeaderProps) {
+  const { t } = useTranslation();
   const toggleSidebar = useSettingsStore((s) => s.toggleSidebar);
   const toggleDarkMode = useSettingsStore((s) => s.toggleDarkMode);
   const location = useLocation();
@@ -65,12 +69,12 @@ export function Header({ showBreadcrumb: showBreadcrumbProp = true }: HeaderProp
   const path = normalizePath(location.pathname);
   const segments = path.split("/").filter(Boolean);
   const firstSegmentPath = segments.length ? `/${segments[0]}` : "/dashboard";
-  const leafLabelKey = PATH_LABEL[firstSegmentPath] ?? segments[0] ?? "Dashboard";
+  const leafLabelKey = PATH_LABEL_KEY[firstSegmentPath] ?? segments[0] ?? "menu.dashboard";
 
   const leafIcon: LucideIcon =
     firstSegmentPath === "/users" ? Users : firstSegmentPath === "/403" ? ShieldAlert : Home;
 
-  const leafLabel = leafLabelKey;
+  const leafLabel = t(leafLabelKey);
 
   const breadcrumbItems: ItemType[] = [];
 
@@ -78,11 +82,11 @@ export function Header({ showBreadcrumb: showBreadcrumbProp = true }: HeaderProp
 
   if (onDashboard) {
     breadcrumbItems.push({
-      title: crumb(Home, "Dashboard"),
+      title: crumb(Home, t("menu.dashboard")),
     });
   } else {
     breadcrumbItems.push({
-      title: crumb(Home, "Dashboard", "/dashboard"),
+      title: crumb(Home, t("menu.dashboard"), "/dashboard"),
     });
 
     breadcrumbItems.push({
@@ -119,7 +123,7 @@ export function Header({ showBreadcrumb: showBreadcrumbProp = true }: HeaderProp
             size="small"
             onClick={toggleSidebar}
             icon={<PanelLeft size={token.size} />}
-            aria-label="Toggle sidebar"
+            aria-label={t("common.toggleSidebar")}
           />
         ) : null}
         {showBreadcrumb ? (
@@ -130,11 +134,12 @@ export function Header({ showBreadcrumb: showBreadcrumbProp = true }: HeaderProp
         ) : null}
       </Flex>
       <Space>
+        <LanguageSwitcher />
         <Button
           type="text"
           onClick={toggleDarkMode}
           icon={<Theme size={token.size} />}
-          aria-label="Toggle Theme"
+          aria-label={t("common.toggleTheme")}
         />
       </Space>
     </AntHeader>

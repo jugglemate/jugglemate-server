@@ -20,6 +20,7 @@ import { useResourceCRUD } from "@/hooks/useResourceCRUD";
 import { useTableFitHeight } from "@/hooks/useTableFitHeight";
 import { useCrudToasts } from "@/hooks/useCrudToasts";
 import { useUrlSearchState } from "@/hooks/useUrlSearchState";
+import { useTranslation } from "react-i18next";
 import { Toolbar } from "./-Toolbar";
 import { FormModal } from "./-FormModal";
 
@@ -41,14 +42,10 @@ export const Route = createFileRoute("/_auth/users/")({
 
 const paginatedUserSchema = PaginatedResponseSchema(UserSchema);
 
-const ROLE_LABELS: Record<string, string> = {
-  admin: "Admin",
-  customer: "Customer",
-};
-
 type UserUpdateInput = CreateUserRequest & { id: string; roles: string[] };
 
 function UsersPage() {
+  const { t } = useTranslation();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const { message, modal } = App.useApp();
@@ -138,25 +135,25 @@ function UsersPage() {
 
   const confirmDelete = (record: User) => {
     modal.confirm({
-      title: "Are you absolutely sure?",
-      content: "This action cannot be undone. This will permanently delete the user.",
-      okText: "Delete",
+      title: t("crud.deleteConfirmTitle"),
+      content: t("crud.deleteConfirmContent"),
+      okText: t("common.delete"),
       okType: "danger",
-      cancelText: "Cancel",
+      cancelText: t("common.cancel"),
       onOk: () => deleteMutation.mutate(record.id),
     });
   };
 
   const columns = [
     {
-      title: "ID",
+      title: t("users.id"),
       dataIndex: "id",
       key: "id",
       sorter: true,
       sortOrder: search.sortField === "id" ? search.sortOrder : null,
     },
     {
-      title: "Username",
+      title: t("users.username"),
       dataIndex: "username",
       key: "username",
       sorter: true,
@@ -182,14 +179,14 @@ function UsersPage() {
       },
     },
     {
-      title: "Email",
+      title: t("users.email"),
       dataIndex: "email",
       key: "email",
       sorter: true,
       sortOrder: search.sortField === "email" ? search.sortOrder : null,
     },
     {
-      title: "Roles",
+      title: t("users.roles"),
       dataIndex: "roles",
       key: "roles",
       sorter: true,
@@ -208,14 +205,14 @@ function UsersPage() {
                 },
               }}
             >
-              {ROLE_LABELS[role] ?? role}
+              {role === "admin" ? t("users.role.admin") : t("users.role.customer")}
             </Tag>
           ))}
         </Space>
       ),
     },
     {
-      title: "Actions",
+      title: t("common.actions"),
       key: "actions",
       width: 60,
       align: "right" as const,
@@ -227,7 +224,7 @@ function UsersPage() {
               {
                 key: "edit",
                 icon: <Pencil size={token.fontSize} />,
-                label: "Edit",
+                label: t("common.edit"),
                 onClick: () => {
                   setEditingUser(record);
                   form.setFieldsValue({
@@ -241,7 +238,7 @@ function UsersPage() {
               {
                 key: "delete",
                 icon: <Trash2 size={token.fontSize} />,
-                label: "Delete",
+                label: t("common.delete"),
                 danger: true,
                 onClick: () => confirmDelete(record),
               },
@@ -252,7 +249,7 @@ function UsersPage() {
           <Button
             type="text"
             icon={<MoreVertical size={token.fontSize} />}
-            aria-label="Row actions"
+            aria-label={t("errors.rowActions")}
           />
         </Dropdown>
       ),
@@ -280,7 +277,7 @@ function UsersPage() {
             current: currentPage,
             pageSize: search.limit,
             showSizeChanger: true,
-            showTotal: (total) => `${total} rows`,
+            showTotal: (total) => t("common.rows", { count: total }),
             onChange: (page, pageSize) => {
               void navigate({
                 search: {

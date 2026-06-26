@@ -1,9 +1,11 @@
 import { Button, Result, theme } from "antd";
 import { useRouter, type ErrorComponentProps } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 
 export function RouteError({ error }: ErrorComponentProps) {
   const router = useRouter();
   const { token } = theme.useToken();
+  const { t } = useTranslation();
 
   const detail = error instanceof Error ? error.message : String(error);
 
@@ -11,11 +13,11 @@ export function RouteError({ error }: ErrorComponentProps) {
     <div style={{ padding: token.paddingLG, maxWidth: 560, margin: "48px auto" }}>
       <Result
         status="error"
-        title="Something went wrong"
-        subTitle={detail || "Please try again or return to the dashboard."}
+        title={t("errors.routeErrorTitle")}
+        subTitle={detail || t("errors.routeErrorSubtitle")}
         extra={
           <Button type="primary" onClick={() => void router.invalidate()}>
-            Retry
+            {t("common.retry")}
           </Button>
         }
       />

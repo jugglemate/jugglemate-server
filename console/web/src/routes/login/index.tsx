@@ -14,7 +14,9 @@ import { APP_BRAND_NAME, APP_FAVICON_SRC } from "@/utils/constants";
 import { getLoginErrorMessage } from "@/utils/authErrors";
 import { Theme } from "@/components/Icon";
 import { AppFooter } from "@/components/Layout/AppFooter";
+import { LanguageSwitcher } from "@/components/Layout/LanguageSwitcher";
 import { Aurora } from "@/components/Aurora";
+import { useTranslation } from "react-i18next";
 import "./index.css";
 
 export const Route = createFileRoute("/login/")({
@@ -28,6 +30,7 @@ export const Route = createFileRoute("/login/")({
 });
 
 function LoginPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { message } = App.useApp();
   const toggleDarkMode = useSettingsStore((s) => s.toggleDarkMode);
@@ -37,7 +40,7 @@ function LoginPage() {
   const loginMutation = useMutation({
     mutationFn: async (values: JmateLoginRequest) => {
       if (!getAppKey()) {
-        throw new Error("缺少 appkey，请先通过 ?appkey=xxx 访问控制台");
+        throw new Error(t("auth.missingAppkey"));
       }
       const parsed = JmateLoginRequestSchema.parse(values);
       const data = await httpClient.post(AUTH_ENDPOINTS.login, parsed);
@@ -45,7 +48,7 @@ function LoginPage() {
       applyLoginSession(login);
     },
     onSuccess: () => {
-      message.success("登录成功");
+      message.success(t("auth.loginSuccess"));
       void navigate({ to: "/dashboard" });
     },
     onError: (err) => {
@@ -139,22 +142,27 @@ function LoginPage() {
             >
               <Form.Item
                 name="account"
-                label={<span style={{ fontWeight: 500 }}>账号</span>}
-                rules={[{ required: true, message: "请输入账号" }]}
+                label={<span style={{ fontWeight: 500 }}>{t("auth.account")}</span>}
+                rules={[{ required: true, message: t("auth.accountRequired") }]}
               >
-                <Input id="login-account" aria-label="Account" placeholder="账号" size="large" />
+                <Input
+                  id="login-account"
+                  aria-label={t("auth.account")}
+                  placeholder={t("auth.account")}
+                  size="large"
+                />
               </Form.Item>
 
               <Form.Item
                 name="password"
-                label={<span style={{ fontWeight: 500 }}>密码</span>}
-                rules={[{ required: true, message: "请输入密码" }]}
+                label={<span style={{ fontWeight: 500 }}>{t("auth.password")}</span>}
+                rules={[{ required: true, message: t("auth.passwordRequired") }]}
                 style={{ marginBottom: token.marginLG }}
               >
                 <Input.Password
                   id="login-password"
-                  aria-label="Password"
-                  placeholder="密码"
+                  aria-label={t("auth.password")}
+                  placeholder={t("auth.password")}
                   size="large"
                 />
               </Form.Item>
@@ -166,14 +174,14 @@ function LoginPage() {
                 wrap="wrap"
               >
                 <Form.Item name="remember" valuePropName="checked" noStyle>
-                  <Checkbox>自动登录</Checkbox>
+                  <Checkbox>{t("auth.rememberMe")}</Checkbox>
                 </Form.Item>
                 <Typography.Link
                   href="#"
                   onClick={(e) => e.preventDefault()}
                   style={{ fontSize: token.fontSizeSM }}
                 >
-                  Forgot password?
+                  {t("auth.forgotPassword")}
                 </Typography.Link>
               </Flex>
 
@@ -185,15 +193,15 @@ function LoginPage() {
                   block
                   size="large"
                 >
-                  登录
+                  {t("auth.login")}
                 </Button>
               </Form.Item>
             </Form>
             <Flex justify="center" style={{ marginTop: token.margin }}>
               <Typography.Text type="secondary">
-                Don&apos;t have an account?{" "}
+                {t("auth.noAccount")}{" "}
                 <Link to="/register" style={{ color: token.colorPrimary }}>
-                  Sign up
+                  {t("auth.signUp")}
                 </Link>
               </Typography.Text>
             </Flex>
@@ -209,12 +217,13 @@ function LoginPage() {
         >
           <Flex justify="center" style={{ marginBottom: token.marginSM }}>
             <Space>
+              <LanguageSwitcher />
               <Button
                 type="text"
                 size="small"
                 onClick={toggleDarkMode}
                 icon={<Theme size={token.size} />}
-                aria-label="Toggle Theme"
+                aria-label={t("common.toggleTheme")}
               />
             </Space>
           </Flex>

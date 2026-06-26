@@ -1,7 +1,8 @@
 import { Button, Input, Select, theme } from "antd";
 import { Plus, UserRound } from "lucide-react";
 import { forwardRef, useMemo } from "react";
-import { USER_ROLE_OPTIONS } from "@/api/schemas";
+import { useTranslation } from "react-i18next";
+import { useUserRoleOptions } from "@/hooks/useUserRoleOptions";
 import { FilterToolbar } from "@/components/FilterToolbar";
 
 /** Search + role slot `minWidth` for FilterToolbar collapse math */
@@ -29,6 +30,8 @@ export const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(function Toolbar
   },
   ref,
 ) {
+  const { t } = useTranslation();
+  const roleOptions = useUserRoleOptions();
   const { token } = theme.useToken();
 
   const slots = useMemo(
@@ -39,7 +42,7 @@ export const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(function Toolbar
         children: (
           <Input.Search
             allowClear
-            placeholder="Search User"
+            placeholder={t("users.searchPlaceholder")}
             style={{ width: FILTER_CONTROL_WIDTH }}
             value={keywordInput}
             onChange={(e) => onKeywordChange(e.target.value)}
@@ -54,12 +57,12 @@ export const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(function Toolbar
         children: (
           <Select
             allowClear
-            placeholder="Role"
+            placeholder={t("users.rolePlaceholder")}
             style={{ width: FILTER_CONTROL_WIDTH }}
             prefix={<UserRound size={token.fontSize} />}
             value={roleValue}
             onChange={(v) => onRoleChange(v ?? "")}
-            options={[...USER_ROLE_OPTIONS]}
+            options={[...roleOptions]}
           />
         ),
       },
@@ -70,7 +73,9 @@ export const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(function Toolbar
       onKeywordChange,
       onRoleChange,
       onSearch,
+      roleOptions,
       roleValue,
+      t,
       token.fontSize,
     ],
   );
@@ -81,11 +86,11 @@ export const Toolbar = forwardRef<HTMLDivElement, ToolbarProps>(function Toolbar
       slots={slots}
       actions={
         <Button type="primary" icon={<Plus size={token.fontSize} />} onClick={onCreateClick}>
-          Create User
+          {t("users.createUser")}
         </Button>
       }
-      moreFiltersLabel="More filters"
-      moreFiltersTitle="More filters"
+      moreFiltersLabel={t("common.moreFilters")}
+      moreFiltersTitle={t("common.moreFilters")}
     />
   );
 });

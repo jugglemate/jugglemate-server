@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { MessageInstance } from "antd/es/message/interface";
 
 type MutationLifecycle<TValues> = {
@@ -18,6 +19,7 @@ export function useCrudToasts<TCreate, TUpdate>(options: {
   resourceKey: string;
 }): CrudToastLifecycles<TCreate, TUpdate> {
   const { message, resourceKey } = options;
+  const { t } = useTranslation();
 
   const keys = useMemo(
     () => ({
@@ -32,35 +34,35 @@ export function useCrudToasts<TCreate, TUpdate>(options: {
     () => ({
       createLifecycle: {
         onSuccess: () => {
-          message.success({ content: "Created successfully", key: keys.create });
+          message.success({ content: t("crud.createSuccess"), key: keys.create });
         },
         onError: () => {
-          message.error({ content: "Create failed", key: keys.create });
+          message.error({ content: t("crud.createFailed"), key: keys.create });
         },
       },
       updateLifecycle: {
         onMutate: () => {
-          message.loading({ content: "Updating…", key: keys.update, duration: 0 });
+          message.loading({ content: t("crud.updating"), key: keys.update, duration: 0 });
         },
         onSuccess: () => {
-          message.success({ content: "Updated successfully", key: keys.update });
+          message.success({ content: t("crud.updateSuccess"), key: keys.update });
         },
         onError: () => {
-          message.error({ content: "Update failed", key: keys.update });
+          message.error({ content: t("crud.updateFailed"), key: keys.update });
         },
       },
       deleteLifecycle: {
         onMutate: () => {
-          message.loading({ content: "Deleting…", key: keys.delete, duration: 0 });
+          message.loading({ content: t("crud.deleting"), key: keys.delete, duration: 0 });
         },
         onSuccess: () => {
-          message.success({ content: "Deleted successfully", key: keys.delete });
+          message.success({ content: t("crud.deleteSuccess"), key: keys.delete });
         },
         onError: () => {
-          message.error({ content: "Delete failed", key: keys.delete });
+          message.error({ content: t("crud.deleteFailed"), key: keys.delete });
         },
       },
     }),
-    [keys.create, keys.delete, keys.update, message],
+    [keys.create, keys.delete, keys.update, message, t],
   );
 }

@@ -22,20 +22,30 @@ import { useSettingsStore } from "@/stores/settings";
 import type { MenuItem as MenuItemType } from "@/api/schemas";
 import type { MenuProps } from "antd";
 import { UserMenu } from "../UserMenu";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import "./index.css";
 
 const { Sider } = Layout;
-/** API menu `name` → English labels for known keys; unknown keys pass through as `menu.name`. */
-const MENU_LABELS: Record<string, string> = {
-  Platform: "Platform",
-  Projects: "Projects",
-  Settings: "Settings",
-  Dashboard: "Dashboard",
-  Users: "Users",
-  Inboxes: "Inboxes",
-  "Design Engineering": "Design Engineering",
-  "Sales & Marketing": "Sales & Marketing",
+/** API menu `name` → i18n keys for known legacy English names. */
+const MENU_LABEL_KEYS: Record<string, string> = {
+  Platform: "menu.platform",
+  Projects: "menu.projects",
+  Settings: "menu.settings",
+  Dashboard: "menu.dashboard",
+  Users: "menu.users",
+  Inboxes: "menu.inboxes",
+  "Design Engineering": "menu.projects",
+  "Sales & Marketing": "menu.projects",
 };
+
+function resolveMenuLabel(name: string, t: TFunction): string {
+  if (name.includes(".")) {
+    return t(name);
+  }
+  const key = MENU_LABEL_KEYS[name];
+  return key ? t(key) : name;
+}
 
 type AntMenuItem = Required<MenuProps>["items"][number];
 type BuildMenuResult = {
@@ -67,6 +77,7 @@ function renderMenuIcon(icon: string | null, size = 16) {
 function buildMenuItems(
   menus: MenuItemType[],
   token: ReturnType<typeof theme.useToken>["token"],
+  t: TFunction,
   collapsed = false,
   iconSize = 16,
   parentKeys: string[] = [],
@@ -77,11 +88,11 @@ function buildMenuItems(
   const items: AntMenuItem[] = [];
 
   for (const menu of sorted) {
-    const label = MENU_LABELS[menu.name] ?? menu.name;
+    const label = resolveMenuLabel(menu.name, t);
     const key = menu.id;
 
     if (menu.kind === "group") {
-      const built = buildMenuItems(menu.children, token, collapsed, iconSize, parentKeys);
+      const built = buildMenuItems(menu.children, token, t, collapsed, iconSize, parentKeys);
       Object.assign(keyToPath, built.keyToPath);
       Object.assign(pathToKeyChain, built.pathToKeyChain);
       if (built.items.length > 0) {
@@ -132,7 +143,7 @@ function buildMenuItems(
 
     let children: AntMenuItem[] | undefined;
     if (menu.children?.length) {
-      const built = buildMenuItems(menu.children, token, collapsed, iconSize, nextParents);
+      const built = buildMenuItems(menu.children, token, t, collapsed, iconSize, nextParents);
       Object.assign(keyToPath, built.keyToPath);
       Object.assign(pathToKeyChain, built.pathToKeyChain);
       children = built.items.length ? built.items : undefined;
@@ -150,6 +161,7 @@ function buildMenuItems(
 }
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const menus = useAuthStore((s) => s.menus);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -163,8 +175,8 @@ export function Sidebar() {
   const isMobile = !screens.lg;
   const mobileOpen = collapsed;
   const builtMenu = useMemo(
-    () => buildMenuItems(menus, token, !isMobile && collapsed, token.size),
-    [menus, token, isMobile, collapsed, token.size],
+    () => buildMenuItems(menus, token, t, !isMobile && collapsed, token.size),
+    [menus, token, t, isMobile, collapsed, token.size],
   );
   const { selectedKey, routeOpenKeys } = useMemo(() => {
     const chain = builtMenu.pathToKeyChain[location.pathname] ?? [];
@@ -191,7 +203,7 @@ export function Sidebar() {
   const userMenuItems: MenuProps["items"] = [
     {
       key: "logout",
-      label: "Sign Out",
+      label: t("userMenu.signOut"),
       onClick: () => {
         if (isMobile) {
           setSidebarCollapsed(false);
@@ -265,7 +277,7 @@ export function Sidebar() {
                   className="sidebar-collapsed-brand__toggle"
                   onClick={toggleSidebar}
                   icon={<PanelLeft size={token.size} />}
-                  aria-label="Toggle sidebar"
+                  aria-label={t("common.toggleSidebar")}
                 />
               </div>
             </div>
@@ -313,7 +325,7 @@ export function Sidebar() {
                   size="small"
                   onClick={toggleSidebar}
                   icon={<PanelLeft size={token.size} />}
-                  aria-label="Toggle sidebar"
+                  aria-label={t("common.toggleSidebar")}
                   style={{ flexShrink: 0 }}
                 />
               ) : null}

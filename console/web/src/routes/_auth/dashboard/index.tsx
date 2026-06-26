@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Card, Col, Row, Typography, Avatar, theme, Flex, Skeleton, Timeline, Tag } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { DollarSign, Users, CreditCard, Activity } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import "./index.css";
 
 const { Title, Text } = Typography;
@@ -114,6 +115,7 @@ function DashboardSkeleton() {
 }
 
 function DashboardPage() {
+  const { t } = useTranslation();
   const { token } = theme.useToken();
   const { isPending } = useQuery({
     queryKey: ["dashboard"],
@@ -131,31 +133,31 @@ function DashboardPage() {
   const stats = useMemo(
     () => [
       {
-        title: "Total Revenue",
+        title: t("dashboard.totalRevenue"),
         value: "$45,231.89",
-        description: "+20.1% from last month",
+        description: t("dashboard.revenueDesc"),
         icon: <DollarSign style={{ color: token.colorTextSecondary }} />,
       },
       {
-        title: "Subscriptions",
+        title: t("dashboard.subscriptions"),
         value: "+2350",
-        description: "+180.1% from last month",
+        description: t("dashboard.subscriptionsDesc"),
         icon: <Users style={{ color: token.colorTextSecondary }} />,
       },
       {
-        title: "Sales",
+        title: t("dashboard.sales"),
         value: "+12,234",
-        description: "+19% from last month",
+        description: t("dashboard.salesDesc"),
         icon: <CreditCard style={{ color: token.colorTextSecondary }} />,
       },
       {
-        title: "Active Now",
+        title: t("dashboard.activeNow"),
         value: "+573",
-        description: "+201 since last hour",
+        description: t("dashboard.activeDesc"),
         icon: <Activity style={{ color: token.colorTextSecondary }} />,
       },
     ],
-    [token.colorTextSecondary],
+    [t, token.colorTextSecondary],
   );
 
   const recentSales = useMemo(
@@ -200,8 +202,8 @@ function DashboardPage() {
         color: "green" as const,
         content: (
           <Flex vertical gap={4}>
-            <Text strong>08:30 · Deploy V3.2.0</Text>
-            <Text type="secondary">Release branch merged and production rollout completed.</Text>
+            <Text strong>{t("dashboard.timelineDeploy")}</Text>
+            <Text type="secondary">{t("dashboard.timelineDeployDesc")}</Text>
           </Flex>
         ),
       },
@@ -209,8 +211,8 @@ function DashboardPage() {
         color: "blue" as const,
         content: (
           <Flex vertical gap={4}>
-            <Text strong>10:10 · Menu policy updated</Text>
-            <Text type="secondary">Admin changed sidebar visibility and permission mapping.</Text>
+            <Text strong>{t("dashboard.timelineMenu")}</Text>
+            <Text type="secondary">{t("dashboard.timelineMenuDesc")}</Text>
           </Flex>
         ),
       },
@@ -218,8 +220,8 @@ function DashboardPage() {
         color: "gold" as const,
         content: (
           <Flex vertical gap={4}>
-            <Text strong>13:20 · Security review</Text>
-            <Text type="secondary">Token refresh behavior and 403 routes validated.</Text>
+            <Text strong>{t("dashboard.timelineSecurity")}</Text>
+            <Text type="secondary">{t("dashboard.timelineSecurityDesc")}</Text>
           </Flex>
         ),
       },
@@ -227,13 +229,13 @@ function DashboardPage() {
         color: "red" as const,
         content: (
           <Flex vertical gap={4}>
-            <Text strong>15:50 · Incident recovery</Text>
-            <Text type="secondary">User creation spike handled and queue restored.</Text>
+            <Text strong>{t("dashboard.timelineIncident")}</Text>
+            <Text type="secondary">{t("dashboard.timelineIncidentDesc")}</Text>
           </Flex>
         ),
       },
     ],
-    [],
+    [t],
   );
 
   if (isPending) {
@@ -273,10 +275,10 @@ function DashboardPage() {
             title={
               <Flex align="center" gap={token.marginSM}>
                 <Title level={5} style={{ margin: 0 }}>
-                  Timeline
+                  {t("dashboard.timeline")}
                 </Title>
                 <Tag variant="filled" color="processing">
-                  Today
+                  {t("dashboard.today")}
                 </Tag>
               </Flex>
             }
@@ -290,7 +292,7 @@ function DashboardPage() {
             style={{ ...cardHoverStyle, height: "100%" }}
             title={
               <Title level={5} style={{ margin: 0 }}>
-                Recent Sales
+                {t("dashboard.recentSales")}
               </Title>
             }
           >
