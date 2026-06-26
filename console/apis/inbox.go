@@ -37,6 +37,20 @@ func CreateTelegramInbox(ctx *gin.Context) {
 	responses.SuccessHttpResp(ctx, resp)
 }
 
+func CreateWidgetInbox(ctx *gin.Context) {
+	var req consoleModels.CreateWidgetInboxReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_REQ_BODY_ILLEGAL)
+		return
+	}
+	code, resp := consoleServices.CreateWidgetInbox(ctxs.ToCtx(ctx), &req)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, resp)
+}
+
 func QryInboxMembers(ctx *gin.Context) {
 	inboxId := ctx.Param("inbox_id")
 	code, resp := consoleServices.QryInboxMembers(ctxs.ToCtx(ctx), inboxId)

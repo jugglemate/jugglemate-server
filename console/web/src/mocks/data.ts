@@ -54,8 +54,20 @@ export const MOCK_INBOXES: Inbox[] = [
     created_time: Date.now() - 86_400_000,
     updated_time: Date.now() - 3_600_000,
   },
+  {
+    id: "inbox_widget_1",
+    name: "Website Support",
+    channel_type: "widget",
+    channel_conf: {
+      welcome_message: "Hi! How can we help you today?",
+    },
+    member_count: 1,
+    created_time: Date.now() - 43_200_000,
+    updated_time: Date.now() - 1_800_000,
+  },
 ];
 
 export const MOCK_INBOX_MEMBER_IDS: Record<string, string[]> = {
   inbox_telegram_1: ["1", "2"],
+  inbox_widget_1: ["1"],
 };

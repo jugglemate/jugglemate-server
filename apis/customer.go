@@ -1,11 +1,9 @@
 package apis
 
 import (
-	"bytes"
-	"fmt"
-	"io"
-
 	"github.com/gin-gonic/gin"
+	"strings"
+
 	"github.com/juggleim/jugglemate-server/apis/models"
 	"github.com/juggleim/jugglemate-server/commons/ctxs"
 	"github.com/juggleim/jugglemate-server/commons/errs"
@@ -14,16 +12,8 @@ import (
 )
 
 func StartWebCustom(ctx *gin.Context) {
-	body, err := io.ReadAll(ctx.Request.Body)
-	if err != nil {
-		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
-		return
-	}
-	fmt.Printf("[StartWebCustom] body=%s\n", string(body))
-	ctx.Request.Body = io.NopCloser(bytes.NewReader(body))
-
 	var req models.StartCustomReq
-	if err := ctx.ShouldBindJSON(&req); err != nil || req.Identifier == "" {
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.Identifier == "" || strings.TrimSpace(req.InboxId) == "" {
 		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
 		return
 	}

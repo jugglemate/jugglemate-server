@@ -47,6 +47,26 @@ export const inboxHandlers = [
     return successWithSchema(InboxSchema, inbox);
   }),
 
+  http.post("/jmate/console/inboxes/widget", async ({ request }) => {
+    await withDelay(200);
+    const body = (await request.json()) as Record<string, unknown>;
+    const id = `inbox_widget_${Date.now()}`;
+    const inbox = {
+      id,
+      name: String(body.name ?? ""),
+      channel_type: "widget" as const,
+      channel_conf: {
+        welcome_message: String(body.welcome_message ?? ""),
+      },
+      member_count: 0,
+      created_time: Date.now(),
+      updated_time: Date.now(),
+    };
+    inboxes = [inbox, ...inboxes];
+    inboxMemberIds[id] = [];
+    return successWithSchema(InboxSchema, inbox);
+  }),
+
   http.get("/jmate/console/inboxes/:id/members", async ({ params }) => {
     await withDelay(200);
     const ids = inboxMemberIds[String(params.id)] ?? [];

@@ -14,6 +14,8 @@ import (
 	storageModels "github.com/juggleim/jugglemate-server/storages/models"
 )
 
+const maxWidgetWelcomeMessageLen = 500
+
 var (
 	newInboxStorageForConsole       = storages.NewInboxStorage
 	newInboxMemberStorageForConsole = storages.NewInboxMemberStorage
@@ -33,7 +35,7 @@ func QryInboxes(ctx context.Context, limit, offset int64) (errs.IMErrorCode, *co
 	}
 
 	inboxStorage := newInboxStorageForConsole()
-	result, err := inboxStorage.QryByApp(appkey, string(appServices.ChannelType_Telegram), limit, offset)
+	result, err := inboxStorage.QryByApp(appkey, "", limit, offset)
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
@@ -87,16 +89,46 @@ func CreateTelegramInbox(ctx context.Context, req *consoleModels.CreateTelegramI
 	if err := newInboxStorageForConsole().Create(inbox); err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
-	return errs.IMErrorCode_SUCCESS, &consoleModels.InboxItem{
-		ID:          inbox.InboxId,
-		Name:        inbox.Name,
-		ChannelType: inbox.ChannelType,
-		ChannelConf: consoleModels.TelegramConfigItem{
-			BotName:  botName,
-			BotToken: "",
-		},
-		MemberCount: 0,
+	item := ToInboxItem(&inbox, 0)
+	return errs.IMErrorCode_SUCCESS, &item
+}
+
+func CreateWidgetInbox(ctx context.Context, req *consoleModels.CreateWidgetInboxReq) (errs.IMErrorCode, *consoleModels.InboxItem) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	if appkey == "" {
+		return errs.IMErrorCode_APP_NOT_EXISTED, nil
 	}
+	if req == nil {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+	welcomeMessage := strings.TrimSpace(req.WelcomeMessage)
+	if len(welcomeMessage) > maxWidgetWelcomeMessageLen {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+
+	channelConf, err := json.Marshal(appServices.WebWidgetChannelConf{
+		WelcomeMessage: welcomeMessage,
+	})
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+
+	inbox := storageModels.Inbox{
+		InboxId:     tools.GenerateUUIDShort22(),
+		ChannelType: string(appServices.ChannelType_Widget),
+		ChannelConf: string(channelConf),
+		Name:        name,
+		AppKey:      appkey,
+	}
+	if err := newInboxStorageForConsole().Create(inbox); err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	item := ToInboxItem(&inbox, 0)
+	return errs.IMErrorCode_SUCCESS, &item
 }
 
 func QryInboxMembers(ctx context.Context, inboxId string) (errs.IMErrorCode, *consoleModels.InboxMembersResp) {
@@ -157,14 +189,25 @@ func ToInboxItem(inbox *storageModels.Inbox, memberCount int64) consoleModels.In
 		ID:          inbox.InboxId,
 		Name:        inbox.Name,
 		ChannelType: inbox.ChannelType,
-		ChannelConf: consoleModels.TelegramConfigItem{},
 		MemberCount: memberCount,
 		CreatedTime: inbox.CreatedTime,
 		UpdatedTime: inbox.UpdatedTime,
 	}
-	var conf appServices.TelegramChannelConf
-	if err := json.Unmarshal([]byte(inbox.ChannelConf), &conf); err == nil {
-		item.ChannelConf.BotName = conf.BotName
+	switch inbox.ChannelType {
+	case string(appServices.ChannelType_Telegram):
+		conf := consoleModels.TelegramConfigItem{}
+		var stored appServices.TelegramChannelConf
+		if err := json.Unmarshal([]byte(inbox.ChannelConf), &stored); err == nil {
+			conf.BotName = stored.BotName
+		}
+		item.ChannelConf = conf
+	case string(appServices.ChannelType_Widget):
+		conf := appServices.ParseWebWidgetChannelConf(inbox.ChannelConf)
+		item.ChannelConf = consoleModels.WidgetConfigItem{
+			WelcomeMessage: conf.WelcomeMessage,
+		}
+	default:
+		item.ChannelConf = map[string]string{}
 	}
 	return item
 }
@@ -174,10 +217,15 @@ func inboxExists(appkey, inboxId string) (bool, errs.IMErrorCode) {
 	if err != nil {
 		return false, errs.IMErrorCode_APP_INTERNAL_TIMEOUT
 	}
-	if inbox == nil || inbox.ChannelType != string(appServices.ChannelType_Telegram) {
+	if inbox == nil {
 		return false, errs.IMErrorCode_APP_ParamError
 	}
-	return true, errs.IMErrorCode_SUCCESS
+	switch inbox.ChannelType {
+	case string(appServices.ChannelType_Telegram), string(appServices.ChannelType_Widget):
+		return true, errs.IMErrorCode_SUCCESS
+	default:
+		return false, errs.IMErrorCode_APP_ParamError
+	}
 }
 
 func normalizeAndValidateMemberIds(appkey string, userIds []string) ([]string, errs.IMErrorCode) {

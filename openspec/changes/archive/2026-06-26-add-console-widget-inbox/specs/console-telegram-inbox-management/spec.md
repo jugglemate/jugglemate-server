@@ -1,9 +1,4 @@
-# console-telegram-inbox-management Specification
-
-## Purpose
-TBD - created by archiving change add-console-telegram-inboxes. Updated by add-console-widget-inbox for multi-channel inbox management.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Console Telegram inbox APIs are admin-only and app-scoped
 The system SHALL expose authenticated console APIs for inbox management across supported channels (at minimum `widget` and `telegram`). Only administrators MAY create, list, read, or update inbox assignments, and all operations MUST be scoped to the current request app.
@@ -27,46 +22,12 @@ The system SHALL allow administrators to create a Telegram inbox with a display 
 - **WHEN** an administrator submits a Telegram inbox creation request without bot name or bot token
 - **THEN** the system rejects the request with a request-body error
 
-### Requirement: Console can create Widget inboxes
-The system SHALL allow administrators to create a Widget inbox with a display name and an optional welcome message. The welcome message SHALL be stored in `channel_conf` as JSON encoded from `WebWidgetChannelConf`.
-
-#### Scenario: Create Widget inbox with name and welcome message
-- **WHEN** an administrator submits a Widget inbox creation request with a non-empty name and a welcome message
-- **THEN** the system creates an `inboxes` record with a server-generated `inbox_id`, `channel_type` set to `widget`, `name` set from the request, and `channel_conf` containing `welcome_message`
-
-#### Scenario: Create Widget inbox without welcome message
-- **WHEN** an administrator submits a Widget inbox creation request with a non-empty name and no welcome message
-- **THEN** the system creates the inbox with `channel_conf` containing an empty or omitted `welcome_message`
-
-#### Scenario: Reject Widget inbox without name
-- **WHEN** an administrator submits a Widget inbox creation request without a name
-- **THEN** the system rejects the request with a request-body error
-
-#### Scenario: Widget inbox usable by customers start
-- **WHEN** a Widget inbox has been created for the current app
-- **THEN** its `inbox_id` MAY be passed to `POST /jmate/customers/start`, satisfy the widget inbox validation, and return the configured `welcome_message` in the response
-
 ### Requirement: Console can list Telegram inboxes
 The system SHALL return inboxes in a response shape suitable for the console inbox list, including inbox id, name, channel type, created time, updated time, and member count, for all supported console channel types.
 
 #### Scenario: List inbox rows by channel
 - **WHEN** an administrator opens the Inboxes page
 - **THEN** the page can render each inbox with its name, channel label derived from `channel_type`, and number of assigned representatives
-
-### Requirement: Console can assign representatives to an inbox
-The system SHALL allow administrators to replace the representative list for an inbox using user IDs from the current app's `users` table.
-
-#### Scenario: Assign representatives
-- **WHEN** an administrator saves selected users for an existing inbox
-- **THEN** the system stores those users in `inboxmembers` with the target `inbox_id` and current `app_key`
-
-#### Scenario: Remove omitted representatives
-- **WHEN** an administrator saves an assignment list that omits a previously assigned user
-- **THEN** the system removes that user's `inboxmembers` row for the inbox
-
-#### Scenario: Reject users outside current app
-- **WHEN** an administrator attempts to assign a user ID that does not belong to the current app
-- **THEN** the system rejects the assignment request with a parameter or not-found error
 
 ### Requirement: Console web provides Chatwoot-inspired inbox setup flow
 The console web app SHALL provide an Inboxes workflow that mirrors Chatwoot's high-level flow: inbox list, **channel selection**, channel-specific setup, representative selection, and finish confirmation.
@@ -90,3 +51,24 @@ The console web app SHALL provide an Inboxes workflow that mirrors Chatwoot's hi
 #### Scenario: Finish setup
 - **WHEN** an administrator saves representatives for the new inbox
 - **THEN** the UI shows a setup completion state and allows returning to the inbox list
+
+## ADDED Requirements
+
+### Requirement: Console can create Widget inboxes
+The system SHALL allow administrators to create a Widget inbox with a display name and an optional welcome message. The welcome message SHALL be stored in `channel_conf` as JSON encoded from `WebWidgetChannelConf`.
+
+#### Scenario: Create Widget inbox with name and welcome message
+- **WHEN** an administrator submits a Widget inbox creation request with a non-empty name and a welcome message
+- **THEN** the system creates an `inboxes` record with a server-generated `inbox_id`, `channel_type` set to `widget`, `name` set from the request, and `channel_conf` containing `welcome_message`
+
+#### Scenario: Create Widget inbox without welcome message
+- **WHEN** an administrator submits a Widget inbox creation request with a non-empty name and no welcome message
+- **THEN** the system creates the inbox with `channel_conf` containing an empty or omitted `welcome_message`
+
+#### Scenario: Reject Widget inbox without name
+- **WHEN** an administrator submits a Widget inbox creation request without a name
+- **THEN** the system rejects the request with a request-body error
+
+#### Scenario: Widget inbox usable by customers start
+- **WHEN** a Widget inbox has been created for the current app
+- **THEN** its `inbox_id` MAY be passed to `POST /jmate/customers/start`, satisfy the widget inbox validation, and return the configured `welcome_message` in the response

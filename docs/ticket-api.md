@@ -20,6 +20,7 @@
 | `17005` | 参数错误 |
 | `17006` | 服务内部错误 |
 | `17012` | 用户不存在 |
+| `17014` | 渠道不存在 |
 
 ## 工单状态
 
@@ -51,7 +52,10 @@
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `identifier` | string | 是 | 访客唯一标识。同一个 app 下用它定位 customer |
+| `inbox_id` | string | 是 | 管理后台创建的 widget 渠道 inbox ID |
 | `nickname` | string | 否 | 访客昵称。为空时服务端自动生成 |
+
+`inbox_id` 必须在当前 app 的 `inboxes` 表中存在，且 `channel_type` 为 `widget`。服务端不会自动创建 inbox；若 inbox 不存在或渠道类型不是 widget，返回 `17014`（渠道不存在）。
 
 ### 请求示例
 
@@ -61,6 +65,7 @@ curl -X POST 'http://localhost:8080/jmate/customers/start' \
   -H 'Content-Type: application/json' \
   -d '{
     "identifier": "web-user-001",
+    "inbox_id": "widget_inbox_001",
     "nickname": "Alice"
   }'
 ```
@@ -76,7 +81,8 @@ curl -X POST 'http://localhost:8080/jmate/customers/start' \
     "conversation_type": 2,
     "user_id": "customer_8mQz6RkV2pXnT4bYcS1aE9",
     "nickname": "Alice",
-    "im_token": "im-token"
+    "im_token": "im-token",
+    "welcome_message": "您好，有什么可以帮您？"
   }
 }
 ```
@@ -90,12 +96,14 @@ curl -X POST 'http://localhost:8080/jmate/customers/start' \
 | `user_id` | string | 访客在 IM 中使用的用户 ID，即 `customerinboxrels.source_id` |
 | `nickname` | string | 访客昵称 |
 | `im_token` | string | 访客 IM 登录 token |
+| `welcome_message` | string | Widget 收件箱欢迎语，来自 `inboxes.channel_conf` 中的 `welcome_message`；未配置时为空字符串 |
 
 ### 处理规则
 
 - 先按 `identifier` 在 `customers` 表中查找访客。
 - 不存在时创建 customer，`customer_id` 由服务端生成。
-- 按 `customer_id + inbox_id` 查找或创建 `customerinboxrels`，Web 入口的 `inbox_id` 为 `web`。
+- 校验 `inbox_id` 对应当前 app 下 `channel_type=widget` 的 inbox 记录。
+- 按 `customer_id + inbox_id` 查找或创建 `customerinboxrels`。
 - `source_id` 使用 `customer_` 前缀加服务端生成 ID。
 - 查找该 `source_id` 对应工单，不存在时创建新工单。
 - 新工单的 `ticket_id` 由服务端生成，状态为 `0`。

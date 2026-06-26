@@ -227,15 +227,34 @@ export const TelegramChannelConfigSchema = z.object({
 
 export type TelegramChannelConfig = z.infer<typeof TelegramChannelConfigSchema>;
 
-export const InboxSchema = z.object({
+export const WidgetChannelConfigSchema = z.object({
+  welcome_message: z.string().catch(""),
+});
+
+export type WidgetChannelConfig = z.infer<typeof WidgetChannelConfigSchema>;
+
+const InboxBaseSchema = z.object({
   id: z.string(),
   name: z.string(),
-  channel_type: z.literal("telegram"),
-  channel_conf: TelegramChannelConfigSchema,
   member_count: z.number().int().nonnegative(),
   created_time: z.number().int().catch(0),
   updated_time: z.number().int().catch(0),
 });
+
+export const TelegramInboxSchema = InboxBaseSchema.extend({
+  channel_type: z.literal("telegram"),
+  channel_conf: TelegramChannelConfigSchema,
+});
+
+export const WidgetInboxSchema = InboxBaseSchema.extend({
+  channel_type: z.literal("widget"),
+  channel_conf: WidgetChannelConfigSchema,
+});
+
+export const InboxSchema = z.discriminatedUnion("channel_type", [
+  TelegramInboxSchema,
+  WidgetInboxSchema,
+]);
 
 export type Inbox = z.infer<typeof InboxSchema>;
 
@@ -246,6 +265,17 @@ export const CreateTelegramInboxRequestSchema = z.object({
 });
 
 export type CreateTelegramInboxRequest = z.infer<typeof CreateTelegramInboxRequestSchema>;
+
+export const CreateWidgetInboxRequestSchema = z.object({
+  name: z.string().trim().min(1, "Please enter inbox name"),
+  welcome_message: z
+    .string()
+    .trim()
+    .max(500, "Welcome message must be at most 500 characters")
+    .catch(""),
+});
+
+export type CreateWidgetInboxRequest = z.infer<typeof CreateWidgetInboxRequestSchema>;
 
 export const InboxMemberSchema = z.object({
   id: z.string(),

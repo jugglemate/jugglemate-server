@@ -87,6 +87,7 @@ func RouteConsole(group *gin.RouterGroup) {
 
 	group.GET("/inboxes", consoleApis.QryInboxes)
 	group.POST("/inboxes/telegram", consoleApis.CreateTelegramInbox)
+	group.POST("/inboxes/widget", consoleApis.CreateWidgetInbox)
 	group.GET("/inboxes/:inbox_id/members", consoleApis.QryInboxMembers)
 	group.PUT("/inboxes/:inbox_id/members", consoleApis.ReplaceInboxMembers)
 }

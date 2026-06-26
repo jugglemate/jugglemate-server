@@ -16,9 +16,10 @@ const (
 
 // App user account errors.
 const (
-	IMErrorCode_APP_USER_EXISTED   IMErrorCode = 17011
-	IMErrorCode_APP_USER_NOT_EXIST IMErrorCode = 17012
-	IMErrorCode_APP_LOGIN_ERR_PASS IMErrorCode = 17013
+	IMErrorCode_APP_USER_EXISTED      IMErrorCode = 17011
+	IMErrorCode_APP_USER_NOT_EXIST    IMErrorCode = 17012
+	IMErrorCode_APP_LOGIN_ERR_PASS    IMErrorCode = 17013
+	IMErrorCode_APP_CHANNEL_NOT_EXIST IMErrorCode = 17014
 )
 
 // AIBOT errors.
@@ -34,7 +35,8 @@ const (
 )
 
 var imCode2ApiErrorMap = map[IMErrorCode]*ApiErrorMsg{
-	IMErrorCode_SUCCESS: newApiErrorMsg(200, IMErrorCode_SUCCESS, "success"),
+	IMErrorCode_SUCCESS:               newApiErrorMsg(200, IMErrorCode_SUCCESS, "success"),
+	IMErrorCode_APP_CHANNEL_NOT_EXIST: newApiErrorMsg(200, IMErrorCode_APP_CHANNEL_NOT_EXIST, "渠道不存在"),
 }
 
 func GetApiErrorByCode(code IMErrorCode) *ApiErrorMsg {

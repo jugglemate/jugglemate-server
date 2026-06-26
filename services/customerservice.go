@@ -16,20 +16,24 @@ import (
 )
 
 const (
-	CustomChannel_Web       string = "web"
-	CustomInbox_Web         string = "web"
 	CustomerSourceIDPrefix  string = "customer_"
 	ConversationType_Ticket int    = 2
 )
 
+func validateWidgetInbox(inbox *storageModels.Inbox) errs.IMErrorCode {
+	if inbox == nil || inbox.ChannelType != string(ChannelType_Widget) {
+		return errs.IMErrorCode_APP_CHANNEL_NOT_EXIST
+	}
+	return errs.IMErrorCode_SUCCESS
+}
+
 func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IMErrorCode, *apiModels.StartCustomResp) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
-	if appkey == "" || req == nil || req.Identifier == "" {
+	inboxId := strings.TrimSpace(req.InboxId)
+	if appkey == "" || req == nil || req.Identifier == "" || inboxId == "" {
 		return errs.IMErrorCode_APP_ParamError, nil
 	}
 
-	channelId := CustomChannel_Web
-	inboxId := CustomInbox_Web
 	customerStorage := storages.NewCustomerStorage()
 	inboxStorage := storages.NewInboxStorage()
 	relStorage := storages.NewCustomerInboxRelStorage()
@@ -60,17 +64,10 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
-	if inbox == nil {
-		inbox = &storageModels.Inbox{
-			InboxId:     inboxId,
-			ChannelType: channelId,
-			Name:        channelId,
-			AppKey:      appkey,
-		}
-		if err := inboxStorage.Create(*inbox); err != nil {
-			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
-		}
+	if code := validateWidgetInbox(inbox); code != errs.IMErrorCode_SUCCESS {
+		return code, nil
 	}
+	widgetConf := ParseWebWidgetChannelConf(inbox.ChannelConf)
 
 	rel, err := relStorage.FindByCustomerInbox(appkey, customer.CustomerId, inbox.InboxId)
 	if err != nil {
@@ -135,7 +132,7 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 			TicketId:   ticketId,
 			SourceId:   rel.SourceId,
 			CustomerId: customer.CustomerId,
-			ChannelId:  channelId,
+			ChannelId:  inbox.InboxId,
 			Status:     storageModels.TicketStatusPending,
 			AppKey:     appkey,
 		}
@@ -150,5 +147,6 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 		UserId:           rel.SourceId,
 		Nickname:         customer.Nickname,
 		ImToken:          imResp.Token,
+		WelcomeMessage:   widgetConf.WelcomeMessage,
 	}
 }

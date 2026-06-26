@@ -116,6 +116,8 @@ func (d *InboxDao) QryByApp(appkey, channelType string, limit, offset int64) (*m
 	db := dbcommons.GetDb().Model(&InboxDao{}).Where("app_key=?", appkey)
 	if channelType != "" {
 		db = db.Where("channel_type=?", channelType)
+	} else {
+		db = db.Where("channel_type IN ?", []string{"widget", "telegram"})
 	}
 
 	var total int64

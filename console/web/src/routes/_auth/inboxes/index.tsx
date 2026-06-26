@@ -18,26 +18,40 @@ import {
   theme,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { CheckCircle2, Inbox as InboxIcon, Plus, Send, Users } from "lucide-react";
+import {
+  CheckCircle2,
+  Globe,
+  Inbox as InboxIcon,
+  MessageSquare,
+  Plus,
+  Send,
+  Users,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod/v4";
 import {
   createTelegramInbox,
+  createWidgetInbox,
+  inboxChannelLabel,
+  inboxSubtitle,
   listInboxMembers,
   listInboxes,
   replaceInboxMembers,
   type CreateTelegramInboxRequest,
+  type CreateWidgetInboxRequest,
   type Inbox,
 } from "@/api/inbox";
 import { USER_ENDPOINTS } from "@/api/user";
 import {
   CreateTelegramInboxRequestSchema,
+  CreateWidgetInboxRequestSchema,
   PaginatedResponseSchema,
   UserSchema,
 } from "@/api/schemas";
 import { httpClient } from "@/utils/http";
 
 const { Text, Title } = Typography;
+const { TextArea } = Input;
 
 const InboxSearchParamsSchema = z.object({
   limit: z.number().int().positive().catch(100),
@@ -61,7 +75,28 @@ async function listUsersForMembers() {
   return UsersListResponseSchema.shape.data.parse(raw).list;
 }
 
-type FlowStep = 0 | 1 | 2;
+type FlowStep = 0 | 1 | 2 | 3;
+type CreateChannel = "widget" | "telegram";
+
+const CHANNEL_OPTIONS: Array<{
+  key: CreateChannel;
+  title: string;
+  description: string;
+  icon: typeof Globe;
+}> = [
+  {
+    key: "widget",
+    title: "Website",
+    description: "Chat widget for your website visitors",
+    icon: Globe,
+  },
+  {
+    key: "telegram",
+    title: "Telegram",
+    description: "Connect a Telegram bot to receive messages",
+    icon: Send,
+  },
+];
 
 function InboxesPage() {
   const search = Route.useSearch();
@@ -71,9 +106,11 @@ function InboxesPage() {
   const [query, setQuery] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [step, setStep] = useState<FlowStep>(0);
+  const [selectedChannel, setSelectedChannel] = useState<CreateChannel | null>(null);
   const [activeInbox, setActiveInbox] = useState<Inbox | null>(null);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [form] = Form.useForm<CreateTelegramInboxRequest>();
+  const [telegramForm] = Form.useForm<CreateTelegramInboxRequest>();
+  const [widgetForm] = Form.useForm<CreateWidgetInboxRequest>();
 
   const inboxQuery = useQuery({
     queryKey: ["inboxes", search.limit, search.offset],
@@ -89,21 +126,36 @@ function InboxesPage() {
   const membersQuery = useQuery({
     queryKey: ["inbox-members", activeInbox?.id],
     queryFn: () => listInboxMembers(activeInbox?.id ?? ""),
-    enabled: modalOpen && step === 1 && Boolean(activeInbox),
+    enabled: modalOpen && step === 2 && Boolean(activeInbox),
   });
 
-  const createMutation = useMutation({
+  const createTelegramMutation = useMutation({
     mutationFn: (values: CreateTelegramInboxRequest) =>
       createTelegramInbox(CreateTelegramInboxRequestSchema.parse(values)),
     onSuccess: (inbox) => {
       void queryClient.invalidateQueries({ queryKey: ["inboxes"] });
       setActiveInbox(inbox);
       setSelectedUserIds([]);
-      setStep(1);
+      setStep(2);
       message.success("Telegram inbox created");
     },
     onError: () => {
       message.error("Failed to create Telegram inbox");
+    },
+  });
+
+  const createWidgetMutation = useMutation({
+    mutationFn: (values: CreateWidgetInboxRequest) =>
+      createWidgetInbox(CreateWidgetInboxRequestSchema.parse(values)),
+    onSuccess: (inbox) => {
+      void queryClient.invalidateQueries({ queryKey: ["inboxes"] });
+      setActiveInbox(inbox);
+      setSelectedUserIds([]);
+      setStep(2);
+      message.success("Widget inbox created");
+    },
+    onError: () => {
+      message.error("Failed to create Widget inbox");
     },
   });
 
@@ -112,7 +164,7 @@ function InboxesPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["inboxes"] });
       void queryClient.invalidateQueries({ queryKey: ["inbox-members", activeInbox?.id] });
-      setStep(2);
+      setStep(3);
       message.success("Representatives saved");
     },
     onError: () => {
@@ -124,11 +176,13 @@ function InboxesPage() {
   const filteredInboxes = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return inboxes;
-    return inboxes.filter(
-      (inbox) =>
-        inbox.name.toLowerCase().includes(q) ||
-        inbox.channel_conf.bot_name.toLowerCase().includes(q),
-    );
+    return inboxes.filter((inbox) => {
+      if (inbox.name.toLowerCase().includes(q)) return true;
+      if (inbox.channel_type === "telegram") {
+        return inbox.channel_conf.bot_name.toLowerCase().includes(q);
+      }
+      return inbox.channel_conf.welcome_message.toLowerCase().includes(q);
+    });
   }, [inboxes, query]);
 
   const userOptions = useMemo(
@@ -141,17 +195,20 @@ function InboxesPage() {
   );
 
   const openCreate = () => {
-    form.resetFields();
+    telegramForm.resetFields();
+    widgetForm.resetFields();
     setActiveInbox(null);
     setSelectedUserIds([]);
+    setSelectedChannel(null);
     setStep(0);
     setModalOpen(true);
   };
 
   const openMembers = (inbox: Inbox) => {
     setActiveInbox(inbox);
+    setSelectedChannel(inbox.channel_type);
     setSelectedUserIds([]);
-    setStep(1);
+    setStep(2);
     setModalOpen(true);
   };
 
@@ -164,48 +221,68 @@ function InboxesPage() {
   const closeModal = () => {
     setModalOpen(false);
     setStep(0);
+    setSelectedChannel(null);
     setActiveInbox(null);
     setSelectedUserIds([]);
-    form.resetFields();
+    telegramForm.resetFields();
+    widgetForm.resetFields();
   };
+
+  const modalTitle =
+    step === 0
+      ? "Choose a channel"
+      : step === 1
+        ? selectedChannel === "widget"
+          ? "Configure Website Inbox"
+          : "Configure Telegram Inbox"
+        : step === 2
+          ? "Inbox Representatives"
+          : "Setup Complete";
 
   const columns: ColumnsType<Inbox> = [
     {
       title: "Inbox",
       dataIndex: "name",
       key: "name",
-      render: (_, record) => (
-        <Flex align="center" gap={token.marginSM}>
-          <Flex
-            align="center"
-            justify="center"
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: token.borderRadius,
-              background: token.colorFillTertiary,
-              color: token.colorTextSecondary,
-              flex: "0 0 auto",
-            }}
-          >
-            <Send size={18} aria-hidden />
+      render: (_, record) => {
+        const Icon = record.channel_type === "widget" ? Globe : Send;
+        return (
+          <Flex align="center" gap={token.marginSM}>
+            <Flex
+              align="center"
+              justify="center"
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: token.borderRadius,
+                background: token.colorFillTertiary,
+                color: token.colorTextSecondary,
+                flex: "0 0 auto",
+              }}
+            >
+              <Icon size={18} aria-hidden />
+            </Flex>
+            <Flex vertical style={{ minWidth: 0 }}>
+              <Text strong ellipsis>
+                {record.name}
+              </Text>
+              <Text type="secondary" ellipsis>
+                {inboxSubtitle(record)}
+              </Text>
+            </Flex>
           </Flex>
-          <Flex vertical style={{ minWidth: 0 }}>
-            <Text strong ellipsis>
-              {record.name}
-            </Text>
-            <Text type="secondary" ellipsis>
-              @{record.channel_conf.bot_name || "telegram"}
-            </Text>
-          </Flex>
-        </Flex>
-      ),
+        );
+      },
     },
     {
       title: "Channel",
       dataIndex: "channel_type",
       key: "channel_type",
-      render: () => <Tag color="blue">Telegram</Tag>,
+      render: (channelType: Inbox["channel_type"]) => (
+        <Tag color={channelType === "widget" ? "green" : "blue"}>
+          {inboxChannelLabel(channelType)}
+        </Tag>
+      ),
     },
     {
       title: "Representatives",
@@ -238,7 +315,9 @@ function InboxesPage() {
           <Title level={3} style={{ margin: 0 }}>
             Inboxes
           </Title>
-          <Text type="secondary">Create Telegram inboxes and assign customer representatives.</Text>
+          <Text type="secondary">
+            Create website and Telegram inboxes, then assign customer representatives.
+          </Text>
         </Flex>
         <Button type="primary" icon={<Plus size={16} aria-hidden />} onClick={openCreate}>
           New Inbox
@@ -262,7 +341,7 @@ function InboxesPage() {
             pagination={false}
             locale={{
               emptyText: (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No Telegram inboxes yet" />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No inboxes yet" />
               ),
             }}
           />
@@ -271,23 +350,93 @@ function InboxesPage() {
 
       <Modal
         open={modalOpen}
-        title={step === 0 ? "Create Telegram Inbox" : "Inbox Representatives"}
+        title={modalTitle}
         onCancel={closeModal}
         footer={null}
         destroyOnHidden
+        width={step === 0 ? 720 : 560}
       >
         <Flex vertical gap={token.marginLG}>
           <Steps
             size="small"
             current={step}
-            items={[{ title: "Telegram" }, { title: "Representatives" }, { title: "Finish" }]}
+            items={[
+              { title: "Channel" },
+              { title: "Configure" },
+              { title: "Representatives" },
+              { title: "Finish" },
+            ]}
           />
 
           {step === 0 ? (
-            <Form<CreateTelegramInboxRequest>
-              form={form}
+            <Flex gap={token.marginMD} wrap="wrap">
+              {CHANNEL_OPTIONS.map((channel) => {
+                const Icon = channel.icon;
+                return (
+                  <Card
+                    key={channel.key}
+                    hoverable
+                    style={{ flex: "1 1 240px", maxWidth: 320, cursor: "pointer" }}
+                    onClick={() => {
+                      setSelectedChannel(channel.key);
+                      setStep(1);
+                    }}
+                  >
+                    <Flex vertical gap={token.marginSM}>
+                      <Flex align="center" gap={token.marginSM}>
+                        <Icon size={20} aria-hidden />
+                        <Text strong>{channel.title}</Text>
+                      </Flex>
+                      <Text type="secondary">{channel.description}</Text>
+                    </Flex>
+                  </Card>
+                );
+              })}
+            </Flex>
+          ) : null}
+
+          {step === 1 && selectedChannel === "widget" ? (
+            <Form<CreateWidgetInboxRequest>
+              form={widgetForm}
               layout="vertical"
-              onFinish={(values) => createMutation.mutate(values)}
+              onFinish={(values) => createWidgetMutation.mutate(values)}
+            >
+              <Form.Item
+                name="name"
+                label="Inbox name"
+                rules={[{ required: true, message: "Please enter inbox name" }]}
+              >
+                <Input prefix={<InboxIcon size={14} aria-hidden />} placeholder="Website Support" />
+              </Form.Item>
+              <Form.Item
+                name="welcome_message"
+                label="Welcome message"
+                extra="Shown to visitors when they start a chat. Optional."
+              >
+                <TextArea
+                  rows={3}
+                  placeholder="Hi! How can we help you today?"
+                  maxLength={500}
+                  showCount
+                />
+              </Form.Item>
+              <Flex justify="space-between" gap={token.marginSM}>
+                <Button onClick={() => setStep(0)}>Back</Button>
+                <Flex gap={token.marginSM}>
+                  <Button onClick={closeModal}>Cancel</Button>
+                  <Button type="primary" htmlType="submit" loading={createWidgetMutation.isPending}>
+                    Create and continue
+                  </Button>
+                </Flex>
+              </Flex>
+            </Form>
+          ) : null}
+
+          {step === 1 && selectedChannel === "telegram" ? (
+            <Form<CreateTelegramInboxRequest>
+              form={telegramForm}
+              layout="vertical"
+              onFinish={(values) => createTelegramMutation.mutate(values)}
             >
               <Form.Item
                 name="name"
@@ -313,16 +462,23 @@ function InboxesPage() {
               >
                 <Input.Password placeholder="123456:ABC-DEF..." />
               </Form.Item>
-              <Flex justify="flex-end" gap={token.marginSM}>
-                <Button onClick={closeModal}>Cancel</Button>
-                <Button type="primary" htmlType="submit" loading={createMutation.isPending}>
-                  Create and continue
-                </Button>
+              <Flex justify="space-between" gap={token.marginSM}>
+                <Button onClick={() => setStep(0)}>Back</Button>
+                <Flex gap={token.marginSM}>
+                  <Button onClick={closeModal}>Cancel</Button>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    loading={createTelegramMutation.isPending}
+                  >
+                    Create and continue
+                  </Button>
+                </Flex>
               </Flex>
             </Form>
           ) : null}
 
-          {step === 1 ? (
+          {step === 2 ? (
             <Flex vertical gap={token.marginMD}>
               <Text type="secondary">
                 Select users who should handle conversations for {activeInbox?.name ?? "this inbox"}
@@ -351,14 +507,33 @@ function InboxesPage() {
             </Flex>
           ) : null}
 
-          {step === 2 ? (
+          {step === 3 ? (
             <Flex vertical align="center" gap={token.marginMD} style={{ textAlign: "center" }}>
               <CheckCircle2 size={48} color={token.colorSuccess} strokeWidth={1.5} aria-hidden />
               <Flex vertical gap={token.marginXXS}>
-                <Text strong>{activeInbox?.name ?? "Telegram inbox"} is ready</Text>
-                <Text type="secondary">
-                  Your Telegram inbox and representatives have been saved.
-                </Text>
+                <Text strong>{activeInbox?.name ?? "Inbox"} is ready</Text>
+                <Text type="secondary">Your inbox and representatives have been saved.</Text>
+                {activeInbox?.channel_type === "widget" ? (
+                  <Flex
+                    vertical
+                    gap={token.marginXXS}
+                    style={{
+                      marginTop: token.marginSM,
+                      padding: token.paddingMD,
+                      borderRadius: token.borderRadius,
+                      background: token.colorFillTertiary,
+                      width: "100%",
+                    }}
+                  >
+                    <Flex align="center" justify="center" gap={token.marginXS}>
+                      <MessageSquare size={14} aria-hidden />
+                      <Text type="secondary">Inbox ID for /customers/start</Text>
+                    </Flex>
+                    <Text code copyable>
+                      {activeInbox.id}
+                    </Text>
+                  </Flex>
+                ) : null}
               </Flex>
               <Button type="primary" onClick={closeModal}>
                 Back to inboxes

@@ -47,8 +47,12 @@ func TestCreateTelegramInboxStoresConfigAndRedactsResponse(t *testing.T) {
 	if resp.ID == "" || resp.Name != "Telegram Support" || resp.ChannelType != "telegram" {
 		t.Fatalf("resp = %+v", resp)
 	}
-	if resp.ChannelConf.BotToken != "" {
-		t.Fatalf("bot token should be redacted, got %q", resp.ChannelConf.BotToken)
+	conf, ok := resp.ChannelConf.(consoleModels.TelegramConfigItem)
+	if !ok {
+		t.Fatalf("channel conf type = %T", resp.ChannelConf)
+	}
+	if conf.BotToken != "" {
+		t.Fatalf("bot token should be redacted, got %q", conf.BotToken)
 	}
 	if inboxStorage.created.AppKey != "app_1" {
 		t.Fatalf("created appkey = %q", inboxStorage.created.AppKey)
@@ -56,12 +60,12 @@ func TestCreateTelegramInboxStoresConfigAndRedactsResponse(t *testing.T) {
 	if inboxStorage.created.ChannelType != string(appServices.ChannelType_Telegram) {
 		t.Fatalf("channel type = %q", inboxStorage.created.ChannelType)
 	}
-	var conf appServices.TelegramChannelConf
-	if err := json.Unmarshal([]byte(inboxStorage.created.ChannelConf), &conf); err != nil {
+	var storedConf appServices.TelegramChannelConf
+	if err := json.Unmarshal([]byte(inboxStorage.created.ChannelConf), &storedConf); err != nil {
 		t.Fatalf("channel conf json: %v", err)
 	}
-	if conf.BotName != "support_bot" || conf.BotToken != "secret-token" {
-		t.Fatalf("conf = %+v", conf)
+	if storedConf.BotName != "support_bot" || storedConf.BotToken != "secret-token" {
+		t.Fatalf("conf = %+v", storedConf)
 	}
 }
 
@@ -74,13 +78,13 @@ func TestCreateTelegramInboxRequiresConfig(t *testing.T) {
 }
 
 func TestQryInboxesUsesAppScopeAndRedactsToken(t *testing.T) {
-	conf, _ := json.Marshal(appServices.TelegramChannelConf{BotName: "bot", BotToken: "secret"})
+	storedConf, _ := json.Marshal(appServices.TelegramChannelConf{BotName: "bot", BotToken: "secret"})
 	inboxStorage := &fakeInboxStorage{
 		list: []*storageModels.Inbox{{
 			InboxId:     "inbox_1",
 			Name:        "Telegram",
 			ChannelType: "telegram",
-			ChannelConf: string(conf),
+			ChannelConf: string(storedConf),
 			AppKey:      "app_1",
 		}},
 		total: 1,
@@ -92,14 +96,115 @@ func TestQryInboxesUsesAppScopeAndRedactsToken(t *testing.T) {
 	if code != errs.IMErrorCode_SUCCESS {
 		t.Fatalf("code = %d", code)
 	}
-	if inboxStorage.qryAppkey != "app_1" || inboxStorage.qryChannelType != "telegram" {
+	if inboxStorage.qryAppkey != "app_1" || inboxStorage.qryChannelType != "" {
 		t.Fatalf("query scope app=%q type=%q", inboxStorage.qryAppkey, inboxStorage.qryChannelType)
 	}
 	if len(resp.List) != 1 || resp.List[0].MemberCount != 2 {
 		t.Fatalf("resp = %+v", resp)
 	}
-	if resp.List[0].ChannelConf.BotName != "bot" || resp.List[0].ChannelConf.BotToken != "" {
-		t.Fatalf("conf = %+v", resp.List[0].ChannelConf)
+	telegramConf, ok := resp.List[0].ChannelConf.(consoleModels.TelegramConfigItem)
+	if !ok {
+		t.Fatalf("channel conf type = %T", resp.List[0].ChannelConf)
+	}
+	if telegramConf.BotName != "bot" || telegramConf.BotToken != "" {
+		t.Fatalf("conf = %+v", telegramConf)
+	}
+}
+
+func TestCreateWidgetInboxStoresWelcomeMessage(t *testing.T) {
+	inboxStorage := &fakeInboxStorage{}
+	withInboxFakes(t, inboxStorage, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+
+	code, resp := CreateWidgetInbox(inboxTestCtx(), &consoleModels.CreateWidgetInboxReq{
+		Name:           "Website Support",
+		WelcomeMessage: "Hello there",
+	})
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code = %d", code)
+	}
+	if resp.ChannelType != "widget" {
+		t.Fatalf("channel type = %q", resp.ChannelType)
+	}
+	widgetConf, ok := resp.ChannelConf.(consoleModels.WidgetConfigItem)
+	if !ok || widgetConf.WelcomeMessage != "Hello there" {
+		t.Fatalf("widget conf = %+v", resp.ChannelConf)
+	}
+	var stored appServices.WebWidgetChannelConf
+	if err := json.Unmarshal([]byte(inboxStorage.created.ChannelConf), &stored); err != nil {
+		t.Fatalf("channel conf json: %v", err)
+	}
+	if stored.WelcomeMessage != "Hello there" {
+		t.Fatalf("stored conf = %+v", stored)
+	}
+}
+
+func TestCreateWidgetInboxAllowsEmptyWelcomeMessage(t *testing.T) {
+	inboxStorage := &fakeInboxStorage{}
+	withInboxFakes(t, inboxStorage, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+
+	code, resp := CreateWidgetInbox(inboxTestCtx(), &consoleModels.CreateWidgetInboxReq{Name: "Website"})
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code = %d", code)
+	}
+	widgetConf, ok := resp.ChannelConf.(consoleModels.WidgetConfigItem)
+	if !ok || widgetConf.WelcomeMessage != "" {
+		t.Fatalf("widget conf = %+v", resp.ChannelConf)
+	}
+}
+
+func TestCreateWidgetInboxRequiresName(t *testing.T) {
+	withInboxFakes(t, &fakeInboxStorage{}, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+	code, _ := CreateWidgetInbox(inboxTestCtx(), &consoleModels.CreateWidgetInboxReq{})
+	if code != errs.IMErrorCode_APP_REQ_BODY_ILLEGAL {
+		t.Fatalf("code = %d", code)
+	}
+}
+
+func TestQryInboxesIncludesWidgetRows(t *testing.T) {
+	widgetConf, _ := json.Marshal(appServices.WebWidgetChannelConf{WelcomeMessage: "Hi"})
+	inboxStorage := &fakeInboxStorage{
+		list: []*storageModels.Inbox{
+			{
+				InboxId:     "inbox_widget",
+				Name:        "Website",
+				ChannelType: "widget",
+				ChannelConf: string(widgetConf),
+				AppKey:      "app_1",
+			},
+		},
+		total: 1,
+	}
+	withInboxFakes(t, inboxStorage, &fakeInboxMemberStorage{counts: map[string]int64{}}, &fakeUserStorageForInbox{})
+
+	code, resp := QryInboxes(inboxTestCtx(), 20, 0)
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code = %d", code)
+	}
+	if len(resp.List) != 1 || resp.List[0].ChannelType != "widget" {
+		t.Fatalf("resp = %+v", resp)
+	}
+	widgetItem, ok := resp.List[0].ChannelConf.(consoleModels.WidgetConfigItem)
+	if !ok || widgetItem.WelcomeMessage != "Hi" {
+		t.Fatalf("widget conf = %+v", resp.List[0].ChannelConf)
+	}
+}
+
+func TestReplaceInboxMembersWorksForWidgetInbox(t *testing.T) {
+	inboxStorage := &fakeInboxStorage{byId: map[string]*storageModels.Inbox{
+		"inbox_widget": {InboxId: "inbox_widget", ChannelType: "widget", AppKey: "app_1"},
+	}}
+	memberStorage := &fakeInboxMemberStorage{}
+	userStorage := &fakeUserStorageForInbox{users: map[string]*storageModels.User{
+		"u_1": {UserId: "u_1", AppKey: "app_1"},
+	}}
+	withInboxFakes(t, inboxStorage, memberStorage, userStorage)
+
+	code := ReplaceInboxMembers(inboxTestCtx(), "inbox_widget", &consoleModels.ReplaceInboxMembersReq{UserIds: []string{"u_1"}})
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code = %d", code)
+	}
+	if !reflect.DeepEqual(memberStorage.replaced, []string{"u_1"}) {
+		t.Fatalf("replaced = %v", memberStorage.replaced)
 	}
 }
 
