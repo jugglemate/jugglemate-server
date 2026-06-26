@@ -1,4 +1,5 @@
 import type { AuthTokens, User, MenuItem } from "@/api/schemas";
+import { APP_MENU_TREE, filterMenuTreeByPermissions } from "@/utils/appMenu";
 import { createPersistentStore } from "./createPersistentStore";
 
 interface AuthState {
@@ -49,11 +50,15 @@ export const useAuthStore = createPersistentStore<AuthState>(
       const p = persistedState as Partial<
         Pick<AuthState, "tokens" | "user" | "menus" | "isAuthenticated">
       > | null;
+      const user = p?.user ?? currentState.user;
+      const menus = user?.permissions?.length
+        ? filterMenuTreeByPermissions(APP_MENU_TREE, user.permissions)
+        : (p?.menus ?? currentState.menus);
       return {
         ...currentState,
         tokens: p?.tokens ?? currentState.tokens,
-        user: p?.user ?? currentState.user,
-        menus: p?.menus ?? currentState.menus,
+        user,
+        menus,
         isAuthenticated: p?.isAuthenticated ?? currentState.isAuthenticated,
       };
     },

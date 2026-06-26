@@ -84,4 +84,9 @@ func RouteConsole(group *gin.RouterGroup) {
 	group.POST("/users", consoleApis.CreateUser)
 	group.PUT("/users/:user_id", consoleApis.UpdateUser)
 	group.DELETE("/users/:user_id", consoleApis.DeleteUser)
+
+	group.GET("/inboxes", consoleApis.QryInboxes)
+	group.POST("/inboxes/telegram", consoleApis.CreateTelegramInbox)
+	group.GET("/inboxes/:inbox_id/members", consoleApis.QryInboxMembers)
+	group.PUT("/inboxes/:inbox_id/members", consoleApis.ReplaceInboxMembers)
 }

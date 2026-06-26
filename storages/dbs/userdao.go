@@ -2,6 +2,7 @@ package dbs
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/juggleim/jugglemate-server/commons/dbcommons"
@@ -16,7 +17,7 @@ type UserDao struct {
 	Nickname     string    `gorm:"nickname"`
 	Avator       string    `gorm:"avator"`
 	LoginAccount string    `gorm:"login_account"`
-	Email        string    `gorm:"email"`
+	Email        *string   `gorm:"email"`
 	LoginPass    string    `gorm:"login_pass"`
 	Role         int       `gorm:"role"`
 	Status       int       `gorm:"status"`
@@ -30,6 +31,21 @@ func (UserDao) TableName() string {
 	return "users"
 }
 
+func emailPtrForDB(email string) *string {
+	trimmed := strings.TrimSpace(email)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func emailStringFromDB(email *string) string {
+	if email == nil {
+		return ""
+	}
+	return *email
+}
+
 func (d *UserDao) toModel() *models.User {
 	return &models.User{
 		ID:           d.ID,
@@ -37,7 +53,7 @@ func (d *UserDao) toModel() *models.User {
 		Nickname:     d.Nickname,
 		Avator:       d.Avator,
 		LoginAccount: d.LoginAccount,
-		Email:        d.Email,
+		Email:        emailStringFromDB(d.Email),
 		LoginPass:    d.LoginPass,
 		Role:         models.UserRole(d.Role),
 		Status:       d.Status,
@@ -78,7 +94,7 @@ func (d *UserDao) Create(item models.User) error {
 		Nickname:     item.Nickname,
 		Avator:       item.Avator,
 		LoginAccount: item.LoginAccount,
-		Email:        item.Email,
+		Email:        emailPtrForDB(item.Email),
 		LoginPass:    item.LoginPass,
 		Role:         int(item.Role),
 		Status:       item.Status,
@@ -189,7 +205,7 @@ func (d *UserDao) UpdateUser(appkey, userId string, updates models.UserUpdate) e
 		fields["nickname"] = *updates.Nickname
 	}
 	if updates.Email != nil {
-		fields["email"] = *updates.Email
+		fields["email"] = emailPtrForDB(*updates.Email)
 	}
 	if updates.Role != nil {
 		fields["role"] = int(*updates.Role)

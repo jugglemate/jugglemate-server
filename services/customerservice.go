@@ -17,6 +17,7 @@ import (
 
 const (
 	CustomChannel_Web       string = "web"
+	CustomInbox_Web         string = "web"
 	CustomerSourceIDPrefix  string = "customer_"
 	ConversationType_Ticket int    = 2
 )
@@ -28,8 +29,10 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 	}
 
 	channelId := CustomChannel_Web
+	inboxId := CustomInbox_Web
 	customerStorage := storages.NewCustomerStorage()
-	relStorage := storages.NewCustomerChannelRelStorage()
+	inboxStorage := storages.NewInboxStorage()
+	relStorage := storages.NewCustomerInboxRelStorage()
 	ticketStorage := storages.NewTicketStorage()
 	nickname := strings.TrimSpace(req.Nickname)
 
@@ -53,14 +56,30 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 		}
 	}
 
-	rel, err := relStorage.FindByCustomerChannel(appkey, customer.CustomerId, channelId)
+	inbox, err := inboxStorage.FindByInboxId(appkey, inboxId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if inbox == nil {
+		inbox = &storageModels.Inbox{
+			InboxId:     inboxId,
+			ChannelType: channelId,
+			Name:        channelId,
+			AppKey:      appkey,
+		}
+		if err := inboxStorage.Create(*inbox); err != nil {
+			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+		}
+	}
+
+	rel, err := relStorage.FindByCustomerInbox(appkey, customer.CustomerId, inbox.InboxId)
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
 	if rel == nil {
-		rel = &storageModels.CustomerChannelRel{
+		rel = &storageModels.CustomerInboxRel{
 			CustomerId: customer.CustomerId,
-			ChannelId:  channelId,
+			InboxId:    inbox.InboxId,
 			SourceId:   CustomerSourceIDPrefix + tools.GenerateUUIDShort22(),
 			AppKey:     appkey,
 		}

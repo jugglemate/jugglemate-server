@@ -7,4 +7,4 @@ export const APP_FAVICON_SRC = `${import.meta.env.BASE_URL}favicon.svg`;
 export const APP_BRAND_NAME = "JuggleMate";
 
 /** Default permissions for console admins after login (until a profile API exists). */
-export const CONSOLE_ADMIN_PERMISSIONS = ["user:view"] as const;
+export const CONSOLE_ADMIN_PERMISSIONS = ["user:view", "inbox:view"] as const;

@@ -35,8 +35,11 @@ export function applyLoginSession(data: JmateLoginResponse): void {
 
 /** Fetches mock auth profile when available; skips if user is already in store. */
 export async function fetchSessionAndApplyToStore(): Promise<void> {
-  const { user } = useAuthStore.getState();
-  if (user) return;
+  const store = useAuthStore.getState();
+  if (store.user) {
+    store.setMenus(filterMenuTreeByPermissions(APP_MENU_TREE, store.user.permissions));
+    return;
+  }
 
   const [userBase, permissions] = await Promise.all([
     httpClient.get(AUTH_ENDPOINTS.user).then((d) => AuthUserResponseSchema.parse(d)),
@@ -44,7 +47,6 @@ export async function fetchSessionAndApplyToStore(): Promise<void> {
   ]);
   const nextUser = UserSchema.parse({ ...userBase, permissions });
   const menus = filterMenuTreeByPermissions(APP_MENU_TREE, permissions);
-  const { setUser, setMenus } = useAuthStore.getState();
-  setUser(nextUser);
-  setMenus(menus);
+  store.setUser(nextUser);
+  store.setMenus(menus);
 }

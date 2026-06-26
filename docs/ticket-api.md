@@ -87,7 +87,7 @@ curl -X POST 'http://localhost:8080/jmate/customers/start' \
 | --- | --- | --- |
 | `conversation_id` | string | 工单 ID，同时作为 IM 群组 ID |
 | `conversation_type` | int | 会话类型。工单会话固定为 `2` |
-| `user_id` | string | 访客在 IM 中使用的用户 ID，即 `customerchannelrels.source_id` |
+| `user_id` | string | 访客在 IM 中使用的用户 ID，即 `customerinboxrels.source_id` |
 | `nickname` | string | 访客昵称 |
 | `im_token` | string | 访客 IM 登录 token |
 
@@ -95,7 +95,7 @@ curl -X POST 'http://localhost:8080/jmate/customers/start' \
 
 - 先按 `identifier` 在 `customers` 表中查找访客。
 - 不存在时创建 customer，`customer_id` 由服务端生成。
-- 按 `customer_id + channel_id` 查找或创建 `customerchannelrels`，Web 渠道的 `channel_id` 为 `web`。
+- 按 `customer_id + inbox_id` 查找或创建 `customerinboxrels`，Web 入口的 `inbox_id` 为 `web`。
 - `source_id` 使用 `customer_` 前缀加服务端生成 ID。
 - 查找该 `source_id` 对应工单，不存在时创建新工单。
 - 新工单的 `ticket_id` 由服务端生成，状态为 `0`。

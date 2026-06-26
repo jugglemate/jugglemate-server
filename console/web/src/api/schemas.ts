@@ -219,3 +219,45 @@ export function toUpdateUserApiBody(
     roles: [values.role],
   };
 }
+
+export const TelegramChannelConfigSchema = z.object({
+  bot_name: z.string(),
+  bot_token: z.string().optional().default(""),
+});
+
+export type TelegramChannelConfig = z.infer<typeof TelegramChannelConfigSchema>;
+
+export const InboxSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  channel_type: z.literal("telegram"),
+  channel_conf: TelegramChannelConfigSchema,
+  member_count: z.number().int().nonnegative(),
+  created_time: z.number().int().catch(0),
+  updated_time: z.number().int().catch(0),
+});
+
+export type Inbox = z.infer<typeof InboxSchema>;
+
+export const CreateTelegramInboxRequestSchema = z.object({
+  name: z.string().trim().min(1, "Please enter inbox name"),
+  bot_name: z.string().trim().min(1, "Please enter bot name"),
+  bot_token: z.string().trim().min(1, "Please enter bot token"),
+});
+
+export type CreateTelegramInboxRequest = z.infer<typeof CreateTelegramInboxRequestSchema>;
+
+export const InboxMemberSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  avatar: z.string().nullable().catch(null),
+  email: z.string().nullable().catch(null),
+});
+
+export type InboxMember = z.infer<typeof InboxMemberSchema>;
+
+export const InboxMembersResponseSchema = z.object({
+  list: z.array(InboxMemberSchema),
+});
+
+export type InboxMembersResponse = z.infer<typeof InboxMembersResponseSchema>;

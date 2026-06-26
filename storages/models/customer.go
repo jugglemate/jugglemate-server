@@ -22,23 +22,23 @@ type ICustomerStorage interface {
 	FindByIdentifier(appkey, identifier string) (*Customer, error)
 }
 
-type CustomerChannelRel struct {
+type CustomerInboxRel struct {
 	ID          int64
 	CustomerId  string
-	ChannelId   string
+	InboxId     string
 	SourceId    string
 	CreatedTime int64
 	UpdatedTime int64
 	AppKey      string
 }
 
-type ICustomerChannelRelStorage interface {
-	Create(item CustomerChannelRel) error
-	Update(item CustomerChannelRel) error
-	Upsert(item CustomerChannelRel) error
-	Delete(appkey, customerId, channelId, sourceId string) error
-	Find(appkey, customerId, channelId, sourceId string) (*CustomerChannelRel, error)
-	FindByCustomerChannel(appkey, customerId, channelId string) (*CustomerChannelRel, error)
-	QryByCustomer(appkey, customerId string, startId, limit int64) ([]*CustomerChannelRel, error)
-	QryByChannel(appkey, channelId string, startId, limit int64) ([]*CustomerChannelRel, error)
+type ICustomerInboxRelStorage interface {
+	Create(item CustomerInboxRel) error
+	Update(item CustomerInboxRel) error
+	Upsert(item CustomerInboxRel) error
+	Delete(appkey, customerId, inboxId, sourceId string) error
+	Find(appkey, customerId, inboxId, sourceId string) (*CustomerInboxRel, error)
+	FindByCustomerInbox(appkey, customerId, inboxId string) (*CustomerInboxRel, error)
+	QryByCustomer(appkey, customerId string, startId, limit int64) ([]*CustomerInboxRel, error)
+	QryByInbox(appkey, inboxId string, startId, limit int64) ([]*CustomerInboxRel, error)
 }

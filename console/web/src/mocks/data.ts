@@ -1,4 +1,4 @@
-import type { User } from "@/api/schemas";
+import type { Inbox, User } from "@/api/schemas";
 import { vercelAvatarUrl } from "./utils";
 
 const MOCK_IDENTITIES: ReadonlyArray<[string, string]> = [
@@ -40,3 +40,22 @@ export const MOCK_USERS: User[] = MOCK_IDENTITIES.map(([username, email], i) => 
   roles: i === 0 ? ["admin"] : ["editor"],
   permissions: i === 0 ? ["user:view", "user:create", "user:edit", "user:delete"] : ["user:view"],
 }));
+
+export const MOCK_INBOXES: Inbox[] = [
+  {
+    id: "inbox_telegram_1",
+    name: "Telegram Support",
+    channel_type: "telegram",
+    channel_conf: {
+      bot_name: "support_bot",
+      bot_token: "",
+    },
+    member_count: 2,
+    created_time: Date.now() - 86_400_000,
+    updated_time: Date.now() - 3_600_000,
+  },
+];
+
+export const MOCK_INBOX_MEMBER_IDS: Record<string, string[]> = {
+  inbox_telegram_1: ["1", "2"],
+};

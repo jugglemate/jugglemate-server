@@ -23,6 +23,17 @@ export const APP_MENU_TREE: MenuItem[] = [
     sort: 1,
     hidden: false,
   },
+  {
+    id: "3",
+    kind: "item",
+    name: "Inboxes",
+    path: "/inboxes",
+    icon: "IconLucideInbox",
+    children: null,
+    permissions: ["inbox:view"],
+    sort: 2,
+    hidden: false,
+  },
 ];
 
 function hasRequiredPermissions(
@@ -73,6 +84,8 @@ export function requiredPermissionForPath(pathname: string): string | null {
   const map: Record<string, string | null> = {
     "/dashboard": null,
     "/users": "user:view",
+    "/inboxes": "inbox:view",
+    "/settings/inboxes": "inbox:view",
     "/403": null,
   };
   return map[p] ?? null;

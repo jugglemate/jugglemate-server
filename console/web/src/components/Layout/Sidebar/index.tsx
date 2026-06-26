@@ -7,6 +7,7 @@ import {
   CircleDashed,
   Folder,
   Home,
+  Inbox,
   PanelLeft,
   SlidersHorizontal,
   Star,
@@ -28,8 +29,10 @@ const { Sider } = Layout;
 const MENU_LABELS: Record<string, string> = {
   Platform: "Platform",
   Projects: "Projects",
+  Settings: "Settings",
   Dashboard: "Dashboard",
   Users: "Users",
+  Inboxes: "Inboxes",
   "Design Engineering": "Design Engineering",
   "Sales & Marketing": "Sales & Marketing",
 };
@@ -43,6 +46,7 @@ type BuildMenuResult = {
 
 const MENU_ICON_MAP: Record<string, LucideIcon> = {
   IconLucideLayoutDashboard: Home,
+  IconLucideInbox: Inbox,
   IconLucideUsers: User,
   IconLucideUserList: Users,
   /** Back-compat for older menu payloads still using IconLucideHistory */

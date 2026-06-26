@@ -34,17 +34,6 @@ CREATE TABLE IF NOT EXISTS `customers` (
   UNIQUE KEY `uniq_id` (`app_key`,`customer_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS `customerchannelrels` (
-  `id` int NOT NULL AUTO_INCREMENT,
-  `customer_id` varchar(32) DEFAULT '',
-  `channel_id` varchar(32) DEFAULT '',
-  `source_id` varchar(32) DEFAULT '',
-  `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
-  `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-  `app_key` varchar(20) DEFAULT '',
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 CREATE TABLE IF NOT EXISTS `tickets` (
   `id` int NOT NULL AUTO_INCREMENT,
   `ticket_id` varchar(50) DEFAULT '',
