@@ -20,6 +20,79 @@ const (
 	ConversationType_Ticket int    = 2
 )
 
+var (
+	newInboxMemberStorageForCustomer = storages.NewInboxMemberStorage
+	newUserStorageForCustomer          = storages.NewUserStorage
+	registerIMUserForCustomer          = registerIMUser
+)
+
+func registerIMUser(sdk *juggleimsdk.JuggleIMSdk, userId, nickname, portrait string) errs.IMErrorCode {
+	resp, code, _, err := sdk.Register(juggleimsdk.User{
+		UserId:       userId,
+		Nickname:     nickname,
+		UserPortrait: portrait,
+	})
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
+	}
+	if code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
+		return errs.IMErrorCode(code)
+	}
+	if resp == nil || resp.Token == "" {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
+	}
+	return errs.IMErrorCode_SUCCESS
+}
+
+func buildTicketGroupMemberIds(sourceId string, inboxMemberIds []string) []string {
+	memberIds := []string{sourceId}
+	seen := map[string]struct{}{sourceId: {}}
+	for _, memberId := range inboxMemberIds {
+		memberId = strings.TrimSpace(memberId)
+		if memberId == "" {
+			continue
+		}
+		if _, ok := seen[memberId]; ok {
+			continue
+		}
+		seen[memberId] = struct{}{}
+		memberIds = append(memberIds, memberId)
+	}
+	return memberIds
+}
+
+func prepareTicketGroupMemberIds(
+	appkey, inboxId, sourceId string,
+	sdk *juggleimsdk.JuggleIMSdk,
+	memberStorage storageModels.IInboxMemberStorage,
+	userStorage storageModels.IUserStorage,
+) (errs.IMErrorCode, []string) {
+	members, err := memberStorage.QryByInbox(appkey, inboxId, 0, 1000)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+
+	inboxMemberIds := make([]string, 0, len(members))
+	for _, member := range members {
+		userId := strings.TrimSpace(member.MemberId)
+		if userId == "" || userId == sourceId {
+			continue
+		}
+		user, err := userStorage.FindByUserId(appkey, userId)
+		if err != nil {
+			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+		}
+		if user == nil {
+			continue
+		}
+		if code := registerIMUserForCustomer(sdk, user.UserId, user.Nickname, user.Avator); code != errs.IMErrorCode_SUCCESS {
+			return code, nil
+		}
+		inboxMemberIds = append(inboxMemberIds, userId)
+	}
+	return errs.IMErrorCode_SUCCESS, buildTicketGroupMemberIds(sourceId, inboxMemberIds)
+}
+
 func validateWidgetInbox(inbox *storageModels.Inbox) errs.IMErrorCode {
 	if inbox == nil || inbox.ChannelType != string(ChannelType_Widget) {
 		return errs.IMErrorCode_APP_CHANNEL_NOT_EXIST
@@ -115,18 +188,27 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 		if groupName == "" {
 			groupName = customer.Nickname
 		}
-		code, _, err := sdk.CreateGroup(juggleimsdk.GroupMembersReq{
+		memberCode, memberIds := prepareTicketGroupMemberIds(
+			appkey,
+			inbox.InboxId,
+			rel.SourceId,
+			sdk,
+			newInboxMemberStorageForCustomer(),
+			newUserStorageForCustomer(),
+		)
+		if memberCode != errs.IMErrorCode_SUCCESS {
+			return memberCode, nil
+		}
+		groupCode, _, err := sdk.CreateGroup(juggleimsdk.GroupMembersReq{
 			GroupId:   ticketId,
 			GroupName: groupName,
-			MemberIds: []string{
-				rel.SourceId,
-			},
+			MemberIds: memberIds,
 		})
 		if err != nil {
 			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 		}
-		if code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
-			return errs.IMErrorCode(code), nil
+		if groupCode != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
+			return errs.IMErrorCode(groupCode), nil
 		}
 		ticket = &storageModels.Ticket{
 			TicketId:   ticketId,

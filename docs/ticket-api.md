@@ -107,7 +107,7 @@ curl -X POST 'http://localhost:8080/jmate/customers/start' \
 - `source_id` 使用 `customer_` 前缀加服务端生成 ID。
 - 查找该 `source_id` 对应工单，不存在时创建新工单。
 - 新工单的 `ticket_id` 由服务端生成，状态为 `0`。
-- 新工单会同步创建 IM 群组，`group_id` 使用 `ticket_id`。
+- 新工单会同步创建 IM 群组，`group_id` 使用 `ticket_id`，群成员包含访客 `source_id` 与该工单对应 inbox 在 `inboxmembers` 中配置的全部代表用户。
 
 ## 查询工单列表
 
