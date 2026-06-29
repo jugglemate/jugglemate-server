@@ -24,6 +24,7 @@ type AppConfig struct {
 
 	ImApiDomain   string `yaml:"imApiDomain"`
 	ImAdminDomain string `yaml:"imAdminDomain"`
+	JmateBaseUrl  string `yaml:"jmateBaseUrl"`
 
 	AiBotCallbackUrl string `yaml:"aiBotCallbackUrl"`
 

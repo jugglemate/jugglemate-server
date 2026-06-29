@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/juggleim/jugglemate-server/commons/configures"
 	"github.com/juggleim/jugglemate-server/commons/ctxs"
 	"github.com/juggleim/jugglemate-server/commons/errs"
+	telegramapi "github.com/juggleim/jugglemate-server/commons/telegram"
 	"github.com/juggleim/jugglemate-server/commons/tools"
 	consoleModels "github.com/juggleim/jugglemate-server/console/apis/models"
 	appServices "github.com/juggleim/jugglemate-server/services"
@@ -20,6 +22,15 @@ var (
 	newInboxStorageForConsole       = storages.NewInboxStorage
 	newInboxMemberStorageForConsole = storages.NewInboxMemberStorage
 	newUserStorageForConsoleInbox   = storages.NewUserStorage
+	telegramGetMeForConsole         = func(botToken string) (*telegramapi.BotInfo, error) {
+		return telegramapi.NewClient().GetMe(botToken)
+	}
+	telegramDeleteWebhookForConsole = func(botToken string) error {
+		return telegramapi.NewClient().DeleteWebhook(botToken)
+	}
+	telegramSetWebhookForConsole = func(botToken, callbackURL string) error {
+		return telegramapi.NewClient().SetWebhook(botToken, callbackURL)
+	}
 )
 
 func QryInboxes(ctx context.Context, limit, offset int64) (errs.IMErrorCode, *consoleModels.InboxListResp) {
@@ -70,6 +81,26 @@ func CreateTelegramInbox(ctx context.Context, req *consoleModels.CreateTelegramI
 	if name == "" || botName == "" || botToken == "" {
 		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
 	}
+	baseURL := strings.TrimRight(strings.TrimSpace(configures.Config.JmateBaseUrl), "/")
+	if baseURL == "" {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+	botInfo, err := telegramGetMeForConsole(botToken)
+	if err != nil {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+	if botInfo != nil && strings.TrimSpace(botInfo.Username) != "" {
+		botName = strings.TrimSpace(botInfo.Username)
+	}
+
+	inboxId := tools.GenerateUUIDShort22()
+	callbackURL := telegramWebhookCallbackURL(baseURL, inboxId)
+	if err := telegramDeleteWebhookForConsole(botToken); err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if err := telegramSetWebhookForConsole(botToken, callbackURL); err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
 
 	channelConf, err := json.Marshal(appServices.TelegramChannelConf{
 		BotName:  botName,
@@ -80,7 +111,7 @@ func CreateTelegramInbox(ctx context.Context, req *consoleModels.CreateTelegramI
 	}
 
 	inbox := storageModels.Inbox{
-		InboxId:     tools.GenerateUUIDShort22(),
+		InboxId:     inboxId,
 		ChannelType: string(appServices.ChannelType_Telegram),
 		ChannelConf: string(channelConf),
 		Name:        name,
@@ -91,6 +122,10 @@ func CreateTelegramInbox(ctx context.Context, req *consoleModels.CreateTelegramI
 	}
 	item := ToInboxItem(&inbox, 0)
 	return errs.IMErrorCode_SUCCESS, &item
+}
+
+func telegramWebhookCallbackURL(baseURL, inboxId string) string {
+	return strings.TrimRight(baseURL, "/") + "/jmate/webhooks/telegram/" + inboxId
 }
 
 func CreateWidgetInbox(ctx context.Context, req *consoleModels.CreateWidgetInboxReq) (errs.IMErrorCode, *consoleModels.InboxItem) {

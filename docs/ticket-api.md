@@ -109,6 +109,37 @@ curl -X POST 'http://localhost:8080/jmate/customers/start' \
 - 新工单的 `ticket_id` 由服务端生成，状态为 `0`。
 - 新工单会同步创建 IM 群组，`group_id` 使用 `ticket_id`，群成员包含访客 `source_id` 与该工单对应 inbox 在 `inboxmembers` 中配置的全部代表用户。
 
+## Telegram Webhook
+
+Telegram 渠道由管理后台创建 inbox 时自动配置 webhook。服务端会先通过 Telegram Bot API 校验 `bot_token`，再把回调地址设置为：
+
+```text
+{jmateBaseUrl}/jmate/webhooks/telegram/{inbox_id}
+```
+
+`jmateBaseUrl` 必须配置在 `conf/config.yml`，示例：
+
+```yaml
+jmateBaseUrl: https://example.com
+```
+
+### 请求
+
+`POST /jmate/webhooks/telegram/:inbox_id`
+
+该接口由 Telegram Bot API 回调，不要求 `Authorization` 或 `appkey`。服务端会根据 `:inbox_id` 查询 Telegram inbox，并从 inbox 记录中获取 `app_key`。
+
+### 处理规则
+
+- 只处理 Telegram private chat 中的 `message.text` 或 `message.caption`。
+- 非 private chat、非 message update、空文本或不支持的消息体会直接确认成功，不创建 customer、ticket 或 IM 消息。
+- Telegram 访客 identity 使用 `message.from.id` 的数字 ID 字符串。
+- Telegram 访客在 IM 中的 `source_id` 与 Web 渠道一致，使用 `customer_` 前缀加服务端生成 ID。
+- 访客昵称优先使用 `first_name + last_name`，为空时使用 `username`，再为空时使用 Telegram 数字 ID。
+- 服务端复用 Web 访客相同的工单启动流程：创建或复用 customer、customer-inbox relation、IM 用户和 ticket。
+- 新工单会创建 IM 群组，`group_id` 使用 `ticket_id`，群成员包含 Telegram 访客 `source_id` 与该 inbox 的成员。
+- Telegram 消息会以访客 `source_id` 为 sender，发送到 `ticket_id` 对应的群会话，消息类型为 `jg:text`。
+
 ## 查询工单列表
 
 按当前登录用户权限查询工单列表，支持按状态过滤和 `limit`/`offset` 分页。

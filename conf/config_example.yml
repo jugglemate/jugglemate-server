@@ -12,6 +12,7 @@ mysql:
 
 imApiDomain: http://127.0.0.1:9001
 imAdminDomain: http://127.0.0.1:8090
+jmateBaseUrl: http://127.0.0.1:8050
 
 botConnector:
   domain: <bot-connector url>
@@ -19,7 +20,3 @@ botConnector:
 agentServer:
   baseURL: http://127.0.0.1:8080/v1
   timeoutSeconds: 5
-  
-# 默认 AppKey 配置（简化版，实际生产应从数据库读取）
-appkey: juggleim
-appSecret: juggleim_secret_key

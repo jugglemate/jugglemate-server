@@ -22,6 +22,7 @@ type IInboxStorage interface {
 	Upsert(item Inbox) error
 	Delete(appkey, inboxId string) error
 	FindByInboxId(appkey, inboxId string) (*Inbox, error)
+	FindByInboxIdAny(inboxId string) ([]*Inbox, error)
 	QryByApp(appkey, channelType string, limit, offset int64) (*InboxListResult, error)
 	QryByChannelType(appkey, channelType string, startId, limit int64) ([]*Inbox, error)
 }

@@ -3,11 +3,14 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 
+	"github.com/juggleim/jugglemate-server/commons/configures"
 	"github.com/juggleim/jugglemate-server/commons/ctxs"
 	"github.com/juggleim/jugglemate-server/commons/errs"
+	telegramapi "github.com/juggleim/jugglemate-server/commons/telegram"
 	consoleModels "github.com/juggleim/jugglemate-server/console/apis/models"
 	appServices "github.com/juggleim/jugglemate-server/services"
 	storageModels "github.com/juggleim/jugglemate-server/storages/models"
@@ -32,13 +35,44 @@ func withInboxFakes(t *testing.T, inbox *fakeInboxStorage, members *fakeInboxMem
 	})
 }
 
+func withTelegramSetupFakes(t *testing.T) *fakeTelegramSetup {
+	t.Helper()
+	fake := &fakeTelegramSetup{botInfo: &telegramapi.BotInfo{Username: "support_bot"}}
+	oldGetMe := telegramGetMeForConsole
+	oldDelete := telegramDeleteWebhookForConsole
+	oldSet := telegramSetWebhookForConsole
+	oldConfig := configures.Config
+	configures.Config.JmateBaseUrl = "https://jmate.example.com/"
+	telegramGetMeForConsole = func(botToken string) (*telegramapi.BotInfo, error) {
+		fake.getMeToken = botToken
+		return fake.botInfo, fake.getMeErr
+	}
+	telegramDeleteWebhookForConsole = func(botToken string) error {
+		fake.deleteToken = botToken
+		return fake.deleteErr
+	}
+	telegramSetWebhookForConsole = func(botToken, callbackURL string) error {
+		fake.setToken = botToken
+		fake.callbackURL = callbackURL
+		return fake.setErr
+	}
+	t.Cleanup(func() {
+		telegramGetMeForConsole = oldGetMe
+		telegramDeleteWebhookForConsole = oldDelete
+		telegramSetWebhookForConsole = oldSet
+		configures.Config = oldConfig
+	})
+	return fake
+}
+
 func TestCreateTelegramInboxStoresConfigAndRedactsResponse(t *testing.T) {
 	inboxStorage := &fakeInboxStorage{}
 	withInboxFakes(t, inboxStorage, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+	telegramSetup := withTelegramSetupFakes(t)
 
 	code, resp := CreateTelegramInbox(inboxTestCtx(), &consoleModels.CreateTelegramInboxReq{
 		Name:     "Telegram Support",
-		BotName:  "support_bot",
+		BotName:  "manual_bot",
 		BotToken: "secret-token",
 	})
 	if code != errs.IMErrorCode_SUCCESS {
@@ -67,13 +101,78 @@ func TestCreateTelegramInboxStoresConfigAndRedactsResponse(t *testing.T) {
 	if storedConf.BotName != "support_bot" || storedConf.BotToken != "secret-token" {
 		t.Fatalf("conf = %+v", storedConf)
 	}
+	if telegramSetup.getMeToken != "secret-token" || telegramSetup.deleteToken != "secret-token" || telegramSetup.setToken != "secret-token" {
+		t.Fatalf("telegram tokens = getMe:%q delete:%q set:%q", telegramSetup.getMeToken, telegramSetup.deleteToken, telegramSetup.setToken)
+	}
+	wantCallback := "https://jmate.example.com/jmate/webhooks/telegram/" + resp.ID
+	if telegramSetup.callbackURL != wantCallback {
+		t.Fatalf("callbackURL = %q, want %q", telegramSetup.callbackURL, wantCallback)
+	}
 }
 
 func TestCreateTelegramInboxRequiresConfig(t *testing.T) {
 	withInboxFakes(t, &fakeInboxStorage{}, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+	withTelegramSetupFakes(t)
 	code, _ := CreateTelegramInbox(inboxTestCtx(), &consoleModels.CreateTelegramInboxReq{Name: "Telegram"})
 	if code != errs.IMErrorCode_APP_REQ_BODY_ILLEGAL {
 		t.Fatalf("code = %d", code)
+	}
+}
+
+func TestCreateTelegramInboxRejectsInvalidBotToken(t *testing.T) {
+	inboxStorage := &fakeInboxStorage{}
+	withInboxFakes(t, inboxStorage, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+	telegramSetup := withTelegramSetupFakes(t)
+	telegramSetup.getMeErr = errors.New("invalid token")
+
+	code, _ := CreateTelegramInbox(inboxTestCtx(), &consoleModels.CreateTelegramInboxReq{
+		Name:     "Telegram",
+		BotName:  "bot",
+		BotToken: "bad-token",
+	})
+	if code != errs.IMErrorCode_APP_REQ_BODY_ILLEGAL {
+		t.Fatalf("code = %d", code)
+	}
+	if inboxStorage.created.InboxId != "" {
+		t.Fatalf("inbox should not be created: %+v", inboxStorage.created)
+	}
+}
+
+func TestCreateTelegramInboxRejectsMissingBaseURL(t *testing.T) {
+	inboxStorage := &fakeInboxStorage{}
+	withInboxFakes(t, inboxStorage, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+	withTelegramSetupFakes(t)
+	configures.Config.JmateBaseUrl = ""
+
+	code, _ := CreateTelegramInbox(inboxTestCtx(), &consoleModels.CreateTelegramInboxReq{
+		Name:     "Telegram",
+		BotName:  "bot",
+		BotToken: "secret",
+	})
+	if code != errs.IMErrorCode_APP_REQ_BODY_ILLEGAL {
+		t.Fatalf("code = %d", code)
+	}
+	if inboxStorage.created.InboxId != "" {
+		t.Fatalf("inbox should not be created: %+v", inboxStorage.created)
+	}
+}
+
+func TestCreateTelegramInboxRejectsWebhookSetupFailure(t *testing.T) {
+	inboxStorage := &fakeInboxStorage{}
+	withInboxFakes(t, inboxStorage, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+	telegramSetup := withTelegramSetupFakes(t)
+	telegramSetup.setErr = errors.New("webhook failed")
+
+	code, _ := CreateTelegramInbox(inboxTestCtx(), &consoleModels.CreateTelegramInboxReq{
+		Name:     "Telegram",
+		BotName:  "bot",
+		BotToken: "secret",
+	})
+	if code != errs.IMErrorCode_APP_INTERNAL_TIMEOUT {
+		t.Fatalf("code = %d", code)
+	}
+	if inboxStorage.created.InboxId != "" {
+		t.Fatalf("inbox should not be created: %+v", inboxStorage.created)
 	}
 }
 
@@ -267,6 +366,15 @@ func (s *fakeInboxStorage) FindByInboxId(appkey, inboxId string) (*storageModels
 	}
 	return s.byId[inboxId], nil
 }
+func (s *fakeInboxStorage) FindByInboxIdAny(inboxId string) ([]*storageModels.Inbox, error) {
+	if s.byId == nil {
+		return nil, nil
+	}
+	if inbox, ok := s.byId[inboxId]; ok {
+		return []*storageModels.Inbox{inbox}, nil
+	}
+	return nil, nil
+}
 func (s *fakeInboxStorage) QryByApp(appkey, channelType string, limit, offset int64) (*storageModels.InboxListResult, error) {
 	s.qryAppkey = appkey
 	s.qryChannelType = channelType
@@ -309,6 +417,19 @@ func (s *fakeInboxMemberStorage) ReplaceByInbox(appkey, inboxId string, memberId
 
 type fakeUserStorageForInbox struct {
 	users map[string]*storageModels.User
+}
+
+type fakeTelegramSetup struct {
+	botInfo *telegramapi.BotInfo
+
+	getMeToken  string
+	deleteToken string
+	setToken    string
+	callbackURL string
+
+	getMeErr  error
+	deleteErr error
+	setErr    error
 }
 
 func (s *fakeUserStorageForInbox) Create(item storageModels.User) error { return nil }

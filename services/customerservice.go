@@ -21,9 +21,18 @@ const (
 )
 
 var (
-	newInboxMemberStorageForCustomer = storages.NewInboxMemberStorage
-	newUserStorageForCustomer        = storages.NewUserStorage
-	registerIMUserForCustomer        = registerIMUser
+	newInboxMemberStorageForCustomer      = storages.NewInboxMemberStorage
+	newUserStorageForCustomer             = storages.NewUserStorage
+	newCustomerStorageForCustomer         = storages.NewCustomerStorage
+	newInboxStorageForCustomer            = storages.NewInboxStorage
+	newCustomerInboxRelStorageForCustomer = storages.NewCustomerInboxRelStorage
+	newTicketStorageForCustomer           = storages.NewTicketStorage
+	getImSdkForCustomer                   = imsdk.GetImSdk
+	registerIMUserForCustomer             = registerIMUser
+	registerCustomerIMUserForCustomer     = registerCustomerIMUser
+	createGroupForCustomer                = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.GroupMembersReq) (juggleimsdk.ApiCode, string, error) {
+		return sdk.CreateGroup(req)
+	}
 )
 
 func registerIMUser(sdk *juggleimsdk.JuggleIMSdk, userId, nickname, portrait string) errs.IMErrorCode {
@@ -42,6 +51,24 @@ func registerIMUser(sdk *juggleimsdk.JuggleIMSdk, userId, nickname, portrait str
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
 	}
 	return errs.IMErrorCode_SUCCESS
+}
+
+func registerCustomerIMUser(sdk *juggleimsdk.JuggleIMSdk, userId, nickname, portrait string) (errs.IMErrorCode, string) {
+	resp, code, _, err := sdk.Register(juggleimsdk.User{
+		UserId:       userId,
+		Nickname:     nickname,
+		UserPortrait: portrait,
+	})
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, ""
+	}
+	if code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
+		return errs.IMErrorCode(code), ""
+	}
+	if resp == nil || resp.Token == "" {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, ""
+	}
+	return errs.IMErrorCode_SUCCESS, resp.Token
 }
 
 func buildTicketGroupMemberIds(sourceId string, inboxMemberIds []string) []string {
@@ -100,20 +127,47 @@ func validateWidgetInbox(inbox *storageModels.Inbox) errs.IMErrorCode {
 	return errs.IMErrorCode_SUCCESS
 }
 
-func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IMErrorCode, *apiModels.StartCustomResp) {
-	appkey := ctxs.GetAppKeyFromCtx(ctx)
+func validateTelegramInbox(inbox *storageModels.Inbox) errs.IMErrorCode {
+	if inbox == nil || inbox.ChannelType != string(ChannelType_Telegram) {
+		return errs.IMErrorCode_APP_CHANNEL_NOT_EXIST
+	}
+	return errs.IMErrorCode_SUCCESS
+}
+
+type customerTicketStartReq struct {
+	AppKey           string
+	InboxId          string
+	Identifier       string
+	Nickname         string
+	Avatar           string
+	ChannelType      ChannelType
+	SourceId         string
+	GenerateSourceId func() string
+}
+
+type customerTicketStartResp struct {
+	Customer *storageModels.Customer
+	Inbox    *storageModels.Inbox
+	Rel      *storageModels.CustomerInboxRel
+	Ticket   *storageModels.Ticket
+	ImToken  string
+}
+
+func startCustomerTicket(req customerTicketStartReq) (errs.IMErrorCode, *customerTicketStartResp) {
+	appkey := req.AppKey
 	inboxId := strings.TrimSpace(req.InboxId)
-	if appkey == "" || req == nil || req.Identifier == "" || inboxId == "" {
+	identifier := strings.TrimSpace(req.Identifier)
+	nickname := strings.TrimSpace(req.Nickname)
+	if appkey == "" || inboxId == "" || identifier == "" {
 		return errs.IMErrorCode_APP_ParamError, nil
 	}
 
-	customerStorage := storages.NewCustomerStorage()
-	inboxStorage := storages.NewInboxStorage()
-	relStorage := storages.NewCustomerInboxRelStorage()
-	ticketStorage := storages.NewTicketStorage()
-	nickname := strings.TrimSpace(req.Nickname)
+	customerStorage := newCustomerStorageForCustomer()
+	inboxStorage := newInboxStorageForCustomer()
+	relStorage := newCustomerInboxRelStorageForCustomer()
+	ticketStorage := newTicketStorageForCustomer()
 
-	customer, err := customerStorage.FindByIdentifier(appkey, req.Identifier)
+	customer, err := customerStorage.FindByIdentifier(appkey, identifier)
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
@@ -125,7 +179,8 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 		customer = &storageModels.Customer{
 			CustomerId: customerId,
 			Nickname:   nickname,
-			Identifier: req.Identifier,
+			Avator:     strings.TrimSpace(req.Avatar),
+			Identifier: identifier,
 			AppKey:     appkey,
 		}
 		if err := customerStorage.Create(*customer); err != nil {
@@ -137,20 +192,35 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
-	if code := validateWidgetInbox(inbox); code != errs.IMErrorCode_SUCCESS {
-		return code, nil
+	switch req.ChannelType {
+	case ChannelType_Widget:
+		if code := validateWidgetInbox(inbox); code != errs.IMErrorCode_SUCCESS {
+			return code, nil
+		}
+	case ChannelType_Telegram:
+		if code := validateTelegramInbox(inbox); code != errs.IMErrorCode_SUCCESS {
+			return code, nil
+		}
+	default:
+		return errs.IMErrorCode_APP_CHANNEL_NOT_EXIST, nil
 	}
-	widgetConf := ParseWebWidgetChannelConf(inbox.ChannelConf)
 
 	rel, err := relStorage.FindByCustomerInbox(appkey, customer.CustomerId, inbox.InboxId)
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
 	if rel == nil {
+		sourceId := strings.TrimSpace(req.SourceId)
+		if sourceId == "" && req.GenerateSourceId != nil {
+			sourceId = strings.TrimSpace(req.GenerateSourceId())
+		}
+		if sourceId == "" {
+			sourceId = CustomerSourceIDPrefix + tools.GenerateUUIDShort22()
+		}
 		rel = &storageModels.CustomerInboxRel{
 			CustomerId: customer.CustomerId,
 			InboxId:    inbox.InboxId,
-			SourceId:   CustomerSourceIDPrefix + tools.GenerateUUIDShort22(),
+			SourceId:   sourceId,
 			AppKey:     appkey,
 		}
 		if err := relStorage.Create(*rel); err != nil {
@@ -158,7 +228,7 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 		}
 	}
 
-	sdk := imsdk.GetImSdk(appkey)
+	sdk := getImSdkForCustomer(appkey)
 	if sdk == nil {
 		return errs.IMErrorCode_APP_NOT_EXISTED, nil
 	}
@@ -167,19 +237,9 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
-	imResp, code, _, err := sdk.Register(juggleimsdk.User{
-		UserId:       rel.SourceId,
-		Nickname:     customer.Nickname,
-		UserPortrait: customer.Avator,
-	})
-	if err != nil {
-		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
-	}
-	if code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
-		return errs.IMErrorCode(code), nil
-	}
-	if imResp == nil || imResp.Token == "" {
-		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	code, imToken := registerCustomerIMUserForCustomer(sdk, rel.SourceId, customer.Nickname, customer.Avator)
+	if code != errs.IMErrorCode_SUCCESS {
+		return code, nil
 	}
 
 	if ticket == nil {
@@ -199,7 +259,7 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 		if memberCode != errs.IMErrorCode_SUCCESS {
 			return memberCode, nil
 		}
-		groupCode, _, err := sdk.CreateGroup(juggleimsdk.GroupMembersReq{
+		groupCode, _, err := createGroupForCustomer(sdk, juggleimsdk.GroupMembersReq{
 			GroupId:   ticketId,
 			GroupName: groupName,
 			MemberIds: memberIds,
@@ -223,12 +283,41 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 		}
 	}
 
+	return errs.IMErrorCode_SUCCESS, &customerTicketStartResp{
+		Customer: customer,
+		Inbox:    inbox,
+		Rel:      rel,
+		Ticket:   ticket,
+		ImToken:  imToken,
+	}
+}
+
+func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IMErrorCode, *apiModels.StartCustomResp) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	if req == nil {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+	resultCode, result := startCustomerTicket(customerTicketStartReq{
+		AppKey:      appkey,
+		InboxId:     req.InboxId,
+		Identifier:  req.Identifier,
+		Nickname:    req.Nickname,
+		ChannelType: ChannelType_Widget,
+		GenerateSourceId: func() string {
+			return CustomerSourceIDPrefix + tools.GenerateUUIDShort22()
+		},
+	})
+	if resultCode != errs.IMErrorCode_SUCCESS {
+		return resultCode, nil
+	}
+	widgetConf := ParseWebWidgetChannelConf(result.Inbox.ChannelConf)
+
 	return errs.IMErrorCode_SUCCESS, &apiModels.StartCustomResp{
-		ConversationId:   ticket.TicketId,
+		ConversationId:   result.Ticket.TicketId,
 		ConversationType: ConversationType_Ticket,
-		UserId:           rel.SourceId,
-		Nickname:         customer.Nickname,
-		ImToken:          imResp.Token,
+		UserId:           result.Rel.SourceId,
+		Nickname:         result.Customer.Nickname,
+		ImToken:          result.ImToken,
 		WelcomeMessage:   widgetConf.WelcomeMessage,
 	}
 }

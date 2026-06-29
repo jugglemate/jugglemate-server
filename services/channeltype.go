@@ -28,3 +28,14 @@ func ParseWebWidgetChannelConf(channelConf string) WebWidgetChannelConf {
 	}
 	return conf
 }
+
+func ParseTelegramChannelConf(channelConf string) TelegramChannelConf {
+	if channelConf == "" {
+		return TelegramChannelConf{}
+	}
+	var conf TelegramChannelConf
+	if err := json.Unmarshal([]byte(channelConf), &conf); err != nil {
+		return TelegramChannelConf{}
+	}
+	return conf
+}

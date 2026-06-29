@@ -112,6 +112,22 @@ func (d *InboxDao) FindByInboxId(appkey, inboxId string) (*models.Inbox, error) 
 	return item.toModel(), nil
 }
 
+func (d *InboxDao) FindByInboxIdAny(inboxId string) ([]*models.Inbox, error) {
+	var items []InboxDao
+	err := dbcommons.GetDb().
+		Where("inbox_id=?", inboxId).
+		Limit(2).
+		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*models.Inbox, 0, len(items))
+	for i := range items {
+		ret = append(ret, items[i].toModel())
+	}
+	return ret, nil
+}
+
 func (d *InboxDao) QryByApp(appkey, channelType string, limit, offset int64) (*models.InboxListResult, error) {
 	db := dbcommons.GetDb().Model(&InboxDao{}).Where("app_key=?", appkey)
 	if channelType != "" {

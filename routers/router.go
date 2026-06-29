@@ -12,6 +12,9 @@ import (
 func Route(eng *gin.Engine, prefix string) {
 	eng.Use(corsHandler())
 
+	publicGroup := eng.Group("/" + prefix)
+	publicGroup.POST("/webhooks/telegram/:inbox_id", apis.TelegramWebhook)
+
 	group := eng.Group("/" + prefix)
 	group.Use(apis.Validate)
 
