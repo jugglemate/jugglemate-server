@@ -55,6 +55,18 @@ export const MOCK_INBOXES: Inbox[] = [
     updated_time: Date.now() - 3_600_000,
   },
   {
+    id: "inbox_juggleim_1",
+    name: "JuggleIM Support",
+    channel_type: "juggleim",
+    channel_conf: {
+      bot_name: "juggle_support_bot",
+      bot_token: "",
+    },
+    member_count: 1,
+    created_time: Date.now() - 64_800_000,
+    updated_time: Date.now() - 2_700_000,
+  },
+  {
     id: "inbox_widget_1",
     name: "Website Support",
     channel_type: "widget",
@@ -69,5 +81,6 @@ export const MOCK_INBOXES: Inbox[] = [
 
 export const MOCK_INBOX_MEMBER_IDS: Record<string, string[]> = {
   inbox_telegram_1: ["1", "2"],
+  inbox_juggleim_1: ["1"],
   inbox_widget_1: ["1"],
 };

@@ -8,6 +8,7 @@ import (
 	"github.com/juggleim/jugglemate-server/commons/configures"
 	"github.com/juggleim/jugglemate-server/commons/ctxs"
 	"github.com/juggleim/jugglemate-server/commons/errs"
+	juggleimapi "github.com/juggleim/jugglemate-server/commons/juggleim"
 	telegramapi "github.com/juggleim/jugglemate-server/commons/telegram"
 	"github.com/juggleim/jugglemate-server/commons/tools"
 	consoleModels "github.com/juggleim/jugglemate-server/console/apis/models"
@@ -30,6 +31,9 @@ var (
 	}
 	telegramSetWebhookForConsole = func(botToken, callbackURL string) error {
 		return telegramapi.NewClient().SetWebhook(botToken, callbackURL)
+	}
+	juggleIMSetupBotForConsole = func(botName, botToken, callbackURL string) (*juggleimapi.BotInfo, error) {
+		return juggleimapi.NewClient().SetupBot(botName, botToken, callbackURL)
 	}
 )
 
@@ -126,6 +130,61 @@ func CreateTelegramInbox(ctx context.Context, req *consoleModels.CreateTelegramI
 
 func telegramWebhookCallbackURL(baseURL, inboxId string) string {
 	return strings.TrimRight(baseURL, "/") + "/jmate/webhooks/telegram/" + inboxId
+}
+
+func CreateJuggleIMInbox(ctx context.Context, req *consoleModels.CreateJuggleIMInboxReq) (errs.IMErrorCode, *consoleModels.InboxItem) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	if appkey == "" {
+		return errs.IMErrorCode_APP_NOT_EXISTED, nil
+	}
+	if req == nil {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+	name := strings.TrimSpace(req.Name)
+	botName := strings.TrimSpace(req.BotName)
+	botToken := strings.TrimSpace(req.BotToken)
+	if name == "" || botName == "" || botToken == "" {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(configures.Config.JmateBaseUrl), "/")
+	if baseURL == "" {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+
+	inboxId := tools.GenerateUUIDShort22()
+	callbackURL := juggleIMWebhookCallbackURL(baseURL, inboxId)
+	botInfo, err := juggleIMSetupBotForConsole(botName, botToken, callbackURL)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if botInfo != nil && strings.TrimSpace(botInfo.Username) != "" {
+		botName = strings.TrimSpace(botInfo.Username)
+	}
+
+	channelConf, err := json.Marshal(appServices.JuggleIMChannelConf{
+		BotName:  botName,
+		BotToken: botToken,
+	})
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+
+	inbox := storageModels.Inbox{
+		InboxId:     inboxId,
+		ChannelType: string(appServices.ChannelType_JuggleIM),
+		ChannelConf: string(channelConf),
+		Name:        name,
+		AppKey:      appkey,
+	}
+	if err := newInboxStorageForConsole().Create(inbox); err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	item := ToInboxItem(&inbox, 0)
+	return errs.IMErrorCode_SUCCESS, &item
+}
+
+func juggleIMWebhookCallbackURL(baseURL, inboxId string) string {
+	return strings.TrimRight(baseURL, "/") + "/jmate/webhooks/juggleim/" + inboxId
 }
 
 func CreateWidgetInbox(ctx context.Context, req *consoleModels.CreateWidgetInboxReq) (errs.IMErrorCode, *consoleModels.InboxItem) {
@@ -236,6 +295,13 @@ func ToInboxItem(inbox *storageModels.Inbox, memberCount int64) consoleModels.In
 			conf.BotName = stored.BotName
 		}
 		item.ChannelConf = conf
+	case string(appServices.ChannelType_JuggleIM):
+		conf := consoleModels.JuggleIMConfigItem{}
+		var stored appServices.JuggleIMChannelConf
+		if err := json.Unmarshal([]byte(inbox.ChannelConf), &stored); err == nil {
+			conf.BotName = stored.BotName
+		}
+		item.ChannelConf = conf
 	case string(appServices.ChannelType_Widget):
 		conf := appServices.ParseWebWidgetChannelConf(inbox.ChannelConf)
 		item.ChannelConf = consoleModels.WidgetConfigItem{
@@ -256,7 +322,7 @@ func inboxExists(appkey, inboxId string) (bool, errs.IMErrorCode) {
 		return false, errs.IMErrorCode_APP_ParamError
 	}
 	switch inbox.ChannelType {
-	case string(appServices.ChannelType_Telegram), string(appServices.ChannelType_Widget):
+	case string(appServices.ChannelType_Telegram), string(appServices.ChannelType_Widget), string(appServices.ChannelType_JuggleIM):
 		return true, errs.IMErrorCode_SUCCESS
 	default:
 		return false, errs.IMErrorCode_APP_ParamError

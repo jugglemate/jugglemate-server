@@ -104,11 +104,13 @@ func ProcessTelegramWebhook(inboxId string, body []byte) errs.IMErrorCode {
 	if sdk == nil {
 		return errs.IMErrorCode_APP_NOT_EXISTED
 	}
+	imMsgId := telegramIMMessageID(inbox.InboxId, msg.MessageID)
 	sendCode, _, err := sendTelegramGroupMsg(sdk, juggleimsdk.Message{
 		SenderId:   result.Rel.SourceId,
 		TargetId:   result.Ticket.TicketId,
 		MsgType:    "jg:text",
 		MsgContent: fmt.Sprintf(`{"content":%q}`, text),
+		MsgId:      &imMsgId,
 		IsStorage:  boolPtrForTelegram(true),
 		IsCount:    boolPtrForTelegram(true),
 	})

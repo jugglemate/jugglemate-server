@@ -134,6 +134,13 @@ func validateTelegramInbox(inbox *storageModels.Inbox) errs.IMErrorCode {
 	return errs.IMErrorCode_SUCCESS
 }
 
+func validateJuggleIMInbox(inbox *storageModels.Inbox) errs.IMErrorCode {
+	if inbox == nil || inbox.ChannelType != string(ChannelType_JuggleIM) {
+		return errs.IMErrorCode_APP_CHANNEL_NOT_EXIST
+	}
+	return errs.IMErrorCode_SUCCESS
+}
+
 type customerTicketStartReq struct {
 	AppKey           string
 	InboxId          string
@@ -199,6 +206,10 @@ func startCustomerTicket(req customerTicketStartReq) (errs.IMErrorCode, *custome
 		}
 	case ChannelType_Telegram:
 		if code := validateTelegramInbox(inbox); code != errs.IMErrorCode_SUCCESS {
+			return code, nil
+		}
+	case ChannelType_JuggleIM:
+		if code := validateJuggleIMInbox(inbox); code != errs.IMErrorCode_SUCCESS {
 			return code, nil
 		}
 	default:

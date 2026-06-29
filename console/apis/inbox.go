@@ -9,6 +9,8 @@ import (
 	consoleServices "github.com/juggleim/jugglemate-server/console/services"
 )
 
+var createJuggleIMInboxForAPI = consoleServices.CreateJuggleIMInbox
+
 func QryInboxes(ctx *gin.Context) {
 	limit, offset, ok := parsePagination(ctx)
 	if !ok {
@@ -30,6 +32,20 @@ func CreateTelegramInbox(ctx *gin.Context) {
 		return
 	}
 	code, resp := consoleServices.CreateTelegramInbox(ctxs.ToCtx(ctx), &req)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, resp)
+}
+
+func CreateJuggleIMInbox(ctx *gin.Context) {
+	var req consoleModels.CreateJuggleIMInboxReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_REQ_BODY_ILLEGAL)
+		return
+	}
+	code, resp := createJuggleIMInboxForAPI(ctxs.ToCtx(ctx), &req)
 	if code != errs.IMErrorCode_SUCCESS {
 		responses.ErrorHttpResp(ctx, code)
 		return

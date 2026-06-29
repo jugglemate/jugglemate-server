@@ -14,6 +14,7 @@ func Route(eng *gin.Engine, prefix string) {
 
 	publicGroup := eng.Group("/" + prefix)
 	publicGroup.POST("/webhooks/telegram/:inbox_id", apis.TelegramWebhook)
+	publicGroup.POST("/webhooks/juggleim/:inbox_id", apis.JuggleIMWebhook)
 
 	group := eng.Group("/" + prefix)
 	group.Use(apis.Validate)
@@ -90,6 +91,7 @@ func RouteConsole(group *gin.RouterGroup) {
 
 	group.GET("/inboxes", consoleApis.QryInboxes)
 	group.POST("/inboxes/telegram", consoleApis.CreateTelegramInbox)
+	group.POST("/inboxes/juggleim", consoleApis.CreateJuggleIMInbox)
 	group.POST("/inboxes/widget", consoleApis.CreateWidgetInbox)
 	group.GET("/inboxes/:inbox_id/members", consoleApis.QryInboxMembers)
 	group.PUT("/inboxes/:inbox_id/members", consoleApis.ReplaceInboxMembers)

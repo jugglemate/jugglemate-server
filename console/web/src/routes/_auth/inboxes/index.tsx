@@ -31,6 +31,7 @@ import { useEffect, useMemo, useState } from "react";
 import { z } from "zod/v4";
 import { useTranslation } from "react-i18next";
 import {
+  createJuggleIMInbox,
   createTelegramInbox,
   createWidgetInbox,
   inboxChannelLabel,
@@ -38,12 +39,14 @@ import {
   listInboxMembers,
   listInboxes,
   replaceInboxMembers,
+  type CreateJuggleIMInboxRequest,
   type CreateTelegramInboxRequest,
   type CreateWidgetInboxRequest,
   type Inbox,
 } from "@/api/inbox";
 import { USER_ENDPOINTS } from "@/api/user";
 import {
+  CreateJuggleIMInboxRequestSchema,
   CreateTelegramInboxRequestSchema,
   CreateWidgetInboxRequestSchema,
   PaginatedResponseSchema,
@@ -77,7 +80,7 @@ async function listUsersForMembers() {
 }
 
 type FlowStep = 0 | 1 | 2 | 3;
-type CreateChannel = "widget" | "telegram";
+type CreateChannel = "widget" | "telegram" | "juggleim";
 
 function InboxesPage() {
   const { t } = useTranslation();
@@ -92,6 +95,7 @@ function InboxesPage() {
   const [activeInbox, setActiveInbox] = useState<Inbox | null>(null);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [telegramForm] = Form.useForm<CreateTelegramInboxRequest>();
+  const [juggleIMForm] = Form.useForm<CreateJuggleIMInboxRequest>();
   const [widgetForm] = Form.useForm<CreateWidgetInboxRequest>();
 
   const channelOptions = useMemo(
@@ -108,6 +112,12 @@ function InboxesPage() {
           title: t("inboxes.telegramTitle"),
           description: t("inboxes.telegramDesc"),
           icon: Send,
+        },
+        {
+          key: "juggleim" as const,
+          title: t("inboxes.juggleIMTitle"),
+          description: t("inboxes.juggleIMDesc"),
+          icon: MessageSquare,
         },
       ] satisfies Array<{
         key: CreateChannel;
@@ -150,6 +160,21 @@ function InboxesPage() {
     },
   });
 
+  const createJuggleIMMutation = useMutation({
+    mutationFn: (values: CreateJuggleIMInboxRequest) =>
+      createJuggleIMInbox(CreateJuggleIMInboxRequestSchema.parse(values)),
+    onSuccess: (inbox) => {
+      void queryClient.invalidateQueries({ queryKey: ["inboxes"] });
+      setActiveInbox(inbox);
+      setSelectedUserIds([]);
+      setStep(2);
+      message.success(t("inboxes.juggleIMCreated"));
+    },
+    onError: () => {
+      message.error(t("inboxes.juggleIMCreateFailed"));
+    },
+  });
+
   const createWidgetMutation = useMutation({
     mutationFn: (values: CreateWidgetInboxRequest) =>
       createWidgetInbox(CreateWidgetInboxRequestSchema.parse(values)),
@@ -187,6 +212,9 @@ function InboxesPage() {
       if (inbox.channel_type === "telegram") {
         return inbox.channel_conf.bot_name.toLowerCase().includes(q);
       }
+      if (inbox.channel_type === "juggleim") {
+        return inbox.channel_conf.bot_name.toLowerCase().includes(q);
+      }
       return inbox.channel_conf.welcome_message.toLowerCase().includes(q);
     });
   }, [inboxes, query]);
@@ -202,6 +230,7 @@ function InboxesPage() {
 
   const openCreate = () => {
     telegramForm.resetFields();
+    juggleIMForm.resetFields();
     widgetForm.resetFields();
     setActiveInbox(null);
     setSelectedUserIds([]);
@@ -231,6 +260,7 @@ function InboxesPage() {
     setActiveInbox(null);
     setSelectedUserIds([]);
     telegramForm.resetFields();
+    juggleIMForm.resetFields();
     widgetForm.resetFields();
   };
 
@@ -240,7 +270,9 @@ function InboxesPage() {
       : step === 1
         ? selectedChannel === "widget"
           ? t("inboxes.modalConfigureWidget")
-          : t("inboxes.modalConfigureTelegram")
+          : selectedChannel === "juggleim"
+            ? t("inboxes.modalConfigureJuggleIM")
+            : t("inboxes.modalConfigureTelegram")
         : step === 2
           ? t("inboxes.modalRepresentatives")
           : t("inboxes.modalComplete");
@@ -251,7 +283,12 @@ function InboxesPage() {
       dataIndex: "name",
       key: "name",
       render: (_, record) => {
-        const Icon = record.channel_type === "widget" ? Globe : Send;
+        const Icon =
+          record.channel_type === "widget"
+            ? Globe
+            : record.channel_type === "juggleim"
+              ? MessageSquare
+              : Send;
         return (
           <Flex align="center" gap={token.marginSM}>
             <Flex
@@ -285,7 +322,11 @@ function InboxesPage() {
       dataIndex: "channel_type",
       key: "channel_type",
       render: (channelType: Inbox["channel_type"]) => (
-        <Tag color={channelType === "widget" ? "green" : "blue"}>
+        <Tag
+          color={
+            channelType === "widget" ? "green" : channelType === "juggleim" ? "purple" : "blue"
+          }
+        >
           {inboxChannelLabel(channelType)}
         </Tag>
       ),
@@ -477,6 +518,52 @@ function InboxesPage() {
                     type="primary"
                     htmlType="submit"
                     loading={createTelegramMutation.isPending}
+                  >
+                    {t("inboxes.createAndContinue")}
+                  </Button>
+                </Flex>
+              </Flex>
+            </Form>
+          ) : null}
+
+          {step === 1 && selectedChannel === "juggleim" ? (
+            <Form<CreateJuggleIMInboxRequest>
+              form={juggleIMForm}
+              layout="vertical"
+              onFinish={(values) => createJuggleIMMutation.mutate(values)}
+            >
+              <Form.Item
+                name="name"
+                label={t("inboxes.inboxName")}
+                rules={[{ required: true, message: t("inboxes.inboxNameRequired") }]}
+              >
+                <Input
+                  prefix={<InboxIcon size={14} aria-hidden />}
+                  placeholder={t("inboxes.juggleIMPlaceholder")}
+                />
+              </Form.Item>
+              <Form.Item
+                name="bot_name"
+                label={t("inboxes.juggleIMBotName")}
+                rules={[{ required: true, message: t("inboxes.juggleIMBotNameRequired") }]}
+              >
+                <Input placeholder="support_bot" />
+              </Form.Item>
+              <Form.Item
+                name="bot_token"
+                label={t("inboxes.juggleIMBotToken")}
+                rules={[{ required: true, message: t("inboxes.juggleIMBotTokenRequired") }]}
+              >
+                <Input.Password placeholder="bot-token" />
+              </Form.Item>
+              <Flex justify="space-between" gap={token.marginSM}>
+                <Button onClick={() => setStep(0)}>{t("common.back")}</Button>
+                <Flex gap={token.marginSM}>
+                  <Button onClick={closeModal}>{t("common.cancel")}</Button>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    loading={createJuggleIMMutation.isPending}
                   >
                     {t("inboxes.createAndContinue")}
                   </Button>

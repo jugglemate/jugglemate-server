@@ -17,6 +17,11 @@ function updateMemberCount(inboxId: string) {
   if (inbox) inbox.member_count = inboxMemberIds[inboxId]?.length ?? 0;
 }
 
+function stringField(body: Record<string, unknown>, key: string) {
+  const value = body[key];
+  return typeof value === "string" ? value : "";
+}
+
 export const inboxHandlers = [
   http.get("/jmate/console/inboxes", async ({ request }) => {
     await withDelay(200);
@@ -32,10 +37,31 @@ export const inboxHandlers = [
     const id = `inbox_${Date.now()}`;
     const inbox = {
       id,
-      name: String(body.name ?? ""),
+      name: stringField(body, "name"),
       channel_type: "telegram" as const,
       channel_conf: {
-        bot_name: String(body.bot_name ?? ""),
+        bot_name: stringField(body, "bot_name"),
+        bot_token: "",
+      },
+      member_count: 0,
+      created_time: Date.now(),
+      updated_time: Date.now(),
+    };
+    inboxes = [inbox, ...inboxes];
+    inboxMemberIds[id] = [];
+    return successWithSchema(InboxSchema, inbox);
+  }),
+
+  http.post("/jmate/console/inboxes/juggleim", async ({ request }) => {
+    await withDelay(200);
+    const body = (await request.json()) as Record<string, unknown>;
+    const id = `inbox_juggleim_${Date.now()}`;
+    const inbox = {
+      id,
+      name: stringField(body, "name"),
+      channel_type: "juggleim" as const,
+      channel_conf: {
+        bot_name: stringField(body, "bot_name"),
         bot_token: "",
       },
       member_count: 0,
@@ -53,10 +79,10 @@ export const inboxHandlers = [
     const id = `inbox_widget_${Date.now()}`;
     const inbox = {
       id,
-      name: String(body.name ?? ""),
+      name: stringField(body, "name"),
       channel_type: "widget" as const,
       channel_conf: {
-        welcome_message: String(body.welcome_message ?? ""),
+        welcome_message: stringField(body, "welcome_message"),
       },
       member_count: 0,
       created_time: Date.now(),

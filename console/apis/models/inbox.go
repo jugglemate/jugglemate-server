@@ -5,6 +5,11 @@ type TelegramConfigItem struct {
 	BotToken string `json:"bot_token,omitempty"`
 }
 
+type JuggleIMConfigItem struct {
+	BotName  string `json:"bot_name"`
+	BotToken string `json:"bot_token,omitempty"`
+}
+
 type WidgetConfigItem struct {
 	WelcomeMessage string `json:"welcome_message"`
 }
@@ -25,6 +30,12 @@ type InboxListResp struct {
 }
 
 type CreateTelegramInboxReq struct {
+	Name     string `json:"name"`
+	BotName  string `json:"bot_name"`
+	BotToken string `json:"bot_token"`
+}
+
+type CreateJuggleIMInboxReq struct {
 	Name     string `json:"name"`
 	BotName  string `json:"bot_name"`
 	BotToken string `json:"bot_token"`

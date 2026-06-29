@@ -227,6 +227,13 @@ export const TelegramChannelConfigSchema = z.object({
 
 export type TelegramChannelConfig = z.infer<typeof TelegramChannelConfigSchema>;
 
+export const JuggleIMChannelConfigSchema = z.object({
+  bot_name: z.string(),
+  bot_token: z.string().optional().default(""),
+});
+
+export type JuggleIMChannelConfig = z.infer<typeof JuggleIMChannelConfigSchema>;
+
 export const WidgetChannelConfigSchema = z.object({
   welcome_message: z.string().catch(""),
 });
@@ -251,9 +258,15 @@ export const WidgetInboxSchema = InboxBaseSchema.extend({
   channel_conf: WidgetChannelConfigSchema,
 });
 
+export const JuggleIMInboxSchema = InboxBaseSchema.extend({
+  channel_type: z.literal("juggleim"),
+  channel_conf: JuggleIMChannelConfigSchema,
+});
+
 export const InboxSchema = z.discriminatedUnion("channel_type", [
   TelegramInboxSchema,
   WidgetInboxSchema,
+  JuggleIMInboxSchema,
 ]);
 
 export type Inbox = z.infer<typeof InboxSchema>;
@@ -265,6 +278,14 @@ export const CreateTelegramInboxRequestSchema = z.object({
 });
 
 export type CreateTelegramInboxRequest = z.infer<typeof CreateTelegramInboxRequestSchema>;
+
+export const CreateJuggleIMInboxRequestSchema = z.object({
+  name: z.string().trim().min(1, "Please enter inbox name"),
+  bot_name: z.string().trim().min(1, "Please enter bot name"),
+  bot_token: z.string().trim().min(1, "Please enter bot token"),
+});
+
+export type CreateJuggleIMInboxRequest = z.infer<typeof CreateJuggleIMInboxRequestSchema>;
 
 export const CreateWidgetInboxRequestSchema = z.object({
   name: z.string().trim().min(1, "Please enter inbox name"),

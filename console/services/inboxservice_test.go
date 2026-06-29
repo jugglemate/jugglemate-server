@@ -10,6 +10,7 @@ import (
 	"github.com/juggleim/jugglemate-server/commons/configures"
 	"github.com/juggleim/jugglemate-server/commons/ctxs"
 	"github.com/juggleim/jugglemate-server/commons/errs"
+	juggleimapi "github.com/juggleim/jugglemate-server/commons/juggleim"
 	telegramapi "github.com/juggleim/jugglemate-server/commons/telegram"
 	consoleModels "github.com/juggleim/jugglemate-server/console/apis/models"
 	appServices "github.com/juggleim/jugglemate-server/services"
@@ -60,6 +61,25 @@ func withTelegramSetupFakes(t *testing.T) *fakeTelegramSetup {
 		telegramGetMeForConsole = oldGetMe
 		telegramDeleteWebhookForConsole = oldDelete
 		telegramSetWebhookForConsole = oldSet
+		configures.Config = oldConfig
+	})
+	return fake
+}
+
+func withJuggleIMSetupFakes(t *testing.T) *fakeJuggleIMSetup {
+	t.Helper()
+	fake := &fakeJuggleIMSetup{botInfo: &juggleimapi.BotInfo{Username: "juggle_support"}}
+	oldSetup := juggleIMSetupBotForConsole
+	oldConfig := configures.Config
+	configures.Config.JmateBaseUrl = "https://jmate.example.com/"
+	juggleIMSetupBotForConsole = func(botName, botToken, callbackURL string) (*juggleimapi.BotInfo, error) {
+		fake.botName = botName
+		fake.botToken = botToken
+		fake.callbackURL = callbackURL
+		return fake.botInfo, fake.err
+	}
+	t.Cleanup(func() {
+		juggleIMSetupBotForConsole = oldSetup
 		configures.Config = oldConfig
 	})
 	return fake
@@ -176,6 +196,92 @@ func TestCreateTelegramInboxRejectsWebhookSetupFailure(t *testing.T) {
 	}
 }
 
+func TestCreateJuggleIMInboxStoresConfigAndRedactsResponse(t *testing.T) {
+	inboxStorage := &fakeInboxStorage{}
+	withInboxFakes(t, inboxStorage, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+	juggleIMSetup := withJuggleIMSetupFakes(t)
+
+	code, resp := CreateJuggleIMInbox(inboxTestCtx(), &consoleModels.CreateJuggleIMInboxReq{
+		Name:     "JuggleIM Support",
+		BotName:  "manual_bot",
+		BotToken: "secret-token",
+	})
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code = %d", code)
+	}
+	if resp.ID == "" || resp.Name != "JuggleIM Support" || resp.ChannelType != "juggleim" {
+		t.Fatalf("resp = %+v", resp)
+	}
+	conf, ok := resp.ChannelConf.(consoleModels.JuggleIMConfigItem)
+	if !ok {
+		t.Fatalf("channel conf type = %T", resp.ChannelConf)
+	}
+	if conf.BotName != "juggle_support" || conf.BotToken != "" {
+		t.Fatalf("conf = %+v", conf)
+	}
+	if inboxStorage.created.ChannelType != string(appServices.ChannelType_JuggleIM) {
+		t.Fatalf("channel type = %q", inboxStorage.created.ChannelType)
+	}
+	var storedConf appServices.JuggleIMChannelConf
+	if err := json.Unmarshal([]byte(inboxStorage.created.ChannelConf), &storedConf); err != nil {
+		t.Fatalf("channel conf json: %v", err)
+	}
+	if storedConf.BotName != "juggle_support" || storedConf.BotToken != "secret-token" {
+		t.Fatalf("stored conf = %+v", storedConf)
+	}
+	wantCallback := "https://jmate.example.com/jmate/webhooks/juggleim/" + resp.ID
+	if juggleIMSetup.botName != "manual_bot" || juggleIMSetup.botToken != "secret-token" || juggleIMSetup.callbackURL != wantCallback {
+		t.Fatalf("setup = %+v, want callback %q", juggleIMSetup, wantCallback)
+	}
+}
+
+func TestCreateJuggleIMInboxRequiresConfig(t *testing.T) {
+	withInboxFakes(t, &fakeInboxStorage{}, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+	withJuggleIMSetupFakes(t)
+	code, _ := CreateJuggleIMInbox(inboxTestCtx(), &consoleModels.CreateJuggleIMInboxReq{Name: "JuggleIM"})
+	if code != errs.IMErrorCode_APP_REQ_BODY_ILLEGAL {
+		t.Fatalf("code = %d", code)
+	}
+}
+
+func TestCreateJuggleIMInboxRejectsMissingBaseURL(t *testing.T) {
+	inboxStorage := &fakeInboxStorage{}
+	withInboxFakes(t, inboxStorage, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+	withJuggleIMSetupFakes(t)
+	configures.Config.JmateBaseUrl = ""
+
+	code, _ := CreateJuggleIMInbox(inboxTestCtx(), &consoleModels.CreateJuggleIMInboxReq{
+		Name:     "JuggleIM",
+		BotName:  "bot",
+		BotToken: "secret",
+	})
+	if code != errs.IMErrorCode_APP_REQ_BODY_ILLEGAL {
+		t.Fatalf("code = %d", code)
+	}
+	if inboxStorage.created.InboxId != "" {
+		t.Fatalf("inbox should not be created: %+v", inboxStorage.created)
+	}
+}
+
+func TestCreateJuggleIMInboxRejectsSetupFailure(t *testing.T) {
+	inboxStorage := &fakeInboxStorage{}
+	withInboxFakes(t, inboxStorage, &fakeInboxMemberStorage{}, &fakeUserStorageForInbox{})
+	juggleIMSetup := withJuggleIMSetupFakes(t)
+	juggleIMSetup.err = errors.New("setup failed")
+
+	code, _ := CreateJuggleIMInbox(inboxTestCtx(), &consoleModels.CreateJuggleIMInboxReq{
+		Name:     "JuggleIM",
+		BotName:  "bot",
+		BotToken: "secret",
+	})
+	if code != errs.IMErrorCode_APP_INTERNAL_TIMEOUT {
+		t.Fatalf("code = %d", code)
+	}
+	if inboxStorage.created.InboxId != "" {
+		t.Fatalf("inbox should not be created: %+v", inboxStorage.created)
+	}
+}
+
 func TestQryInboxesUsesAppScopeAndRedactsToken(t *testing.T) {
 	storedConf, _ := json.Marshal(appServices.TelegramChannelConf{BotName: "bot", BotToken: "secret"})
 	inboxStorage := &fakeInboxStorage{
@@ -207,6 +313,36 @@ func TestQryInboxesUsesAppScopeAndRedactsToken(t *testing.T) {
 	}
 	if telegramConf.BotName != "bot" || telegramConf.BotToken != "" {
 		t.Fatalf("conf = %+v", telegramConf)
+	}
+}
+
+func TestQryInboxesIncludesJuggleIMRowsAndRedactsToken(t *testing.T) {
+	storedConf, _ := json.Marshal(appServices.JuggleIMChannelConf{BotName: "juggle_bot", BotToken: "secret"})
+	inboxStorage := &fakeInboxStorage{
+		list: []*storageModels.Inbox{{
+			InboxId:     "inbox_juggle",
+			Name:        "JuggleIM",
+			ChannelType: "juggleim",
+			ChannelConf: string(storedConf),
+			AppKey:      "app_1",
+		}},
+		total: 1,
+	}
+	withInboxFakes(t, inboxStorage, &fakeInboxMemberStorage{counts: map[string]int64{"inbox_juggle": 3}}, &fakeUserStorageForInbox{})
+
+	code, resp := QryInboxes(inboxTestCtx(), 20, 0)
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code = %d", code)
+	}
+	if len(resp.List) != 1 || resp.List[0].MemberCount != 3 {
+		t.Fatalf("resp = %+v", resp)
+	}
+	conf, ok := resp.List[0].ChannelConf.(consoleModels.JuggleIMConfigItem)
+	if !ok {
+		t.Fatalf("channel conf type = %T", resp.List[0].ChannelConf)
+	}
+	if conf.BotName != "juggle_bot" || conf.BotToken != "" {
+		t.Fatalf("conf = %+v", conf)
 	}
 }
 
@@ -299,6 +435,25 @@ func TestReplaceInboxMembersWorksForWidgetInbox(t *testing.T) {
 	withInboxFakes(t, inboxStorage, memberStorage, userStorage)
 
 	code := ReplaceInboxMembers(inboxTestCtx(), "inbox_widget", &consoleModels.ReplaceInboxMembersReq{UserIds: []string{"u_1"}})
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code = %d", code)
+	}
+	if !reflect.DeepEqual(memberStorage.replaced, []string{"u_1"}) {
+		t.Fatalf("replaced = %v", memberStorage.replaced)
+	}
+}
+
+func TestReplaceInboxMembersWorksForJuggleIMInbox(t *testing.T) {
+	inboxStorage := &fakeInboxStorage{byId: map[string]*storageModels.Inbox{
+		"inbox_juggle": {InboxId: "inbox_juggle", ChannelType: "juggleim", AppKey: "app_1"},
+	}}
+	memberStorage := &fakeInboxMemberStorage{}
+	userStorage := &fakeUserStorageForInbox{users: map[string]*storageModels.User{
+		"u_1": {UserId: "u_1", AppKey: "app_1"},
+	}}
+	withInboxFakes(t, inboxStorage, memberStorage, userStorage)
+
+	code := ReplaceInboxMembers(inboxTestCtx(), "inbox_juggle", &consoleModels.ReplaceInboxMembersReq{UserIds: []string{"u_1"}})
 	if code != errs.IMErrorCode_SUCCESS {
 		t.Fatalf("code = %d", code)
 	}
@@ -430,6 +585,16 @@ type fakeTelegramSetup struct {
 	getMeErr  error
 	deleteErr error
 	setErr    error
+}
+
+type fakeJuggleIMSetup struct {
+	botInfo *juggleimapi.BotInfo
+
+	botName     string
+	botToken    string
+	callbackURL string
+
+	err error
 }
 
 func (s *fakeUserStorageForInbox) Create(item storageModels.User) error { return nil }
