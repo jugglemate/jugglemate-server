@@ -170,7 +170,7 @@ curl -X GET 'http://localhost:8080/jmate/tickets/list?status=1&limit=10&offset=2
           "nickname": "Alice",
           "avatar": "https://example.com/customer.png"
         },
-        "channel_id": "web",
+        "inbox_id": "widget_inbox_001",
         "assignee_id": "u_123",
         "assignee": {
           "id": "u_123",
@@ -210,7 +210,7 @@ curl -X GET 'http://localhost:8080/jmate/tickets/list?status=1&limit=10&offset=2
 | `items[].customer.id` | string | 访客 ID |
 | `items[].customer.nickname` | string | 访客昵称 |
 | `items[].customer.avatar` | string | 访客头像 |
-| `items[].channel_id` | string | 渠道 ID，例如 `web` |
+| `items[].inbox_id` | string | inbox ID |
 | `items[].assignee_id` | string | 当前分配的客服用户 ID，未分配时为空 |
 | `items[].assignee` | object/null | 当前分配的客服用户信息。未分配或用户不存在时为 `null` |
 | `items[].assignee.id` | string | 客服用户 ID |
@@ -356,7 +356,7 @@ curl -X POST 'http://localhost:8080/jmate/tickets/3xvJK7Xwq2sTnQp6aLm9Z0/claim' 
         "nickname": "Alice",
         "avatar": "https://example.com/customer.png"
       },
-      "channel_id": "web",
+      "inbox_id": "widget_inbox_001",
       "assignee_id": "u_123",
       "assignee": {
         "id": "u_123",
@@ -380,7 +380,7 @@ curl -X POST 'http://localhost:8080/jmate/tickets/3xvJK7Xwq2sTnQp6aLm9Z0/claim' 
 | `ticket.source_id` | string | 访客渠道身份 ID |
 | `ticket.customer_id` | string | 访客 ID |
 | `ticket.customer` | object/null | 访客信息 |
-| `ticket.channel_id` | string | 渠道 ID，例如 `web` |
+| `ticket.inbox_id` | string | inbox ID |
 | `ticket.assignee_id` | string | 认领后的客服用户 ID，即当前用户 |
 | `ticket.assignee` | object/null | 认领后的客服用户信息 |
 | `ticket.status` | int | 工单状态。认领成功后为 `1`（处理中） |

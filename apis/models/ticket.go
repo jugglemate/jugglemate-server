@@ -11,7 +11,7 @@ type TicketInfo struct {
 	SourceId    string    `json:"source_id"`
 	CustomerId  string    `json:"customer_id"`
 	Customer    *UserInfo `json:"customer"`
-	ChannelId   string    `json:"channel_id"`
+	InboxId     string    `json:"inbox_id"`
 	AssigneeId  string    `json:"assignee_id"`
 	Assignee    *UserInfo `json:"assignee"`
 	Status      int       `json:"status"`

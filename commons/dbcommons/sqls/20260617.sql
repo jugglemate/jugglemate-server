@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS `tickets` (
   `source_id` varchar(32) DEFAULT '',
   `assignee_id` varchar(32) DEFAULT NULL,
   `customer_id` varchar(32) DEFAULT '',
-  `channel_id` varchar(32) DEFAULT '',
+  `inbox_id` varchar(32) DEFAULT '',
   `status` tinyint DEFAULT 0,
   `created_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3),
   `updated_time` datetime(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),

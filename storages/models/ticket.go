@@ -13,7 +13,7 @@ type Ticket struct {
 	TicketId    string
 	SourceId    string
 	CustomerId  string
-	ChannelId   string
+	InboxId     string
 	AssigneeId  string
 	Status      TicketStatus
 	CreatedTime int64
@@ -32,7 +32,7 @@ type ITicketStorage interface {
 	QryVisible(appkey, assigneeId string, status *TicketStatus, limit, offset int64) ([]*Ticket, error)
 	QryByCustomer(appkey, customerId string, startId, limit int64) ([]*Ticket, error)
 	QryByAssignee(appkey, assigneeId string, status int, startId, limit int64) ([]*Ticket, error)
-	QryByChannel(appkey, channelId string, status int, startId, limit int64) ([]*Ticket, error)
+	QryByInbox(appkey, inboxId string, status int, startId, limit int64) ([]*Ticket, error)
 	QryBySource(appkey, sourceId string, status int, startId, limit int64) ([]*Ticket, error)
 	UpdateStatus(appkey, ticketId string, status TicketStatus) error
 	ClaimIfPending(appkey, ticketId, assigneeId string) (*Ticket, error)

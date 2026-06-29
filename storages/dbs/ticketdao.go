@@ -15,7 +15,7 @@ type TicketDao struct {
 	TicketId    string    `gorm:"ticket_id"`
 	SourceId    string    `gorm:"source_id"`
 	CustomerId  string    `gorm:"customer_id"`
-	ChannelId   string    `gorm:"channel_id"`
+	InboxId     string    `gorm:"inbox_id"`
 	AssigneeId  string    `gorm:"assignee_id"`
 	Status      int       `gorm:"status"`
 	CreatedTime time.Time `gorm:"created_time"`
@@ -33,7 +33,7 @@ func (d *TicketDao) toModel() *models.Ticket {
 		TicketId:    d.TicketId,
 		SourceId:    d.SourceId,
 		CustomerId:  d.CustomerId,
-		ChannelId:   d.ChannelId,
+		InboxId:     d.InboxId,
 		AssigneeId:  d.AssigneeId,
 		Status:      models.TicketStatus(d.Status),
 		CreatedTime: d.CreatedTime.UnixMilli(),
@@ -47,7 +47,7 @@ func newTicketDao(item models.Ticket) *TicketDao {
 		TicketId:   item.TicketId,
 		SourceId:   item.SourceId,
 		CustomerId: item.CustomerId,
-		ChannelId:  item.ChannelId,
+		InboxId:    item.InboxId,
 		AssigneeId: item.AssigneeId,
 		Status:     int(item.Status),
 		AppKey:     item.AppKey,
@@ -83,7 +83,7 @@ func (d *TicketDao) Update(item models.Ticket) error {
 		Updates(map[string]interface{}{
 			"customer_id":  item.CustomerId,
 			"source_id":    item.SourceId,
-			"channel_id":   item.ChannelId,
+			"inbox_id":     item.InboxId,
 			"assignee_id":  item.AssigneeId,
 			"status":       int(item.Status),
 			"updated_time": time.Now(),
@@ -104,7 +104,7 @@ func (d *TicketDao) Upsert(item models.Ticket) error {
 		DoUpdates: clause.AssignmentColumns([]string{
 			"customer_id",
 			"source_id",
-			"channel_id",
+			"inbox_id",
 			"assignee_id",
 			"status",
 			"updated_time",
@@ -184,8 +184,8 @@ func (d *TicketDao) QryByAssignee(appkey, assigneeId string, status int, startId
 	return queryTickets(db, limit)
 }
 
-func (d *TicketDao) QryByChannel(appkey, channelId string, status int, startId, limit int64) ([]*models.Ticket, error) {
-	db := dbcommons.GetDb().Where("app_key=? and channel_id=?", appkey, channelId)
+func (d *TicketDao) QryByInbox(appkey, inboxId string, status int, startId, limit int64) ([]*models.Ticket, error) {
+	db := dbcommons.GetDb().Where("app_key=? and inbox_id=?", appkey, inboxId)
 	if status >= 0 {
 		db = db.Where("status=?", status)
 	}

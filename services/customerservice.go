@@ -22,8 +22,8 @@ const (
 
 var (
 	newInboxMemberStorageForCustomer = storages.NewInboxMemberStorage
-	newUserStorageForCustomer          = storages.NewUserStorage
-	registerIMUserForCustomer          = registerIMUser
+	newUserStorageForCustomer        = storages.NewUserStorage
+	registerIMUserForCustomer        = registerIMUser
 )
 
 func registerIMUser(sdk *juggleimsdk.JuggleIMSdk, userId, nickname, portrait string) errs.IMErrorCode {
@@ -214,7 +214,7 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 			TicketId:   ticketId,
 			SourceId:   rel.SourceId,
 			CustomerId: customer.CustomerId,
-			ChannelId:  inbox.InboxId,
+			InboxId:    inbox.InboxId,
 			Status:     storageModels.TicketStatusPending,
 			AppKey:     appkey,
 		}

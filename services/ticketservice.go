@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"strings"
 
 	juggleimsdk "github.com/juggleim/imserver-sdk-go"
 	apiModels "github.com/juggleim/jugglemate-server/apis/models"
@@ -13,14 +14,20 @@ import (
 )
 
 var (
-	newUserStorageForTicket     = storages.NewUserStorage
-	newCustomerStorageForTicket = storages.NewCustomerStorage
-	newTicketStorageForQuery    = storages.NewTicketStorage
-	getImSdkForTicketClaim      = imsdk.GetImSdk
-	groupAddMembersForClaim     = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.GroupMembersReq) (juggleimsdk.ApiCode, string, error) {
-		return sdk.GroupAddMembers(req)
+	newUserStorageForTicket        = storages.NewUserStorage
+	newCustomerStorageForTicket    = storages.NewCustomerStorage
+	newTicketStorageForQuery       = storages.NewTicketStorage
+	newInboxMemberStorageForTicket = storages.NewInboxMemberStorage
+	getImSdkForTicketClaim         = imsdk.GetImSdk
+	tagConversForClaim             = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+		return sdk.TagConvers(req)
 	}
 	sendTicketAssignedNtfMsgForClaim = SendTicketAssignedNtfMsg
+)
+
+const (
+	ticketConversationTagAssigned = "assigned"
+	ticketConversationTagMyTicket = "my_ticket"
 )
 
 func QryTickets(ctx context.Context, req *apiModels.QryTicketsReq) (errs.IMErrorCode, *apiModels.QryTicketsResp) {
@@ -98,17 +105,10 @@ func ClaimTicket(ctx context.Context, ticketId string) (errs.IMErrorCode, *apiMo
 		_ = ticketStorage.RevertClaimIfAssignee(appkey, ticketId, requesterId)
 		return errs.IMErrorCode_APP_NOT_EXISTED, nil
 	}
-	code, _, err := groupAddMembersForClaim(sdk, juggleimsdk.GroupMembersReq{
-		GroupId:   ticketId,
-		MemberIds: []string{requesterId},
-	})
-	if err != nil {
+
+	if code := syncTicketClaimConversationTags(appkey, ticket, requesterId, sdk); code != errs.IMErrorCode_SUCCESS {
 		_ = ticketStorage.RevertClaimIfAssignee(appkey, ticketId, requesterId)
-		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
-	}
-	if code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
-		_ = ticketStorage.RevertClaimIfAssignee(appkey, ticketId, requesterId)
-		return errs.IMErrorCode(code), nil
+		return code, nil
 	}
 
 	resp, err := ticketsToAPI(appkey, []*storageModels.Ticket{ticket})
@@ -170,7 +170,7 @@ func ticketsToAPI(appkey string, tickets []*storageModels.Ticket) (*apiModels.Qr
 			SourceId:    ticket.SourceId,
 			CustomerId:  ticket.CustomerId,
 			Customer:    customer,
-			ChannelId:   ticket.ChannelId,
+			InboxId:     ticket.InboxId,
 			AssigneeId:  ticket.AssigneeId,
 			Assignee:    assignee,
 			Status:      int(ticket.Status),
@@ -179,6 +179,90 @@ func ticketsToAPI(appkey string, tickets []*storageModels.Ticket) (*apiModels.Qr
 		})
 	}
 	return resp, nil
+}
+
+func syncTicketClaimConversationTags(appkey string, ticket *storageModels.Ticket, assigneeId string, sdk *juggleimsdk.JuggleIMSdk) errs.IMErrorCode {
+	if ticket == nil {
+		return errs.IMErrorCode_APP_ParamError
+	}
+	inboxMemberIds, err := ticketInboxMemberIds(appkey, ticket.InboxId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
+	}
+	conversation := ticketGroupConversation(ticket.TicketId)
+	for _, memberId := range inboxMemberIds {
+		code := tagTicketConversation(sdk, memberId, ticketConversationTagAssigned, conversation)
+		if code != errs.IMErrorCode_SUCCESS {
+			return code
+		}
+	}
+	return tagTicketConversation(sdk, assigneeId, ticketConversationTagMyTicket, conversation)
+}
+
+func ticketInboxMemberIds(appkey, inboxId string) ([]string, error) {
+	if strings.TrimSpace(inboxId) == "" {
+		return nil, nil
+	}
+	memberStorage := newInboxMemberStorageForTicket()
+	const pageSize int64 = 1000
+	var startId int64
+	memberIds := []string{}
+	seen := map[string]struct{}{}
+	for {
+		members, err := memberStorage.QryByInbox(appkey, inboxId, startId, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		if len(members) == 0 {
+			return memberIds, nil
+		}
+		for _, member := range members {
+			if member == nil {
+				continue
+			}
+			if member.ID > 0 && (startId == 0 || member.ID < startId) {
+				startId = member.ID
+			}
+			memberId := strings.TrimSpace(member.MemberId)
+			if memberId == "" {
+				continue
+			}
+			if _, ok := seen[memberId]; ok {
+				continue
+			}
+			seen[memberId] = struct{}{}
+			memberIds = append(memberIds, memberId)
+		}
+		if int64(len(members)) < pageSize || startId == 0 {
+			return memberIds, nil
+		}
+	}
+}
+
+func ticketGroupConversation(ticketId string) *juggleimsdk.Conversation {
+	return &juggleimsdk.Conversation{
+		TargetId:    ticketId,
+		ChannelType: int(juggleimsdk.ChannelType_Group),
+	}
+}
+
+func tagTicketConversation(sdk *juggleimsdk.JuggleIMSdk, userId, tag string, conversation *juggleimsdk.Conversation) errs.IMErrorCode {
+	userId = strings.TrimSpace(userId)
+	if userId == "" {
+		return errs.IMErrorCode_APP_ParamError
+	}
+	code, _, err := tagConversForClaim(sdk, juggleimsdk.TagConversReq{
+		UserId:  userId,
+		Tag:     tag,
+		Convers: []*juggleimsdk.Conversation{conversation},
+	})
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
+	}
+	if code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
+		return errs.IMErrorCode(code)
+	}
+	return errs.IMErrorCode_SUCCESS
 }
 
 func ticketCustomerInfo(storage storageModels.ICustomerStorage, cache map[string]*apiModels.UserInfo, appkey, customerId string) (*apiModels.UserInfo, error) {
