@@ -17,6 +17,7 @@ import (
 
 const (
 	CustomerSourceIDPrefix  string = "customer_"
+	TicketIDPrefix          string = "ticket_"
 	ConversationType_Ticket int    = 2
 )
 
@@ -86,6 +87,10 @@ func buildTicketGroupMemberIds(sourceId string, inboxMemberIds []string) []strin
 		memberIds = append(memberIds, memberId)
 	}
 	return memberIds
+}
+
+func generateTicketId() string {
+	return TicketIDPrefix + tools.GenerateUUIDShort22()
 }
 
 func prepareTicketGroupMemberIds(
@@ -254,7 +259,7 @@ func startCustomerTicket(req customerTicketStartReq) (errs.IMErrorCode, *custome
 	}
 
 	if ticket == nil {
-		ticketId := tools.GenerateUUIDShort22()
+		ticketId := generateTicketId()
 		groupName := nickname
 		if groupName == "" {
 			groupName = customer.Nickname

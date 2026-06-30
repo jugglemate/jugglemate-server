@@ -28,6 +28,9 @@ func TestProcessTelegramWebhookSupportedTextCreatesTicketAndSendsGroupMessage(t 
 	if env.tickets.created == nil || env.tickets.created.InboxId != "inbox_tg" || env.tickets.created.SourceId != env.rels.created.SourceId {
 		t.Fatalf("ticket = %+v", env.tickets.created)
 	}
+	if !strings.HasPrefix(env.tickets.created.TicketId, TicketIDPrefix) || env.createdGroupId != env.tickets.created.TicketId {
+		t.Fatalf("ticket id = %q group id = %q, want matching ticket-prefixed ids", env.tickets.created.TicketId, env.createdGroupId)
+	}
 	if !reflect.DeepEqual(env.createdGroupMembers, []string{env.rels.created.SourceId, "agent_1"}) {
 		t.Fatalf("group members = %+v", env.createdGroupMembers)
 	}
@@ -226,11 +229,15 @@ func (s *telegramFakeInboxStorage) QryByChannelType(appkey, channelType string, 
 
 type telegramFakeCustomerStorage struct {
 	byIdentifier map[string]*storageModels.Customer
+	byId         map[string]*storageModels.Customer
 	created      *storageModels.Customer
 }
 
 func (s *telegramFakeCustomerStorage) Create(item storageModels.Customer) error {
 	s.created = &item
+	if s.byId != nil {
+		s.byId[item.CustomerId] = &item
+	}
 	s.byIdentifier[item.Identifier] = &item
 	return nil
 }
@@ -238,7 +245,10 @@ func (s *telegramFakeCustomerStorage) Update(item storageModels.Customer) error 
 func (s *telegramFakeCustomerStorage) Upsert(item storageModels.Customer) error { return nil }
 func (s *telegramFakeCustomerStorage) Delete(appkey, customerId string) error   { return nil }
 func (s *telegramFakeCustomerStorage) FindByCustomerId(appkey, customerId string) (*storageModels.Customer, error) {
-	return nil, nil
+	if s.byId == nil {
+		return nil, nil
+	}
+	return s.byId[customerId], nil
 }
 func (s *telegramFakeCustomerStorage) FindByIdentifier(appkey, identifier string) (*storageModels.Customer, error) {
 	return s.byIdentifier[identifier], nil
@@ -274,19 +284,26 @@ func (s *telegramFakeRelStorage) QryByInbox(appkey, inboxId string, startId, lim
 
 type telegramFakeTicketStorage struct {
 	bySource map[string]*storageModels.Ticket
+	byTicket map[string]*storageModels.Ticket
 	created  *storageModels.Ticket
 }
 
 func (s *telegramFakeTicketStorage) Create(item storageModels.Ticket) error {
 	s.created = &item
 	s.bySource[item.SourceId] = &item
+	if s.byTicket != nil {
+		s.byTicket[item.TicketId] = &item
+	}
 	return nil
 }
 func (s *telegramFakeTicketStorage) Update(item storageModels.Ticket) error { return nil }
 func (s *telegramFakeTicketStorage) Upsert(item storageModels.Ticket) error { return nil }
 func (s *telegramFakeTicketStorage) Delete(appkey, ticketId string) error   { return nil }
 func (s *telegramFakeTicketStorage) FindByTicketId(appkey, ticketId string) (*storageModels.Ticket, error) {
-	return nil, nil
+	if s.byTicket == nil {
+		return nil, nil
+	}
+	return s.byTicket[ticketId], nil
 }
 func (s *telegramFakeTicketStorage) FindBySource(appkey, sourceId string) (*storageModels.Ticket, error) {
 	return s.bySource[sourceId], nil

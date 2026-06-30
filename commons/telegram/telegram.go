@@ -58,6 +58,14 @@ func (c *Client) SetWebhook(botToken, callbackURL string) error {
 	return c.do(botToken, "setWebhook", map[string]string{"url": callbackURL}, &resp)
 }
 
+func (c *Client) SendMessage(botToken, chatID, text string) error {
+	var resp struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+	}
+	return c.do(botToken, "sendMessage", map[string]string{"chat_id": chatID, "text": text}, &resp)
+}
+
 func (c *Client) do(botToken, method string, body any, out any) error {
 	if botToken == "" {
 		return fmt.Errorf("telegram bot token is empty")

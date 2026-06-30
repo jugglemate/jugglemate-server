@@ -1,6 +1,7 @@
 package services
 
 import (
+	"strings"
 	"testing"
 
 	juggleimsdk "github.com/juggleim/imserver-sdk-go"
@@ -56,6 +57,16 @@ func TestBuildTicketGroupMemberIds(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("member ids = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestGenerateTicketIdUsesTicketPrefix(t *testing.T) {
+	ticketId := generateTicketId()
+	if !strings.HasPrefix(ticketId, TicketIDPrefix) {
+		t.Fatalf("ticket id = %q, want prefix %q", ticketId, TicketIDPrefix)
+	}
+	if len(ticketId) <= len(TicketIDPrefix) {
+		t.Fatalf("ticket id = %q, want random suffix", ticketId)
 	}
 }
 

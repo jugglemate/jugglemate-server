@@ -26,6 +26,9 @@ func TestProcessJuggleIMWebhookSupportedCallbackCreatesTicketAndSendsGroupMessag
 	if env.tickets.created == nil || env.tickets.created.InboxId != "inbox_juggle" || env.tickets.created.SourceId != env.rels.created.SourceId {
 		t.Fatalf("ticket = %+v", env.tickets.created)
 	}
+	if !strings.HasPrefix(env.tickets.created.TicketId, TicketIDPrefix) || env.createdGroupId != env.tickets.created.TicketId {
+		t.Fatalf("ticket id = %q group id = %q, want matching ticket-prefixed ids", env.tickets.created.TicketId, env.createdGroupId)
+	}
 	if env.sentMsg.SenderId != env.rels.created.SourceId || env.sentMsg.TargetId != env.tickets.created.TicketId {
 		t.Fatalf("sent msg = %+v", env.sentMsg)
 	}

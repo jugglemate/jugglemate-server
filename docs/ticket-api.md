@@ -140,6 +140,19 @@ jmateBaseUrl: https://example.com
 - 新工单会创建 IM 群组，`group_id` 使用 `ticket_id`，群成员包含 Telegram 访客 `source_id` 与该 inbox 的成员。
 - Telegram 消息会以访客 `source_id` 为 sender，发送到 `ticket_id` 对应的群会话，消息类型为 `jg:text`。
 
+## IM Message Webhook Outbound Forwarding
+
+`POST /jmate/webhooks/message` 接收到 IM 消息回调后，会对 ticket 群消息做外部渠道回传。
+
+### 处理规则
+
+- 只考虑 `conver_type=2` 的群消息。
+- 只考虑 `receiver` 以 `ticket_` 开头的消息，并把 `receiver` 作为 `ticket_id` 查询工单。
+- 当消息 `sender` 等于该工单的 `source_id` 时跳过处理，避免访客消息回环发送到外部渠道。
+- 根据工单中的 `inbox_id` 查询 inbox，再按 `channel_type` 分发；当前支持 Telegram，其他渠道会确认成功但不转发。
+- Telegram 回传使用 inbox `channel_conf` 中的 `bot_token`，目标 chat/user ID 来自工单 customer 的 `identifier`，不是 `ticket.source_id`。
+- 当前只回传 `text` 或 `jg:text` 的文本内容；空内容或不支持的消息类型会跳过。
+
 ## JuggleIM Webhook
 
 JuggleIM 渠道由管理后台创建 inbox，配置项包含 `bot_name` 和 `bot_token`。当前 JuggleIM bot SDK 初始化是占位实现，会校验必填配置并准备回调地址，真实 SDK 对接后使用同一扩展点完成注册。
