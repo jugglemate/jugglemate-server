@@ -20,3 +20,9 @@ botConnector:
 agentServer:
   baseURL: http://127.0.0.1:8080/v1
   timeoutSeconds: 5
+
+# agent-server Python 管理 API 反向代理目标（/jmate/agentapi/* -> baseURL/api/v1/*）。
+# internalSecret 为 Go 代理与 Python 之间的可信内部共享密钥，两侧必须一致，且禁止下发浏览器。
+agentAdmin:
+  baseURL: http://127.0.0.1:8000
+  internalSecret: change-me-shared-internal-secret

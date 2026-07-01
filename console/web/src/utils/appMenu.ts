@@ -34,6 +34,39 @@ export const APP_MENU_TREE: MenuItem[] = [
     sort: 2,
     hidden: false,
   },
+  {
+    id: "4",
+    kind: "item",
+    name: "menu.agents",
+    path: "/agents",
+    icon: "IconLucideBot",
+    children: null,
+    permissions: null,
+    sort: 3,
+    hidden: false,
+  },
+  {
+    id: "5",
+    kind: "item",
+    name: "menu.tools",
+    path: "/tools",
+    icon: "IconLucideWrench",
+    children: null,
+    permissions: null,
+    sort: 4,
+    hidden: false,
+  },
+  {
+    id: "6",
+    kind: "item",
+    name: "menu.models",
+    path: "/models",
+    icon: "IconLucideCpu",
+    children: null,
+    permissions: null,
+    sort: 5,
+    hidden: false,
+  },
 ];
 
 function hasRequiredPermissions(
@@ -86,6 +119,9 @@ export function requiredPermissionForPath(pathname: string): string | null {
     "/users": "user:view",
     "/inboxes": "inbox:view",
     "/settings/inboxes": "inbox:view",
+    "/agents": null,
+    "/tools": null,
+    "/models": null,
     "/403": null,
   };
   return map[p] ?? null;

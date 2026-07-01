@@ -131,8 +131,10 @@ async function request<T>(
   isAfterRefresh = false,
 ): Promise<T> {
   const url = buildUrl(path, options?.params);
+  // multipart/FormData 请求：不做 JSON 序列化，也不设置 Content-Type（交由浏览器补全 boundary）。
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...getCommonHeaders(),
     ...getAuthHeaders(),
     ...(options?.headers as Record<string, string>),
@@ -141,7 +143,7 @@ async function request<T>(
   const res = await fetch(url, {
     method,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body !== undefined ? (isFormData ? (body as FormData) : JSON.stringify(body)) : undefined,
     ...options,
   });
 

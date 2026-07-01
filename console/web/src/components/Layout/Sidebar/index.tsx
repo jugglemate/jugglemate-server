@@ -3,8 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "@tanstack/react-router";
 import {
   Book,
+  Bot,
   Briefcase,
   CircleDashed,
+  Cpu,
   Folder,
   Home,
   Inbox,
@@ -13,6 +15,7 @@ import {
   Star,
   User,
   Users,
+  Wrench,
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -67,6 +70,9 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   IconLucideBookOpen: Book,
   IconLucideFolderKanban: Folder,
   IconLucideSparkles: Zap,
+  IconLucideBot: Bot,
+  IconLucideWrench: Wrench,
+  IconLucideCpu: Cpu,
 };
 
 function renderMenuIcon(icon: string | null, size = 16) {

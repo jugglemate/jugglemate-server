@@ -15,6 +15,9 @@ const PATH_LABEL_KEY: Record<string, string> = {
   "/dashboard": "menu.dashboard",
   "/users": "menu.users",
   "/inboxes": "menu.inboxes",
+  "/agents": "menu.agents",
+  "/tools": "menu.tools",
+  "/models": "menu.models",
   "/403": "errors.forbiddenTitle",
 };
 

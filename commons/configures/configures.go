@@ -30,6 +30,18 @@ type AppConfig struct {
 
 	// OSS 统一上传配置
 	Oss OssConfig `yaml:"oss"`
+
+	// AgentAdmin 代理到 agent-server Python 管理 API（/api/v1/*）的配置。
+	// 与用于 twins/chat 运行时的 agentServer 区分开。
+	AgentAdmin AgentAdminConfig `yaml:"agentAdmin"`
+}
+
+// AgentAdminConfig agent-server 管理 API 反向代理配置。
+type AgentAdminConfig struct {
+	// BaseURL Python agent-server 源地址（不含 /api/v1），例如 http://127.0.0.1:8000。
+	BaseURL string `yaml:"baseURL"`
+	// InternalSecret Go 代理与 Python 之间的可信内部共享密钥，禁止下发浏览器。
+	InternalSecret string `yaml:"internalSecret"`
 }
 
 // OssConfig 阿里云 OSS 上传配置

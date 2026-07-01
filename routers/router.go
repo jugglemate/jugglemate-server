@@ -59,6 +59,9 @@ func Route(eng *gin.Engine, prefix string) {
 	group.GET("/aibots/:unique_name/feedbacks", handlers.ListAgentFeedbacks)
 
 	RouteConsole(group.Group("/console"))
+
+	// 反向代理到 agent-server 管理 API（智能体/工具/模型设置菜单）。
+	RouteAgentAdminProxy(group)
 }
 
 func RouteMsgCallback(group *gin.RouterGroup) {
