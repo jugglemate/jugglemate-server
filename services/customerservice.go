@@ -34,6 +34,7 @@ var (
 	createGroupForCustomer                = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.GroupMembersReq) (juggleimsdk.ApiCode, string, error) {
 		return sdk.CreateGroup(req)
 	}
+	syncTicketGlobalConversationTagsForCustomer = SyncTicketGlobalConversationTags
 )
 
 func registerIMUser(sdk *juggleimsdk.JuggleIMSdk, userId, nickname, portrait string) errs.IMErrorCode {
@@ -287,15 +288,19 @@ func startCustomerTicket(req customerTicketStartReq) (errs.IMErrorCode, *custome
 			return errs.IMErrorCode(groupCode), nil
 		}
 		ticket = &storageModels.Ticket{
-			TicketId:   ticketId,
-			SourceId:   rel.SourceId,
-			CustomerId: customer.CustomerId,
-			InboxId:    inbox.InboxId,
-			Status:     storageModels.TicketStatusPending,
-			AppKey:     appkey,
+			TicketId:    ticketId,
+			SourceId:    rel.SourceId,
+			CustomerId:  customer.CustomerId,
+			InboxId:     inbox.InboxId,
+			ChannelType: inbox.ChannelType,
+			Status:      storageModels.TicketStatusPending,
+			AppKey:      appkey,
 		}
 		if err := ticketStorage.Create(*ticket); err != nil {
 			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+		}
+		if code := syncTicketGlobalConversationTagsForCustomer(appkey, ticketId); code != errs.IMErrorCode_SUCCESS {
+			return code, nil
 		}
 	}
 

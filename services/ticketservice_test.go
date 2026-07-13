@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	juggleimsdk "github.com/juggleim/imserver-sdk-go"
@@ -50,7 +49,7 @@ func TestQryTicketsAdminUsesAllTicketsQuery(t *testing.T) {
 func TestQryTicketsCustomerServiceUsesVisibleQuery(t *testing.T) {
 	ticketStorage := &mockTicketStorage{
 		tickets: []*storageModels.Ticket{
-			{ID: 8, TicketId: "pending", Status: storageModels.TicketStatusPending},
+			{ID: 8, TicketId: "pending", ChannelType: "telegram", Status: storageModels.TicketStatusPending},
 			{ID: 7, TicketId: "assigned", CustomerId: "c_1", AssigneeId: "u_1", Status: storageModels.TicketStatusClosed},
 		},
 	}
@@ -81,6 +80,9 @@ func TestQryTicketsCustomerServiceUsesVisibleQuery(t *testing.T) {
 	}
 	if len(resp.Items) != 2 {
 		t.Fatalf("len(resp.Items) = %d, want 2", len(resp.Items))
+	}
+	if resp.Items[0].ChannelType != "telegram" {
+		t.Fatalf("channel type = %q, want telegram", resp.Items[0].ChannelType)
 	}
 	if resp.Items[1].Customer == nil || resp.Items[1].Customer.Id != "c_1" || resp.Items[1].Customer.Nickname != "Customer" || resp.Items[1].Customer.Avatar != "customer.png" {
 		t.Fatalf("customer = %+v, want c_1 Customer customer.png", resp.Items[1].Customer)
@@ -125,24 +127,29 @@ func TestClaimTicketSuccess(t *testing.T) {
 			AppKey:     "app_1",
 		},
 	}
+	var tagCount int
 	restore := mockTicketClaimDeps(&mockUserStorage{
 		user: &storageModels.User{UserId: "u_1", Nickname: "Agent", Avator: "agent.png", Role: storageModels.UserRoleCustomerService},
 	}, &mockCustomerStorage{
 		customers: map[string]*storageModels.Customer{
 			"c_1": {CustomerId: "c_1", Nickname: "Customer", Avator: "customer.png"},
 		},
-	}, ticketStorage, &mockInboxMemberStorage{
-		members: []*storageModels.InboxMember{
-			{ID: 2, InboxId: "inbox_1", MemberId: "u_1"},
-			{ID: 1, InboxId: "inbox_1", MemberId: "u_2"},
-		},
-	}, func(_ *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+	}, ticketStorage, func(_ *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+		tagCount++
 		assertTicketTagReq(t, req)
 		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
 	})
 	defer restore()
 
 	var notifyCount int
+	var globalTagSyncCount int
+	syncTicketGlobalConversationTagsForClaim = func(appkey, ticketId string) errs.IMErrorCode {
+		globalTagSyncCount++
+		if appkey != "app_1" || ticketId != "t_1" {
+			t.Fatalf("global tag sync app=%q ticket=%q", appkey, ticketId)
+		}
+		return errs.IMErrorCode_SUCCESS
+	}
 	sendTicketAssignedNtfMsgForClaim = func(_ context.Context, msg *TicketAssignedNtfMsg) {
 		notifyCount++
 		if msg.TicketId != "t_1" || msg.AssignType != AssignType_Claim {
@@ -166,74 +173,24 @@ func TestClaimTicketSuccess(t *testing.T) {
 	if notifyCount != 1 {
 		t.Fatalf("notifyCount = %d, want 1", notifyCount)
 	}
+	if tagCount != 1 {
+		t.Fatalf("tagCount = %d, want only my_ticket tag", tagCount)
+	}
+	if globalTagSyncCount != 1 {
+		t.Fatalf("globalTagSyncCount = %d, want 1", globalTagSyncCount)
+	}
 }
 
 func TestClaimTicketRejectsNonPending(t *testing.T) {
 	ticketStorage := &mockTicketStorage{}
 	restore := mockTicketClaimDeps(&mockUserStorage{
 		user: &storageModels.User{UserId: "u_1", Role: storageModels.UserRoleCustomerService},
-	}, &mockCustomerStorage{}, ticketStorage, &mockInboxMemberStorage{}, nil)
+	}, &mockCustomerStorage{}, ticketStorage, nil)
 	defer restore()
 
 	code, _ := ClaimTicket(ticketTestContext("app_1", "u_1"), "t_1")
 	if code != errs.IMErrorCode_APP_ParamError {
 		t.Fatalf("ClaimTicket code = %d, want param error", code)
-	}
-}
-
-func TestClaimTicketRevertsWhenInboxMemberQueryFails(t *testing.T) {
-	ticketStorage := &mockTicketStorage{
-		claimTicket: &storageModels.Ticket{
-			TicketId:   "t_1",
-			InboxId:    "inbox_1",
-			AssigneeId: "u_1",
-			Status:     storageModels.TicketStatusProcessing,
-			AppKey:     "app_1",
-		},
-	}
-	restore := mockTicketClaimDeps(&mockUserStorage{
-		user: &storageModels.User{UserId: "u_1", Role: storageModels.UserRoleCustomerService},
-	}, &mockCustomerStorage{}, ticketStorage, &mockInboxMemberStorage{err: errors.New("query failed")}, nil)
-	defer restore()
-
-	code, _ := ClaimTicket(ticketTestContext("app_1", "u_1"), "t_1")
-	if code != errs.IMErrorCode_APP_INTERNAL_TIMEOUT {
-		t.Fatalf("ClaimTicket code = %d, want internal timeout", code)
-	}
-	if ticketStorage.revertAppkey != "app_1" || ticketStorage.revertTicketId != "t_1" || ticketStorage.revertAssigneeId != "u_1" {
-		t.Fatalf("revert args = appkey:%q ticketId:%q assigneeId:%q", ticketStorage.revertAppkey, ticketStorage.revertTicketId, ticketStorage.revertAssigneeId)
-	}
-}
-
-func TestClaimTicketRevertsWhenAssignedTagFails(t *testing.T) {
-	ticketStorage := &mockTicketStorage{
-		claimTicket: &storageModels.Ticket{
-			TicketId:   "t_1",
-			InboxId:    "inbox_1",
-			AssigneeId: "u_1",
-			Status:     storageModels.TicketStatusProcessing,
-			AppKey:     "app_1",
-		},
-	}
-	restore := mockTicketClaimDeps(&mockUserStorage{
-		user: &storageModels.User{UserId: "u_1", Role: storageModels.UserRoleCustomerService},
-	}, &mockCustomerStorage{}, ticketStorage, &mockInboxMemberStorage{
-		members: []*storageModels.InboxMember{{ID: 1, InboxId: "inbox_1", MemberId: "u_2"}},
-	}, func(_ *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
-		assertTicketTagReq(t, req)
-		if req.Tag == ticketConversationTagAssigned {
-			return juggleimsdk.ApiCode(errs.IMErrorCode_APP_INTERNAL_TIMEOUT), "", nil
-		}
-		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
-	})
-	defer restore()
-
-	code, _ := ClaimTicket(ticketTestContext("app_1", "u_1"), "t_1")
-	if code != errs.IMErrorCode_APP_INTERNAL_TIMEOUT {
-		t.Fatalf("ClaimTicket code = %d, want internal timeout", code)
-	}
-	if ticketStorage.revertAppkey != "app_1" || ticketStorage.revertTicketId != "t_1" || ticketStorage.revertAssigneeId != "u_1" {
-		t.Fatalf("revert args = appkey:%q ticketId:%q assigneeId:%q", ticketStorage.revertAppkey, ticketStorage.revertTicketId, ticketStorage.revertAssigneeId)
 	}
 }
 
@@ -249,9 +206,7 @@ func TestClaimTicketRevertsWhenMyTicketTagFails(t *testing.T) {
 	}
 	restore := mockTicketClaimDeps(&mockUserStorage{
 		user: &storageModels.User{UserId: "u_1", Role: storageModels.UserRoleCustomerService},
-	}, &mockCustomerStorage{}, ticketStorage, &mockInboxMemberStorage{
-		members: []*storageModels.InboxMember{{ID: 1, InboxId: "inbox_1", MemberId: "u_2"}},
-	}, func(_ *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+	}, &mockCustomerStorage{}, ticketStorage, func(_ *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
 		assertTicketTagReq(t, req)
 		if req.Tag == ticketConversationTagMyTicket {
 			return juggleimsdk.ApiCode(errs.IMErrorCode_APP_INTERNAL_TIMEOUT), "", nil
@@ -269,37 +224,183 @@ func TestClaimTicketRevertsWhenMyTicketTagFails(t *testing.T) {
 	}
 }
 
-func TestClaimTicketDoesNotTagSourceUserAssigned(t *testing.T) {
+func TestTransferTicketSuccess(t *testing.T) {
+	operator := &storageModels.User{UserId: "u_1", Nickname: "Operator", Avator: "operator.png", Role: storageModels.UserRoleCustomerService}
+	assignee := &storageModels.User{UserId: "u_2", Nickname: "Assignee", Avator: "assignee.png", Role: storageModels.UserRoleCustomerService}
 	ticketStorage := &mockTicketStorage{
-		claimTicket: &storageModels.Ticket{
+		findTicket: &storageModels.Ticket{
 			TicketId:   "t_1",
-			SourceId:   "customer_1",
-			InboxId:    "inbox_1",
 			AssigneeId: "u_1",
 			Status:     storageModels.TicketStatusProcessing,
 			AppKey:     "app_1",
 		},
+		transferTicket: &storageModels.Ticket{
+			TicketId:   "t_1",
+			AssigneeId: "u_2",
+			Status:     storageModels.TicketStatusProcessing,
+			AppKey:     "app_1",
+		},
 	}
-	var assignedUsers []string
-	restore := mockTicketClaimDeps(&mockUserStorage{
-		user: &storageModels.User{UserId: "u_1", Role: storageModels.UserRoleCustomerService},
-	}, &mockCustomerStorage{}, ticketStorage, &mockInboxMemberStorage{
-		members: []*storageModels.InboxMember{{ID: 1, InboxId: "inbox_1", MemberId: "u_2"}},
-	}, func(_ *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+	restore := mockTicketStorages(&mockUserStorage{users: map[string]*storageModels.User{
+		"u_1": operator,
+		"u_2": assignee,
+	}}, &mockCustomerStorage{}, ticketStorage)
+	origSend := sendTicketAssignedNtfMsgForTransfer
+	origGetSDK := getImSdkForTicketTransfer
+	origTag := tagConversForTransfer
+	origUnTag := unTagConversForTransfer
+	defer func() {
+		restore()
+		sendTicketAssignedNtfMsgForTransfer = origSend
+		getImSdkForTicketTransfer = origGetSDK
+		tagConversForTransfer = origTag
+		unTagConversForTransfer = origUnTag
+	}()
+
+	var notified *TicketAssignedNtfMsg
+	var taggedUsers, untaggedUsers []string
+	var globalTagSyncCount int
+	syncTicketGlobalConversationTagsForTransfer = func(appkey, ticketId string) errs.IMErrorCode {
+		globalTagSyncCount++
+		if appkey != "app_1" || ticketId != "t_1" {
+			t.Fatalf("global tag sync app=%q ticket=%q", appkey, ticketId)
+		}
+		return errs.IMErrorCode_SUCCESS
+	}
+	getImSdkForTicketTransfer = func(string) *juggleimsdk.JuggleIMSdk { return &juggleimsdk.JuggleIMSdk{} }
+	tagConversForTransfer = func(_ *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
 		assertTicketTagReq(t, req)
-		if req.Tag == ticketConversationTagAssigned {
-			assignedUsers = append(assignedUsers, req.UserId)
+		taggedUsers = append(taggedUsers, req.UserId)
+		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
+	}
+	unTagConversForTransfer = func(_ *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+		assertTicketTagReq(t, req)
+		untaggedUsers = append(untaggedUsers, req.UserId)
+		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
+	}
+	sendTicketAssignedNtfMsgForTransfer = func(_ context.Context, msg *TicketAssignedNtfMsg) {
+		notified = msg
+	}
+	code, resp := TransferTicket(ticketTestContext("app_1", "u_1"), "t_1", &apiModels.TransferTicketReq{AssigneeId: "u_2"})
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("TransferTicket code = %d, want success", code)
+	}
+	if ticketStorage.transferAppkey != "app_1" || ticketStorage.transferTicketId != "t_1" || ticketStorage.transferOldId != "u_1" || ticketStorage.transferNewId != "u_2" {
+		t.Fatalf("transfer args = appkey:%q ticket:%q old:%q new:%q", ticketStorage.transferAppkey, ticketStorage.transferTicketId, ticketStorage.transferOldId, ticketStorage.transferNewId)
+	}
+	if resp == nil || resp.Ticket == nil || resp.Ticket.AssigneeId != "u_2" || resp.Ticket.Assignee == nil || resp.Ticket.Assignee.Id != "u_2" {
+		t.Fatalf("transfer resp = %+v", resp)
+	}
+	if notified == nil || notified.TicketId != "t_1" || notified.AssignType != AssignType_AssignUser || notified.Operator == nil || notified.Operator.Id != "u_1" || notified.Assignee == nil || notified.Assignee.Id != "u_2" {
+		t.Fatalf("notification = %+v", notified)
+	}
+	if len(untaggedUsers) != 1 || untaggedUsers[0] != "u_1" {
+		t.Fatalf("untagged users = %+v, want u_1", untaggedUsers)
+	}
+	if len(taggedUsers) != 1 || taggedUsers[0] != "u_2" {
+		t.Fatalf("tagged users = %+v, want u_2", taggedUsers)
+	}
+	if globalTagSyncCount != 1 {
+		t.Fatalf("globalTagSyncCount = %d, want 1", globalTagSyncCount)
+	}
+}
+
+func TestTransferTicketRollsBackWhenNewAssigneeTagFails(t *testing.T) {
+	ticketStorage := &mockTicketStorage{
+		findTicket: &storageModels.Ticket{
+			TicketId:   "t_1",
+			AssigneeId: "u_1",
+			Status:     storageModels.TicketStatusProcessing,
+			AppKey:     "app_1",
+		},
+		transferTicket: &storageModels.Ticket{
+			TicketId:   "t_1",
+			AssigneeId: "u_2",
+			Status:     storageModels.TicketStatusProcessing,
+			AppKey:     "app_1",
+		},
+	}
+	restore := mockTicketStorages(&mockUserStorage{users: map[string]*storageModels.User{
+		"u_1": {UserId: "u_1", Role: storageModels.UserRoleCustomerService},
+		"u_2": {UserId: "u_2", Role: storageModels.UserRoleCustomerService},
+	}}, &mockCustomerStorage{}, ticketStorage)
+	origGetSDK := getImSdkForTicketTransfer
+	origTag := tagConversForTransfer
+	origUnTag := unTagConversForTransfer
+	origSend := sendTicketAssignedNtfMsgForTransfer
+	defer func() {
+		restore()
+		getImSdkForTicketTransfer = origGetSDK
+		tagConversForTransfer = origTag
+		unTagConversForTransfer = origUnTag
+		sendTicketAssignedNtfMsgForTransfer = origSend
+	}()
+
+	var taggedUsers, untaggedUsers []string
+	var notified bool
+	getImSdkForTicketTransfer = func(string) *juggleimsdk.JuggleIMSdk { return &juggleimsdk.JuggleIMSdk{} }
+	unTagConversForTransfer = func(_ *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+		untaggedUsers = append(untaggedUsers, req.UserId)
+		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
+	}
+	tagConversForTransfer = func(_ *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+		taggedUsers = append(taggedUsers, req.UserId)
+		if req.UserId == "u_2" {
+			return juggleimsdk.ApiCode(errs.IMErrorCode_APP_INTERNAL_TIMEOUT), "", nil
 		}
 		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
-	})
+	}
+	sendTicketAssignedNtfMsgForTransfer = func(context.Context, *TicketAssignedNtfMsg) { notified = true }
+
+	code, _ := TransferTicket(ticketTestContext("app_1", "u_1"), "t_1", &apiModels.TransferTicketReq{AssigneeId: "u_2"})
+	if code != errs.IMErrorCode_APP_INTERNAL_TIMEOUT {
+		t.Fatalf("TransferTicket code = %d, want internal timeout", code)
+	}
+	if ticketStorage.transferOldId != "u_2" || ticketStorage.transferNewId != "u_1" {
+		t.Fatalf("rollback transfer old=%q new=%q, want u_2 to u_1", ticketStorage.transferOldId, ticketStorage.transferNewId)
+	}
+	if len(untaggedUsers) != 1 || untaggedUsers[0] != "u_1" {
+		t.Fatalf("untagged users = %+v, want u_1", untaggedUsers)
+	}
+	if len(taggedUsers) != 2 || taggedUsers[0] != "u_2" || taggedUsers[1] != "u_1" {
+		t.Fatalf("tagged users = %+v, want failed u_2 then restored u_1", taggedUsers)
+	}
+	if notified {
+		t.Fatal("notification sent for rolled-back transfer")
+	}
+}
+
+func TestTransferTicketRejectsNonOwner(t *testing.T) {
+	ticketStorage := &mockTicketStorage{findTicket: &storageModels.Ticket{
+		TicketId:   "t_1",
+		AssigneeId: "u_3",
+		Status:     storageModels.TicketStatusProcessing,
+		AppKey:     "app_1",
+	}}
+	restore := mockTicketStorages(&mockUserStorage{users: map[string]*storageModels.User{
+		"u_1": {UserId: "u_1", Role: storageModels.UserRoleCustomerService},
+		"u_2": {UserId: "u_2", Role: storageModels.UserRoleCustomerService},
+	}}, &mockCustomerStorage{}, ticketStorage)
 	defer restore()
 
-	code, _ := ClaimTicket(ticketTestContext("app_1", "u_1"), "t_1")
-	if code != errs.IMErrorCode_SUCCESS {
-		t.Fatalf("ClaimTicket code = %d, want success", code)
+	code, _ := TransferTicket(ticketTestContext("app_1", "u_1"), "t_1", &apiModels.TransferTicketReq{AssigneeId: "u_2"})
+	if code != errs.IMErrorCode_APP_NOT_LOGIN {
+		t.Fatalf("TransferTicket code = %d, want not login", code)
 	}
-	if len(assignedUsers) != 1 || assignedUsers[0] != "u_2" {
-		t.Fatalf("assignedUsers = %+v, want only u_2", assignedUsers)
+	if ticketStorage.transferTicketId != "" {
+		t.Fatalf("unexpected transfer of ticket %q", ticketStorage.transferTicketId)
+	}
+}
+
+func TestTransferTicketRejectsUnknownAssignee(t *testing.T) {
+	restore := mockTicketStorages(&mockUserStorage{users: map[string]*storageModels.User{
+		"u_1": {UserId: "u_1", Role: storageModels.UserRoleAdmin},
+	}}, &mockCustomerStorage{}, &mockTicketStorage{})
+	defer restore()
+
+	code, _ := TransferTicket(ticketTestContext("app_1", "u_1"), "t_1", &apiModels.TransferTicketReq{AssigneeId: "missing"})
+	if code != errs.IMErrorCode_APP_USER_NOT_EXIST {
+		t.Fatalf("TransferTicket code = %d, want user not exist", code)
 	}
 }
 
@@ -318,6 +419,8 @@ func mockTicketStorages(userStorage *mockUserStorage, customerStorage *mockCusto
 	origUserStorage := newUserStorageForTicket
 	origCustomerStorage := newCustomerStorageForTicket
 	origTicketStorage := newTicketStorageForQuery
+	origSyncClaimTags := syncTicketGlobalConversationTagsForClaim
+	origSyncTransferTags := syncTicketGlobalConversationTagsForTransfer
 	newUserStorageForTicket = func() storageModels.IUserStorage {
 		return userStorage
 	}
@@ -327,10 +430,18 @@ func mockTicketStorages(userStorage *mockUserStorage, customerStorage *mockCusto
 	newTicketStorageForQuery = func() storageModels.ITicketStorage {
 		return ticketStorage
 	}
+	syncTicketGlobalConversationTagsForClaim = func(string, string) errs.IMErrorCode {
+		return errs.IMErrorCode_SUCCESS
+	}
+	syncTicketGlobalConversationTagsForTransfer = func(string, string) errs.IMErrorCode {
+		return errs.IMErrorCode_SUCCESS
+	}
 	return func() {
 		newUserStorageForTicket = origUserStorage
 		newCustomerStorageForTicket = origCustomerStorage
 		newTicketStorageForQuery = origTicketStorage
+		syncTicketGlobalConversationTagsForClaim = origSyncClaimTags
+		syncTicketGlobalConversationTagsForTransfer = origSyncTransferTags
 	}
 }
 
@@ -338,21 +449,14 @@ func mockTicketClaimDeps(
 	userStorage *mockUserStorage,
 	customerStorage *mockCustomerStorage,
 	ticketStorage *mockTicketStorage,
-	inboxMemberStorage *mockInboxMemberStorage,
 	tagConvers func(*juggleimsdk.JuggleIMSdk, juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error),
 ) func() {
 	restoreStorages := mockTicketStorages(userStorage, customerStorage, ticketStorage)
 	origGetImSdk := getImSdkForTicketClaim
-	origInboxMemberStorage := newInboxMemberStorageForTicket
 	origTagConvers := tagConversForClaim
 	origSendTicketAssignedNtfMsg := sendTicketAssignedNtfMsgForClaim
 	getImSdkForTicketClaim = func(appkey string) *juggleimsdk.JuggleIMSdk {
 		return &juggleimsdk.JuggleIMSdk{}
-	}
-	if inboxMemberStorage != nil {
-		newInboxMemberStorageForTicket = func() storageModels.IInboxMemberStorage {
-			return inboxMemberStorage
-		}
 	}
 	if tagConvers != nil {
 		tagConversForClaim = tagConvers
@@ -361,7 +465,6 @@ func mockTicketClaimDeps(
 	return func() {
 		restoreStorages()
 		getImSdkForTicketClaim = origGetImSdk
-		newInboxMemberStorageForTicket = origInboxMemberStorage
 		tagConversForClaim = origTagConvers
 		sendTicketAssignedNtfMsgForClaim = origSendTicketAssignedNtfMsg
 	}
@@ -372,8 +475,8 @@ func assertTicketTagReq(t *testing.T, req juggleimsdk.TagConversReq) {
 	if req.UserId == "" {
 		t.Fatalf("TagConvers req missing user_id: %+v", req)
 	}
-	if req.Tag != ticketConversationTagAssigned && req.Tag != ticketConversationTagMyTicket {
-		t.Fatalf("TagConvers tag = %q, want assigned or my_ticket", req.Tag)
+	if req.Tag != ticketConversationTagMyTicket {
+		t.Fatalf("TagConvers tag = %q, want my_ticket", req.Tag)
 	}
 	if len(req.Convers) != 1 || req.Convers[0] == nil {
 		t.Fatalf("TagConvers convers = %+v, want one conversation", req.Convers)
@@ -387,8 +490,9 @@ func assertTicketTagReq(t *testing.T, req juggleimsdk.TagConversReq) {
 }
 
 type mockUserStorage struct {
-	user *storageModels.User
-	err  error
+	user  *storageModels.User
+	users map[string]*storageModels.User
+	err   error
 }
 
 func (s *mockUserStorage) Create(item storageModels.User) error {
@@ -400,6 +504,9 @@ func (s *mockUserStorage) FindByAccount(appkey, account string) (*storageModels.
 }
 
 func (s *mockUserStorage) FindByUserId(appkey, userId string) (*storageModels.User, error) {
+	if s.users != nil {
+		return s.users[userId], s.err
+	}
 	return s.user, s.err
 }
 
@@ -455,52 +562,6 @@ func (s *mockCustomerStorage) FindByIdentifier(appkey, identifier string) (*stor
 	return nil, nil
 }
 
-type mockInboxMemberStorage struct {
-	members []*storageModels.InboxMember
-	err     error
-
-	qryAppkey  string
-	qryInboxId string
-	qryStartId int64
-	qryLimit   int64
-}
-
-func (s *mockInboxMemberStorage) Create(item storageModels.InboxMember) error {
-	return nil
-}
-
-func (s *mockInboxMemberStorage) Upsert(item storageModels.InboxMember) error {
-	return nil
-}
-
-func (s *mockInboxMemberStorage) Delete(appkey, inboxId, memberId string) error {
-	return nil
-}
-
-func (s *mockInboxMemberStorage) Find(appkey, inboxId, memberId string) (*storageModels.InboxMember, error) {
-	return nil, nil
-}
-
-func (s *mockInboxMemberStorage) QryByInbox(appkey, inboxId string, startId, limit int64) ([]*storageModels.InboxMember, error) {
-	s.qryAppkey = appkey
-	s.qryInboxId = inboxId
-	s.qryStartId = startId
-	s.qryLimit = limit
-	return s.members, s.err
-}
-
-func (s *mockInboxMemberStorage) QryByMember(appkey, memberId string, startId, limit int64) ([]*storageModels.InboxMember, error) {
-	return nil, nil
-}
-
-func (s *mockInboxMemberStorage) CountByInboxes(appkey string, inboxIds []string) (map[string]int64, error) {
-	return nil, nil
-}
-
-func (s *mockInboxMemberStorage) ReplaceByInbox(appkey, inboxId string, memberIds []string) error {
-	return nil
-}
-
 type mockTicketStorage struct {
 	called     string
 	appkey     string
@@ -518,6 +579,12 @@ type mockTicketStorage struct {
 	revertAppkey     string
 	revertTicketId   string
 	revertAssigneeId string
+	findTicket       *storageModels.Ticket
+	transferAppkey   string
+	transferTicketId string
+	transferOldId    string
+	transferNewId    string
+	transferTicket   *storageModels.Ticket
 }
 
 func (s *mockTicketStorage) Create(item storageModels.Ticket) error {
@@ -537,7 +604,7 @@ func (s *mockTicketStorage) Delete(appkey, ticketId string) error {
 }
 
 func (s *mockTicketStorage) FindByTicketId(appkey, ticketId string) (*storageModels.Ticket, error) {
-	return nil, nil
+	return s.findTicket, s.err
 }
 
 func (s *mockTicketStorage) FindBySource(appkey, sourceId string) (*storageModels.Ticket, error) {
@@ -595,4 +662,12 @@ func (s *mockTicketStorage) RevertClaimIfAssignee(appkey, ticketId, assigneeId s
 	s.revertTicketId = ticketId
 	s.revertAssigneeId = assigneeId
 	return s.err
+}
+
+func (s *mockTicketStorage) TransferIfAssignee(appkey, ticketId, oldAssigneeId, newAssigneeId string) (*storageModels.Ticket, error) {
+	s.transferAppkey = appkey
+	s.transferTicketId = ticketId
+	s.transferOldId = oldAssigneeId
+	s.transferNewId = newAssigneeId
+	return s.transferTicket, s.err
 }

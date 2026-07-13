@@ -6,6 +6,7 @@ const (
 	TicketStatusPending    TicketStatus = 0
 	TicketStatusProcessing TicketStatus = 1
 	TicketStatusClosed     TicketStatus = 2
+	TicketStatusReOpen     TicketStatus = 3
 )
 
 type Ticket struct {
@@ -14,6 +15,7 @@ type Ticket struct {
 	SourceId    string
 	CustomerId  string
 	InboxId     string
+	ChannelType string
 	AssigneeId  string
 	Status      TicketStatus
 	CreatedTime int64
@@ -37,4 +39,5 @@ type ITicketStorage interface {
 	UpdateStatus(appkey, ticketId string, status TicketStatus) error
 	ClaimIfPending(appkey, ticketId, assigneeId string) (*Ticket, error)
 	RevertClaimIfAssignee(appkey, ticketId, assigneeId string) error
+	TransferIfAssignee(appkey, ticketId, oldAssigneeId, newAssigneeId string) (*Ticket, error)
 }

@@ -16,6 +16,7 @@ type TicketDao struct {
 	SourceId    string    `gorm:"source_id"`
 	CustomerId  string    `gorm:"customer_id"`
 	InboxId     string    `gorm:"inbox_id"`
+	ChannelType string    `gorm:"channel_type"`
 	AssigneeId  string    `gorm:"assignee_id"`
 	Status      int       `gorm:"status"`
 	CreatedTime time.Time `gorm:"created_time"`
@@ -34,6 +35,7 @@ func (d *TicketDao) toModel() *models.Ticket {
 		SourceId:    d.SourceId,
 		CustomerId:  d.CustomerId,
 		InboxId:     d.InboxId,
+		ChannelType: d.ChannelType,
 		AssigneeId:  d.AssigneeId,
 		Status:      models.TicketStatus(d.Status),
 		CreatedTime: d.CreatedTime.UnixMilli(),
@@ -44,13 +46,14 @@ func (d *TicketDao) toModel() *models.Ticket {
 
 func newTicketDao(item models.Ticket) *TicketDao {
 	dao := &TicketDao{
-		TicketId:   item.TicketId,
-		SourceId:   item.SourceId,
-		CustomerId: item.CustomerId,
-		InboxId:    item.InboxId,
-		AssigneeId: item.AssigneeId,
-		Status:     int(item.Status),
-		AppKey:     item.AppKey,
+		TicketId:    item.TicketId,
+		SourceId:    item.SourceId,
+		CustomerId:  item.CustomerId,
+		InboxId:     item.InboxId,
+		ChannelType: item.ChannelType,
+		AssigneeId:  item.AssigneeId,
+		Status:      int(item.Status),
+		AppKey:      item.AppKey,
 	}
 	if item.CreatedTime > 0 {
 		dao.CreatedTime = time.UnixMilli(item.CreatedTime)
@@ -84,6 +87,7 @@ func (d *TicketDao) Update(item models.Ticket) error {
 			"customer_id":  item.CustomerId,
 			"source_id":    item.SourceId,
 			"inbox_id":     item.InboxId,
+			"channel_type": item.ChannelType,
 			"assignee_id":  item.AssigneeId,
 			"status":       int(item.Status),
 			"updated_time": time.Now(),
@@ -105,6 +109,7 @@ func (d *TicketDao) Upsert(item models.Ticket) error {
 			"customer_id",
 			"source_id",
 			"inbox_id",
+			"channel_type",
 			"assignee_id",
 			"status",
 			"updated_time",
@@ -240,6 +245,22 @@ func (d *TicketDao) RevertClaimIfAssignee(appkey, ticketId, assigneeId string) e
 			"status":       int(models.TicketStatusPending),
 			"updated_time": time.Now(),
 		}).Error
+}
+
+func (d *TicketDao) TransferIfAssignee(appkey, ticketId, oldAssigneeId, newAssigneeId string) (*models.Ticket, error) {
+	result := dbcommons.GetDb().Model(&TicketDao{}).
+		Where("app_key=? and ticket_id=? and assignee_id=? and status=?", appkey, ticketId, oldAssigneeId, int(models.TicketStatusProcessing)).
+		Updates(map[string]interface{}{
+			"assignee_id":  newAssigneeId,
+			"updated_time": time.Now(),
+		})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+	return d.FindByTicketId(appkey, ticketId)
 }
 
 func queryTickets(db *gorm.DB, limit int64) ([]*models.Ticket, error) {

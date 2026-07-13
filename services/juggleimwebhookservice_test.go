@@ -26,6 +26,9 @@ func TestProcessJuggleIMWebhookSupportedCallbackCreatesTicketAndSendsGroupMessag
 	if env.tickets.created == nil || env.tickets.created.InboxId != "inbox_juggle" || env.tickets.created.SourceId != env.rels.created.SourceId {
 		t.Fatalf("ticket = %+v", env.tickets.created)
 	}
+	if env.tickets.created.ChannelType != string(ChannelType_JuggleIM) {
+		t.Fatalf("ticket channel type = %q, want juggleim", env.tickets.created.ChannelType)
+	}
 	if !strings.HasPrefix(env.tickets.created.TicketId, TicketIDPrefix) || env.createdGroupId != env.tickets.created.TicketId {
 		t.Fatalf("ticket id = %q group id = %q, want matching ticket-prefixed ids", env.tickets.created.TicketId, env.createdGroupId)
 	}
@@ -132,6 +135,7 @@ func newJuggleIMWebhookTestEnv(t *testing.T) *juggleIMWebhookTestEnv {
 	oldRegister := registerIMUserForCustomer
 	oldRegisterCustomer := registerCustomerIMUserForCustomer
 	oldCreateGroup := createGroupForCustomer
+	oldSyncGlobalTags := syncTicketGlobalConversationTagsForCustomer
 	oldSendGroup := sendJuggleIMGroupMsg
 
 	newInboxStorageForJuggleIMWebhook = func() storageModels.IInboxStorage { return env.inboxes }
@@ -155,6 +159,9 @@ func newJuggleIMWebhookTestEnv(t *testing.T) *juggleIMWebhookTestEnv {
 		env.createdGroupId = req.GroupId
 		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
 	}
+	syncTicketGlobalConversationTagsForCustomer = func(string, string) errs.IMErrorCode {
+		return errs.IMErrorCode_SUCCESS
+	}
 	sendJuggleIMGroupMsg = func(_ *juggleimsdk.JuggleIMSdk, msg juggleimsdk.Message) (juggleimsdk.ApiCode, string, error) {
 		env.sentMsg = msg
 		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
@@ -172,6 +179,7 @@ func newJuggleIMWebhookTestEnv(t *testing.T) *juggleIMWebhookTestEnv {
 		registerIMUserForCustomer = oldRegister
 		registerCustomerIMUserForCustomer = oldRegisterCustomer
 		createGroupForCustomer = oldCreateGroup
+		syncTicketGlobalConversationTagsForCustomer = oldSyncGlobalTags
 		sendJuggleIMGroupMsg = oldSendGroup
 	})
 	return env

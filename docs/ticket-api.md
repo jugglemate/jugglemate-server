@@ -30,6 +30,24 @@
 | `1` | 处理中 | 工单正在处理 |
 | `2` | 关闭 | 工单已关闭 |
 
+## 工单全局会话标签
+
+工单以 `ticket_id` 作为 IM 群会话 ID。服务端通过 IM SDK 的 `SetGlobalConverTags` 覆盖设置该群会话的全局标签，每次固定写入以下三类标签：
+
+| 分类 | Ticket 字段 | 全局标签 |
+| --- | --- | --- |
+| 分配状态 | `assignee_id` 为空 | `unassigned` |
+| 分配状态 | `assignee_id` 非空 | `assigned` |
+| 流转状态 | `status=0`（待处理） | `ticket_status_pending` |
+| 流转状态 | `status=1`（处理中） | `ticket_status_processing` |
+| 流转状态 | `status=2`（关闭） | `ticket_status_closed` |
+| 流转状态 | `status=3`（重新打开） | `ticket_status_reopen` |
+| 渠道 | `channel_type=widget` | `channel_widget` |
+| 渠道 | `channel_type=telegram` | `channel_telegram` |
+| 渠道 | `channel_type=juggleim` | `channel_juggleim` |
+
+同步方法接收 `appkey` 和 `ticket_id`，每次从数据库重新查询工单最新字段后生成完整的三个标签。新工单群组创建并持久化成功后会执行同步；认领、转移及后续关闭、重新打开等字段变化后也必须重新执行同步。由于 `SetGlobalConverTags` 使用完整标签列表覆盖更新，旧的分配状态、流转状态和渠道标签会被替换。
+
 ## 发起 Web 客服会话
 
 创建或获取访客对应的客服工单，并返回 IM 登录信息。
@@ -257,6 +275,7 @@ curl -X GET 'http://localhost:8080/jmate/tickets/list?status=1&limit=10&offset=2
           "avatar": "https://example.com/customer.png"
         },
         "inbox_id": "widget_inbox_001",
+        "channel_type": "widget",
         "assignee_id": "u_123",
         "assignee": {
           "id": "u_123",
@@ -297,6 +316,7 @@ curl -X GET 'http://localhost:8080/jmate/tickets/list?status=1&limit=10&offset=2
 | `items[].customer.nickname` | string | 访客昵称 |
 | `items[].customer.avatar` | string | 访客头像 |
 | `items[].inbox_id` | string | inbox ID |
+| `items[].channel_type` | string | 工单渠道类型，如 `widget`、`telegram` 或 `juggleim` |
 | `items[].assignee_id` | string | 当前分配的客服用户 ID，未分配时为空 |
 | `items[].assignee` | object/null | 当前分配的客服用户信息。未分配或用户不存在时为 `null` |
 | `items[].assignee.id` | string | 客服用户 ID |
@@ -443,6 +463,7 @@ curl -X POST 'http://localhost:8080/jmate/tickets/3xvJK7Xwq2sTnQp6aLm9Z0/claim' 
         "avatar": "https://example.com/customer.png"
       },
       "inbox_id": "widget_inbox_001",
+      "channel_type": "widget",
       "assignee_id": "u_123",
       "assignee": {
         "id": "u_123",
@@ -467,6 +488,7 @@ curl -X POST 'http://localhost:8080/jmate/tickets/3xvJK7Xwq2sTnQp6aLm9Z0/claim' 
 | `ticket.customer_id` | string | 访客 ID |
 | `ticket.customer` | object/null | 访客信息 |
 | `ticket.inbox_id` | string | inbox ID |
+| `ticket.channel_type` | string | 工单渠道类型，如 `widget`、`telegram` 或 `juggleim` |
 | `ticket.assignee_id` | string | 认领后的客服用户 ID，即当前用户 |
 | `ticket.assignee` | object/null | 认领后的客服用户信息 |
 | `ticket.status` | int | 工单状态。认领成功后为 `1`（处理中） |
@@ -493,3 +515,177 @@ curl -X POST 'http://localhost:8080/jmate/tickets/not-exist/claim' \
 ```
 
 IM 加群失败时，认领状态会回滚，并返回对应错误码（例如 `17006` 服务内部错误）。
+
+## 转移工单
+
+将正在处理的工单转移给指定用户，并向工单对应的 IM 群组发送工单分配通知。
+
+### 请求
+
+`POST /jmate/tickets/:ticket_id/transfer`
+
+该接口需要登录。
+
+### Headers
+
+| 名称 | 必填 | 说明 |
+| --- | --- | --- |
+| `appkey` | 是 | 当前应用的 appkey |
+| `Authorization` | 是 | 用户登录 token |
+
+### Path 参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `ticket_id` | string | 是 | 要转移的工单 ID，同时作为 IM 群组 ID |
+
+### Body 参数
+
+Content-Type：`application/json`
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `assignee_id` | string | 是 | 转移后的处理人用户 ID，不能是当前操作人或工单当前处理人 |
+
+### 权限规则
+
+| 用户角色 | 可转移范围 |
+| --- | --- |
+| 普通客服用户 | 仅限当前分配给自己的工单 |
+| 管理员 | 当前 app 下任意符合转移条件的工单 |
+
+目标用户必须存在于当前 app 下，且角色为普通客服用户或管理员。
+
+### 处理规则
+
+- 仅状态为 `1`（处理中）且已有处理人的工单可以转移。
+- 转移目标必须是其他用户，不能与当前操作人或工单当前处理人相同。
+- 转移成功后，仅更新工单的 `assignee_id` 和 `updated_time`，工单状态保持为 `1`（处理中）。
+- 更新时会同时校验工单原处理人和状态；若工单已被其他请求修改，则转移失败，避免覆盖并发更新。
+- 转移成功后，服务端删除原处理人对应工单群会话的 `my_ticket` 标签，并给新处理人的对应会话添加 `my_ticket` 标签。
+- 若会话标签同步失败，服务端会将工单处理人回滚；新处理人标签写入失败时，还会尽力恢复原处理人的 `my_ticket` 标签。
+- 转移成功后，服务端向 `ticket_id` 对应的 IM 群组发送一条工单分配通知。
+
+### 转移通知消息
+
+| 属性 | 值 | 说明 |
+| --- | --- | --- |
+| 消息类型 | `jgm:ticketassign` | 工单分配通知 |
+| 发送方 | 当前操作人用户 ID | 即 `Authorization` 对应用户 |
+| 接收群 | `ticket_id` | 工单 ID 即 IM 群组 ID |
+| 是否入库 | 是 | `is_storage = true` |
+| 是否计入未读 | 否 | `is_count = false` |
+
+消息体 `msg_content` 为 JSON 字符串，结构如下：
+
+```json
+{
+  "ticket_id": "3xvJK7Xwq2sTnQp6aLm9Z0",
+  "operator": {
+    "id": "u_123",
+    "nickname": "客服 A",
+    "avatar": "https://example.com/agent-a.png"
+  },
+  "assignee": {
+    "id": "u_456",
+    "nickname": "客服 B",
+    "avatar": "https://example.com/agent-b.png"
+  },
+  "assign_type": 1
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `ticket_id` | string | 工单 ID |
+| `operator` | object | 发起转移的操作人信息 |
+| `operator.id` | string | 操作人用户 ID |
+| `operator.nickname` | string | 操作人昵称 |
+| `operator.avatar` | string | 操作人头像 |
+| `assignee` | object | 转移后的处理人信息 |
+| `assignee.id` | string | 新处理人用户 ID |
+| `assignee.nickname` | string | 新处理人昵称 |
+| `assignee.avatar` | string | 新处理人头像 |
+| `assign_type` | int | 分配类型。指定用户固定为 `1`（`AssignUser`） |
+
+通知消息发送失败不影响转移接口的 HTTP 响应；客户端应以转移接口返回的工单数据为准。
+
+### 请求示例
+
+```bash
+curl -X POST 'http://localhost:8080/jmate/tickets/3xvJK7Xwq2sTnQp6aLm9Z0/transfer' \
+  -H 'Content-Type: application/json' \
+  -H 'appkey: app_xxx' \
+  -H 'Authorization: user-token' \
+  -d '{
+    "assignee_id": "u_456"
+  }'
+```
+
+### 成功响应
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "ticket": {
+      "ticket_id": "3xvJK7Xwq2sTnQp6aLm9Z0",
+      "source_id": "customer_8mQz6RkV2pXnT4bYcS1aE9",
+      "customer_id": "7nKs4PmQ1xZaT8VcY2eR0b",
+      "customer": {
+        "id": "7nKs4PmQ1xZaT8VcY2eR0b",
+        "nickname": "Alice",
+        "avatar": "https://example.com/customer.png"
+      },
+      "inbox_id": "widget_inbox_001",
+      "channel_type": "widget",
+      "assignee_id": "u_456",
+      "assignee": {
+        "id": "u_456",
+        "nickname": "客服 B",
+        "avatar": "https://example.com/agent-b.png"
+      },
+      "status": 1,
+      "created_time": 1782360000000,
+      "updated_time": 1782360900000
+    }
+  }
+}
+```
+
+### 响应字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `ticket` | object | 转移后的工单信息 |
+| `ticket.ticket_id` | string | 工单 ID |
+| `ticket.source_id` | string | 访客渠道身份 ID |
+| `ticket.customer_id` | string | 访客 ID |
+| `ticket.customer` | object/null | 访客信息 |
+| `ticket.inbox_id` | string | inbox ID |
+| `ticket.channel_type` | string | 工单渠道类型，如 `widget`、`telegram` 或 `juggleim` |
+| `ticket.assignee_id` | string | 转移后的处理人用户 ID |
+| `ticket.assignee` | object/null | 转移后的处理人信息 |
+| `ticket.status` | int | 工单状态。转移成功后仍为 `1`（处理中） |
+| `ticket.created_time` | int64 | 创建时间，毫秒时间戳 |
+| `ticket.updated_time` | int64 | 转移完成时间，毫秒时间戳 |
+
+### 错误响应
+
+| code | 场景 |
+| --- | --- |
+| `17003` | 当前用户无权转移该工单 |
+| `17002` | IM SDK 未初始化，工单转移已回滚 |
+| `17005` | 请求参数错误、工单不存在、工单不是处理中、目标为当前处理人，或发生并发更新 |
+| `17006` | 查询、更新或会话标签同步失败；已完成的工单转移会回滚 |
+| `17012` | 当前操作人或目标用户不存在 |
+
+例如，目标用户不存在时：
+
+```json
+{
+  "code": 17012,
+  "msg": ""
+}
+```

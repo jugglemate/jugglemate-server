@@ -14,21 +14,27 @@ import (
 )
 
 var (
-	newUserStorageForTicket        = storages.NewUserStorage
-	newCustomerStorageForTicket    = storages.NewCustomerStorage
-	newTicketStorageForQuery       = storages.NewTicketStorage
-	newInboxMemberStorageForTicket = storages.NewInboxMemberStorage
-	getImSdkForTicketClaim         = imsdk.GetImSdk
-	tagConversForClaim             = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+	newUserStorageForTicket     = storages.NewUserStorage
+	newCustomerStorageForTicket = storages.NewCustomerStorage
+	newTicketStorageForQuery    = storages.NewTicketStorage
+	getImSdkForTicketClaim      = imsdk.GetImSdk
+	getImSdkForTicketTransfer   = imsdk.GetImSdk
+	tagConversForClaim          = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
 		return sdk.TagConvers(req)
 	}
-	sendTicketAssignedNtfMsgForClaim = SendTicketAssignedNtfMsg
+	tagConversForTransfer = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+		return sdk.TagConvers(req)
+	}
+	unTagConversForTransfer = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+		return sdk.UnTagConvers(req)
+	}
+	syncTicketGlobalConversationTagsForClaim    = SyncTicketGlobalConversationTags
+	syncTicketGlobalConversationTagsForTransfer = SyncTicketGlobalConversationTags
+	sendTicketAssignedNtfMsgForClaim            = SendTicketAssignedNtfMsg
+	sendTicketAssignedNtfMsgForTransfer         = SendTicketAssignedNtfMsg
 )
 
-const (
-	ticketConversationTagAssigned = "assigned"
-	ticketConversationTagMyTicket = "my_ticket"
-)
+const ticketConversationTagMyTicket = "my_ticket"
 
 func QryTickets(ctx context.Context, req *apiModels.QryTicketsReq) (errs.IMErrorCode, *apiModels.QryTicketsResp) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
@@ -99,15 +105,22 @@ func ClaimTicket(ctx context.Context, ticketId string) (errs.IMErrorCode, *apiMo
 	if ticket == nil {
 		return errs.IMErrorCode_APP_ParamError, nil
 	}
+	if code := syncTicketGlobalConversationTagsForClaim(appkey, ticketId); code != errs.IMErrorCode_SUCCESS {
+		_ = ticketStorage.RevertClaimIfAssignee(appkey, ticketId, requesterId)
+		_ = syncTicketGlobalConversationTagsForClaim(appkey, ticketId)
+		return code, nil
+	}
 
 	sdk := getImSdkForTicketClaim(appkey)
 	if sdk == nil {
 		_ = ticketStorage.RevertClaimIfAssignee(appkey, ticketId, requesterId)
+		_ = syncTicketGlobalConversationTagsForClaim(appkey, ticketId)
 		return errs.IMErrorCode_APP_NOT_EXISTED, nil
 	}
 
 	if code := syncTicketClaimConversationTags(appkey, ticket, requesterId, sdk); code != errs.IMErrorCode_SUCCESS {
 		_ = ticketStorage.RevertClaimIfAssignee(appkey, ticketId, requesterId)
+		_ = syncTicketGlobalConversationTagsForClaim(appkey, ticketId)
 		return code, nil
 	}
 
@@ -128,6 +141,99 @@ func ClaimTicket(ctx context.Context, ticketId string) (errs.IMErrorCode, *apiMo
 	return errs.IMErrorCode_SUCCESS, &apiModels.ClaimTicketResp{
 		Ticket: ticketInfo,
 	}
+}
+
+func TransferTicket(ctx context.Context, ticketId string, req *apiModels.TransferTicketReq) (errs.IMErrorCode, *apiModels.TransferTicketResp) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	requesterId := ctxs.GetRequesterIdFromCtx(ctx)
+	if appkey == "" || requesterId == "" || strings.TrimSpace(ticketId) == "" || req == nil {
+		return errs.IMErrorCode_APP_NOT_LOGIN, nil
+	}
+	assigneeId := strings.TrimSpace(req.AssigneeId)
+	if assigneeId == "" || assigneeId == requesterId {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+
+	userStorage := newUserStorageForTicket()
+	operator, err := userStorage.FindByUserId(appkey, requesterId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if operator == nil {
+		return errs.IMErrorCode_APP_USER_NOT_EXIST, nil
+	}
+	if operator.Role != storageModels.UserRoleAdmin && operator.Role != storageModels.UserRoleCustomerService {
+		return errs.IMErrorCode_APP_NOT_LOGIN, nil
+	}
+
+	assignee, err := userStorage.FindByUserId(appkey, assigneeId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if assignee == nil {
+		return errs.IMErrorCode_APP_USER_NOT_EXIST, nil
+	}
+	if assignee.Role != storageModels.UserRoleAdmin && assignee.Role != storageModels.UserRoleCustomerService {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+
+	ticketStorage := newTicketStorageForQuery()
+	ticket, err := ticketStorage.FindByTicketId(appkey, ticketId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if ticket == nil || ticket.Status != storageModels.TicketStatusProcessing || ticket.AssigneeId == "" {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+	if operator.Role != storageModels.UserRoleAdmin && ticket.AssigneeId != requesterId {
+		return errs.IMErrorCode_APP_NOT_LOGIN, nil
+	}
+	if ticket.AssigneeId == assigneeId {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+
+	oldAssigneeId := ticket.AssigneeId
+	ticket, err = ticketStorage.TransferIfAssignee(appkey, ticketId, oldAssigneeId, assigneeId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if ticket == nil {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+	if code := syncTicketGlobalConversationTagsForTransfer(appkey, ticketId); code != errs.IMErrorCode_SUCCESS {
+		_, _ = ticketStorage.TransferIfAssignee(appkey, ticketId, assigneeId, oldAssigneeId)
+		_ = syncTicketGlobalConversationTagsForTransfer(appkey, ticketId)
+		return code, nil
+	}
+
+	sdk := getImSdkForTicketTransfer(appkey)
+	if sdk == nil {
+		_, _ = ticketStorage.TransferIfAssignee(appkey, ticketId, assigneeId, oldAssigneeId)
+		_ = syncTicketGlobalConversationTagsForTransfer(appkey, ticketId)
+		return errs.IMErrorCode_APP_NOT_EXISTED, nil
+	}
+	if code := syncTicketTransferConversationTags(ticketId, oldAssigneeId, assigneeId, sdk); code != errs.IMErrorCode_SUCCESS {
+		_, _ = ticketStorage.TransferIfAssignee(appkey, ticketId, assigneeId, oldAssigneeId)
+		_ = syncTicketGlobalConversationTagsForTransfer(appkey, ticketId)
+		return code, nil
+	}
+
+	resp, err := ticketsToAPI(appkey, []*storageModels.Ticket{ticket})
+	if err != nil || len(resp.Items) == 0 {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	ticketInfo := resp.Items[0]
+	sendTicketAssignedNtfMsgForTransfer(ctx, &TicketAssignedNtfMsg{
+		TicketId: ticketId,
+		Operator: &apiModels.UserInfo{
+			Id:       operator.UserId,
+			Nickname: operator.Nickname,
+			Avatar:   operator.Avator,
+		},
+		Assignee:   ticketInfo.Assignee,
+		AssignType: AssignType_AssignUser,
+	})
+	return errs.IMErrorCode_SUCCESS, &apiModels.TransferTicketResp{Ticket: ticketInfo}
 }
 
 func toTicketStatus(status *int) (*storageModels.TicketStatus, bool) {
@@ -171,6 +277,7 @@ func ticketsToAPI(appkey string, tickets []*storageModels.Ticket) (*apiModels.Qr
 			CustomerId:  ticket.CustomerId,
 			Customer:    customer,
 			InboxId:     ticket.InboxId,
+			ChannelType: ticket.ChannelType,
 			AssigneeId:  ticket.AssigneeId,
 			Assignee:    assignee,
 			Status:      int(ticket.Status),
@@ -181,62 +288,25 @@ func ticketsToAPI(appkey string, tickets []*storageModels.Ticket) (*apiModels.Qr
 	return resp, nil
 }
 
-func syncTicketClaimConversationTags(appkey string, ticket *storageModels.Ticket, assigneeId string, sdk *juggleimsdk.JuggleIMSdk) errs.IMErrorCode {
+func syncTicketClaimConversationTags(_ string, ticket *storageModels.Ticket, assigneeId string, sdk *juggleimsdk.JuggleIMSdk) errs.IMErrorCode {
 	if ticket == nil {
 		return errs.IMErrorCode_APP_ParamError
 	}
-	inboxMemberIds, err := ticketInboxMemberIds(appkey, ticket.InboxId)
-	if err != nil {
-		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
-	}
-	conversation := ticketGroupConversation(ticket.TicketId)
-	for _, memberId := range inboxMemberIds {
-		code := tagTicketConversation(sdk, memberId, ticketConversationTagAssigned, conversation)
-		if code != errs.IMErrorCode_SUCCESS {
-			return code
-		}
-	}
-	return tagTicketConversation(sdk, assigneeId, ticketConversationTagMyTicket, conversation)
+	return tagTicketConversation(sdk, assigneeId, ticketConversationTagMyTicket, ticketGroupConversation(ticket.TicketId))
 }
 
-func ticketInboxMemberIds(appkey, inboxId string) ([]string, error) {
-	if strings.TrimSpace(inboxId) == "" {
-		return nil, nil
+func syncTicketTransferConversationTags(ticketId, oldAssigneeId, newAssigneeId string, sdk *juggleimsdk.JuggleIMSdk) errs.IMErrorCode {
+	conversation := ticketGroupConversation(ticketId)
+	if code := updateTicketConversationTag(unTagConversForTransfer, sdk, oldAssigneeId, ticketConversationTagMyTicket, conversation); code != errs.IMErrorCode_SUCCESS {
+		return code
 	}
-	memberStorage := newInboxMemberStorageForTicket()
-	const pageSize int64 = 1000
-	var startId int64
-	memberIds := []string{}
-	seen := map[string]struct{}{}
-	for {
-		members, err := memberStorage.QryByInbox(appkey, inboxId, startId, pageSize)
-		if err != nil {
-			return nil, err
-		}
-		if len(members) == 0 {
-			return memberIds, nil
-		}
-		for _, member := range members {
-			if member == nil {
-				continue
-			}
-			if member.ID > 0 && (startId == 0 || member.ID < startId) {
-				startId = member.ID
-			}
-			memberId := strings.TrimSpace(member.MemberId)
-			if memberId == "" {
-				continue
-			}
-			if _, ok := seen[memberId]; ok {
-				continue
-			}
-			seen[memberId] = struct{}{}
-			memberIds = append(memberIds, memberId)
-		}
-		if int64(len(members)) < pageSize || startId == 0 {
-			return memberIds, nil
-		}
+	if code := updateTicketConversationTag(tagConversForTransfer, sdk, newAssigneeId, ticketConversationTagMyTicket, conversation); code != errs.IMErrorCode_SUCCESS {
+		// Best-effort compensation: restore the previous assignee's tag before
+		// the caller rolls the persisted assignee back.
+		_ = updateTicketConversationTag(tagConversForTransfer, sdk, oldAssigneeId, ticketConversationTagMyTicket, conversation)
+		return code
 	}
+	return errs.IMErrorCode_SUCCESS
 }
 
 func ticketGroupConversation(ticketId string) *juggleimsdk.Conversation {
@@ -247,11 +317,17 @@ func ticketGroupConversation(ticketId string) *juggleimsdk.Conversation {
 }
 
 func tagTicketConversation(sdk *juggleimsdk.JuggleIMSdk, userId, tag string, conversation *juggleimsdk.Conversation) errs.IMErrorCode {
+	return updateTicketConversationTag(tagConversForClaim, sdk, userId, tag, conversation)
+}
+
+type ticketConversationTagOperation func(*juggleimsdk.JuggleIMSdk, juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error)
+
+func updateTicketConversationTag(operation ticketConversationTagOperation, sdk *juggleimsdk.JuggleIMSdk, userId, tag string, conversation *juggleimsdk.Conversation) errs.IMErrorCode {
 	userId = strings.TrimSpace(userId)
-	if userId == "" {
+	if operation == nil || sdk == nil || userId == "" || conversation == nil {
 		return errs.IMErrorCode_APP_ParamError
 	}
-	code, _, err := tagConversForClaim(sdk, juggleimsdk.TagConversReq{
+	code, _, err := operation(sdk, juggleimsdk.TagConversReq{
 		UserId:  userId,
 		Tag:     tag,
 		Convers: []*juggleimsdk.Conversation{conversation},

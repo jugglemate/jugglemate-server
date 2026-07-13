@@ -27,6 +27,7 @@ func Route(eng *gin.Engine, prefix string) {
 
 	group.GET("/tickets/list", apis.QryTickets)
 	group.POST("/tickets/:ticket_id/claim", apis.ClaimTicket)
+	group.POST("/tickets/:ticket_id/transfer", apis.TransferTicket)
 
 	group.POST("/aibots/add", apis.CreateAiBot)
 	group.POST("/aibots/update", apis.UpdateAiBot)

@@ -28,6 +28,12 @@ func TestProcessTelegramWebhookSupportedTextCreatesTicketAndSendsGroupMessage(t 
 	if env.tickets.created == nil || env.tickets.created.InboxId != "inbox_tg" || env.tickets.created.SourceId != env.rels.created.SourceId {
 		t.Fatalf("ticket = %+v", env.tickets.created)
 	}
+	if env.tickets.created.ChannelType != string(ChannelType_Telegram) {
+		t.Fatalf("ticket channel type = %q, want telegram", env.tickets.created.ChannelType)
+	}
+	if env.globalTagAppKey != "app_1" || env.globalTagTicketId != env.tickets.created.TicketId {
+		t.Fatalf("global tag sync app=%q ticket=%q", env.globalTagAppKey, env.globalTagTicketId)
+	}
 	if !strings.HasPrefix(env.tickets.created.TicketId, TicketIDPrefix) || env.createdGroupId != env.tickets.created.TicketId {
 		t.Fatalf("ticket id = %q group id = %q, want matching ticket-prefixed ids", env.tickets.created.TicketId, env.createdGroupId)
 	}
@@ -127,6 +133,8 @@ type telegramWebhookTestEnv struct {
 	createdGroupId      string
 	createdGroupMembers []string
 	sentMsg             juggleimsdk.Message
+	globalTagAppKey     string
+	globalTagTicketId   string
 }
 
 func newTelegramWebhookTestEnv(t *testing.T) *telegramWebhookTestEnv {
@@ -159,6 +167,7 @@ func newTelegramWebhookTestEnv(t *testing.T) *telegramWebhookTestEnv {
 	oldRegister := registerIMUserForCustomer
 	oldRegisterCustomer := registerCustomerIMUserForCustomer
 	oldCreateGroup := createGroupForCustomer
+	oldSyncGlobalTags := syncTicketGlobalConversationTagsForCustomer
 	oldSendGroup := sendTelegramGroupMsg
 
 	newInboxStorageForTelegramWebhook = func() storageModels.IInboxStorage { return env.inboxes }
@@ -183,6 +192,11 @@ func newTelegramWebhookTestEnv(t *testing.T) *telegramWebhookTestEnv {
 		env.createdGroupMembers = append([]string{}, req.MemberIds...)
 		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
 	}
+	syncTicketGlobalConversationTagsForCustomer = func(appkey, ticketId string) errs.IMErrorCode {
+		env.globalTagAppKey = appkey
+		env.globalTagTicketId = ticketId
+		return errs.IMErrorCode_SUCCESS
+	}
 	sendTelegramGroupMsg = func(_ *juggleimsdk.JuggleIMSdk, msg juggleimsdk.Message) (juggleimsdk.ApiCode, string, error) {
 		env.sentMsg = msg
 		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
@@ -200,6 +214,7 @@ func newTelegramWebhookTestEnv(t *testing.T) *telegramWebhookTestEnv {
 		registerIMUserForCustomer = oldRegister
 		registerCustomerIMUserForCustomer = oldRegisterCustomer
 		createGroupForCustomer = oldCreateGroup
+		syncTicketGlobalConversationTagsForCustomer = oldSyncGlobalTags
 		sendTelegramGroupMsg = oldSendGroup
 	})
 	return env
@@ -334,6 +349,9 @@ func (s *telegramFakeTicketStorage) ClaimIfPending(appkey, ticketId, assigneeId 
 }
 func (s *telegramFakeTicketStorage) RevertClaimIfAssignee(appkey, ticketId, assigneeId string) error {
 	return nil
+}
+func (s *telegramFakeTicketStorage) TransferIfAssignee(appkey, ticketId, oldAssigneeId, newAssigneeId string) (*storageModels.Ticket, error) {
+	return nil, nil
 }
 
 func (s *telegramFakeTicketStorage) String() string {

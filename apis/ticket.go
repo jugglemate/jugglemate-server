@@ -2,6 +2,7 @@ package apis
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	apiModels "github.com/juggleim/jugglemate-server/apis/models"
@@ -10,6 +11,22 @@ import (
 	"github.com/juggleim/jugglemate-server/commons/responses"
 	"github.com/juggleim/jugglemate-server/services"
 )
+
+func TransferTicket(ctx *gin.Context) {
+	ticketId := strings.TrimSpace(ctx.Param("ticket_id"))
+	var req apiModels.TransferTicketReq
+	if ticketId == "" || ctx.ShouldBindJSON(&req) != nil || strings.TrimSpace(req.AssigneeId) == "" {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	req.AssigneeId = strings.TrimSpace(req.AssigneeId)
+	code, resp := services.TransferTicket(ctxs.ToCtx(ctx), ticketId, &req)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, resp)
+}
 
 func ClaimTicket(ctx *gin.Context) {
 	ticketId := ctx.Param("ticket_id")

@@ -12,6 +12,7 @@ type TicketInfo struct {
 	CustomerId  string    `json:"customer_id"`
 	Customer    *UserInfo `json:"customer"`
 	InboxId     string    `json:"inbox_id"`
+	ChannelType string    `json:"channel_type"`
 	AssigneeId  string    `json:"assignee_id"`
 	Assignee    *UserInfo `json:"assignee"`
 	Status      int       `json:"status"`
@@ -24,5 +25,13 @@ type QryTicketsResp struct {
 }
 
 type ClaimTicketResp struct {
+	Ticket *TicketInfo `json:"ticket"`
+}
+
+type TransferTicketReq struct {
+	AssigneeId string `json:"assignee_id"`
+}
+
+type TransferTicketResp struct {
 	Ticket *TicketInfo `json:"ticket"`
 }
