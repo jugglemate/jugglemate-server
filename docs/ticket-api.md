@@ -127,6 +127,126 @@ curl -X POST 'http://localhost:8080/jmate/customers/start' \
 - 新工单的 `ticket_id` 由服务端生成，状态为 `0`。
 - 新工单会同步创建 IM 群组，`group_id` 使用 `ticket_id`，群成员包含访客 `source_id` 与该工单对应 inbox 在 `inboxmembers` 中配置的全部代表用户。
 
+## 查询客户信息
+
+根据 customer ID 查询当前 app 下的客户用户信息。
+
+### 请求
+
+`GET /jmate/customers/info?customer_id=:customer_id`
+
+该接口需要登录。
+
+### Headers
+
+| 名称 | 必填 | 说明 |
+| --- | --- | --- |
+| `appkey` | 是 | 当前应用的 appkey |
+| `Authorization` | 是 | 用户登录 token |
+
+### Query 参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `customer_id` | string | 是 | 要查询的 customer ID；同时兼容参数名 `customerId` |
+
+### 请求示例
+
+```bash
+curl -X GET 'http://localhost:8080/jmate/customers/info?customer_id=7nKs4PmQ1xZaT8VcY2eR0b' \
+  -H 'appkey: app_xxx' \
+  -H 'Authorization: user-token'
+```
+
+### 成功响应
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "id": "7nKs4PmQ1xZaT8VcY2eR0b",
+    "nickname": "Alice",
+    "avatar": "https://example.com/customer.png"
+  }
+}
+```
+
+### 响应字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | customer ID |
+| `nickname` | string | 客户昵称 |
+| `avatar` | string | 客户头像 |
+
+customer 不存在时返回 `17012`，缺少 customer ID 时返回 `17005`。
+
+## 查询客户工单列表
+
+根据 customer ID 查询当前 app 下该客户的工单，按工单内部 ID 倒序进行游标分页。
+
+### 请求
+
+`GET /jmate/customers/tickets?customer_id=:customer_id&start_id=:start_id&limit=:limit`
+
+该接口需要登录。
+
+### Query 参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `customer_id` | string | 是 | 无 | 要查询的 customer ID；同时兼容参数名 `customerId` |
+| `start_id` | int64 | 否 | `0` | 分页游标。第一页传 `0` 或不传，下一页使用上次响应的 `next_start_id` |
+| `limit` | int | 否 | `20` | 每页工单数，范围为 `1`–`100` |
+
+### 请求示例
+
+```bash
+curl -X GET 'http://localhost:8080/jmate/customers/tickets?customer_id=7nKs4PmQ1xZaT8VcY2eR0b&limit=20' \
+  -H 'appkey: app_xxx' \
+  -H 'Authorization: user-token'
+```
+
+### 成功响应
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "items": [
+      {
+        "ticket_id": "3xvJK7Xwq2sTnQp6aLm9Z0",
+        "source_id": "customer_8mQz6RkV2pXnT4bYcS1aE9",
+        "customer_id": "7nKs4PmQ1xZaT8VcY2eR0b",
+        "customer": {
+          "id": "7nKs4PmQ1xZaT8VcY2eR0b",
+          "nickname": "Alice",
+          "avatar": "https://example.com/customer.png"
+        },
+        "inbox_id": "widget_inbox_001",
+        "channel_type": "widget",
+        "assignee_id": "u_123",
+        "assignee": {
+          "id": "u_123",
+          "nickname": "客服 A",
+          "avatar": "https://example.com/agent.png"
+        },
+        "status": 1,
+        "created_time": 1782360000000,
+        "updated_time": 1782360300000
+      }
+    ],
+    "next_start_id": 123
+  }
+}
+```
+
+`items` 中的工单字段与“查询工单列表”接口一致。`next_start_id` 非 `0` 时，将其作为下一次请求的 `start_id`；值为 `0` 表示没有下一页。
+
+customer 不存在时返回 `17012`。缺少 customer ID、`start_id` 小于 `0`，或 `limit` 不在 `1`–`100` 范围内时返回 `17005`。
+
 ## Telegram Webhook
 
 Telegram 渠道由管理后台创建 inbox 时自动配置 webhook。服务端会先通过 Telegram Bot API 校验 `bot_token`，再把回调地址设置为：

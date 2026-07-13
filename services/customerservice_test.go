@@ -1,13 +1,93 @@
 package services
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	juggleimsdk "github.com/juggleim/imserver-sdk-go"
+	apiModels "github.com/juggleim/jugglemate-server/apis/models"
+	"github.com/juggleim/jugglemate-server/commons/ctxs"
 	"github.com/juggleim/jugglemate-server/commons/errs"
 	storageModels "github.com/juggleim/jugglemate-server/storages/models"
 )
+
+func TestQryCustomerInfo(t *testing.T) {
+	origStorage := newCustomerStorageForCustomer
+	defer func() { newCustomerStorageForCustomer = origStorage }()
+	newCustomerStorageForCustomer = func() storageModels.ICustomerStorage {
+		return &mockCustomerStorage{customers: map[string]*storageModels.Customer{
+			"customer_1": {CustomerId: "customer_1", Nickname: "Alice", Avator: "alice.png"},
+		}}
+	}
+	ctx := context.WithValue(context.Background(), ctxs.CtxKey_AppKey, "app_1")
+	ctx = context.WithValue(ctx, ctxs.CtxKey_RequesterId, "agent_1")
+
+	code, info := QryCustomerInfo(ctx, "customer_1")
+	if code != errs.IMErrorCode_SUCCESS || info == nil || info.Id != "customer_1" || info.Nickname != "Alice" || info.Avatar != "alice.png" {
+		t.Fatalf("code=%d info=%+v", code, info)
+	}
+}
+
+func TestQryCustomerInfoNotFoundAndStorageError(t *testing.T) {
+	origStorage := newCustomerStorageForCustomer
+	defer func() { newCustomerStorageForCustomer = origStorage }()
+	ctx := context.WithValue(context.Background(), ctxs.CtxKey_AppKey, "app_1")
+	ctx = context.WithValue(ctx, ctxs.CtxKey_RequesterId, "agent_1")
+
+	newCustomerStorageForCustomer = func() storageModels.ICustomerStorage {
+		return &mockCustomerStorage{}
+	}
+	if code, _ := QryCustomerInfo(ctx, "missing"); code != errs.IMErrorCode_APP_USER_NOT_EXIST {
+		t.Fatalf("not found code=%d", code)
+	}
+
+	newCustomerStorageForCustomer = func() storageModels.ICustomerStorage {
+		return &mockCustomerStorage{err: errors.New("query failed")}
+	}
+	if code, _ := QryCustomerInfo(ctx, "customer_1"); code != errs.IMErrorCode_APP_INTERNAL_TIMEOUT {
+		t.Fatalf("storage error code=%d", code)
+	}
+}
+
+func TestQryCustomerTicketsUsesCursorPagination(t *testing.T) {
+	customerStorage := &mockCustomerStorage{customers: map[string]*storageModels.Customer{
+		"customer_1": {CustomerId: "customer_1", Nickname: "Alice"},
+	}}
+	ticketStorage := &mockTicketStorage{tickets: []*storageModels.Ticket{
+		{ID: 30, TicketId: "ticket_30", CustomerId: "customer_1", Status: storageModels.TicketStatusClosed},
+		{ID: 20, TicketId: "ticket_20", CustomerId: "customer_1", Status: storageModels.TicketStatusProcessing},
+		{ID: 10, TicketId: "ticket_10", CustomerId: "customer_1", Status: storageModels.TicketStatusPending},
+	}}
+	restoreTicketDeps := mockTicketStorages(&mockUserStorage{}, customerStorage, ticketStorage)
+	origCustomerTicketStorage := newTicketStorageForCustomer
+	origCustomerStorage := newCustomerStorageForCustomer
+	newTicketStorageForCustomer = func() storageModels.ITicketStorage { return ticketStorage }
+	newCustomerStorageForCustomer = func() storageModels.ICustomerStorage { return customerStorage }
+	defer func() {
+		restoreTicketDeps()
+		newTicketStorageForCustomer = origCustomerTicketStorage
+		newCustomerStorageForCustomer = origCustomerStorage
+	}()
+
+	ctx := context.WithValue(context.Background(), ctxs.CtxKey_AppKey, "app_1")
+	ctx = context.WithValue(ctx, ctxs.CtxKey_RequesterId, "agent_1")
+	code, resp := QryCustomerTickets(ctx, &apiModels.QryCustomerTicketsReq{
+		CustomerId: "customer_1",
+		StartId:    40,
+		Limit:      2,
+	})
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code=%d", code)
+	}
+	if ticketStorage.customerId != "customer_1" || ticketStorage.startId != 40 || ticketStorage.customerLimit != 3 {
+		t.Fatalf("query customer=%q start=%d limit=%d", ticketStorage.customerId, ticketStorage.startId, ticketStorage.customerLimit)
+	}
+	if resp == nil || len(resp.Items) != 2 || resp.Items[0].TicketId != "ticket_30" || resp.Items[1].TicketId != "ticket_20" || resp.NextStartId != 20 {
+		t.Fatalf("resp=%+v", resp)
+	}
+}
 
 func TestValidateWidgetInbox(t *testing.T) {
 	tests := []struct {

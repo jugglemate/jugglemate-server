@@ -563,14 +563,17 @@ func (s *mockCustomerStorage) FindByIdentifier(appkey, identifier string) (*stor
 }
 
 type mockTicketStorage struct {
-	called     string
-	appkey     string
-	assigneeId string
-	status     *storageModels.TicketStatus
-	limit      int64
-	offset     int64
-	tickets    []*storageModels.Ticket
-	err        error
+	called        string
+	appkey        string
+	assigneeId    string
+	status        *storageModels.TicketStatus
+	limit         int64
+	offset        int64
+	tickets       []*storageModels.Ticket
+	err           error
+	customerId    string
+	startId       int64
+	customerLimit int64
 
 	claimAppkey      string
 	claimTicketId    string
@@ -631,7 +634,11 @@ func (s *mockTicketStorage) QryVisible(appkey, assigneeId string, status *storag
 }
 
 func (s *mockTicketStorage) QryByCustomer(appkey, customerId string, startId, limit int64) ([]*storageModels.Ticket, error) {
-	return nil, nil
+	s.appkey = appkey
+	s.customerId = customerId
+	s.startId = startId
+	s.customerLimit = limit
+	return s.tickets, s.err
 }
 
 func (s *mockTicketStorage) QryByAssignee(appkey, assigneeId string, status int, startId, limit int64) ([]*storageModels.Ticket, error) {

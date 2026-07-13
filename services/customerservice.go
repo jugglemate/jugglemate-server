@@ -342,3 +342,73 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 		WelcomeMessage:   widgetConf.WelcomeMessage,
 	}
 }
+
+func QryCustomerInfo(ctx context.Context, customerId string) (errs.IMErrorCode, *apiModels.UserInfo) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	requesterId := ctxs.GetRequesterIdFromCtx(ctx)
+	customerId = strings.TrimSpace(customerId)
+	if appkey == "" || requesterId == "" {
+		return errs.IMErrorCode_APP_NOT_LOGIN, nil
+	}
+	if customerId == "" {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+
+	customer, err := newCustomerStorageForCustomer().FindByCustomerId(appkey, customerId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if customer == nil {
+		return errs.IMErrorCode_APP_USER_NOT_EXIST, nil
+	}
+	return errs.IMErrorCode_SUCCESS, &apiModels.UserInfo{
+		Id:       customer.CustomerId,
+		Nickname: customer.Nickname,
+		Avatar:   customer.Avator,
+	}
+}
+
+func QryCustomerTickets(ctx context.Context, req *apiModels.QryCustomerTicketsReq) (errs.IMErrorCode, *apiModels.QryCustomerTicketsResp) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	requesterId := ctxs.GetRequesterIdFromCtx(ctx)
+	if appkey == "" || requesterId == "" {
+		return errs.IMErrorCode_APP_NOT_LOGIN, nil
+	}
+	if req == nil || strings.TrimSpace(req.CustomerId) == "" || req.StartId < 0 || req.Limit <= 0 || req.Limit > 100 {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+
+	customerId := strings.TrimSpace(req.CustomerId)
+	customer, err := newCustomerStorageForCustomer().FindByCustomerId(appkey, customerId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if customer == nil {
+		return errs.IMErrorCode_APP_USER_NOT_EXIST, nil
+	}
+
+	// Fetch one extra row to determine whether another page exists without a
+	// separate count query.
+	tickets, err := newTicketStorageForCustomer().QryByCustomer(appkey, customerId, req.StartId, req.Limit+1)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	hasMore := int64(len(tickets)) > req.Limit
+	if hasMore {
+		tickets = tickets[:req.Limit]
+	}
+	ticketResp, err := ticketsToAPI(appkey, tickets)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	resp := &apiModels.QryCustomerTicketsResp{Items: ticketResp.Items}
+	if hasMore {
+		for i := len(tickets) - 1; i >= 0; i-- {
+			if tickets[i] != nil {
+				resp.NextStartId = tickets[i].ID
+				break
+			}
+		}
+	}
+	return errs.IMErrorCode_SUCCESS, resp
+}
