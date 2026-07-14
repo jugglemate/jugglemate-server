@@ -14,12 +14,13 @@ import (
 )
 
 var (
-	newUserStorageForTicket     = storages.NewUserStorage
-	newCustomerStorageForTicket = storages.NewCustomerStorage
-	newTicketStorageForQuery    = storages.NewTicketStorage
-	getImSdkForTicketClaim      = imsdk.GetImSdk
-	getImSdkForTicketTransfer   = imsdk.GetImSdk
-	tagConversForClaim          = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
+	newUserStorageForTicket        = storages.NewUserStorage
+	newCustomerStorageForTicket    = storages.NewCustomerStorage
+	newTicketStorageForQuery       = storages.NewTicketStorage
+	newInboxMemberStorageForTicket = storages.NewInboxMemberStorage
+	getImSdkForTicketClaim         = imsdk.GetImSdk
+	getImSdkForTicketTransfer      = imsdk.GetImSdk
+	tagConversForClaim             = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
 		return sdk.TagConvers(req)
 	}
 	tagConversForTransfer = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.TagConversReq) (juggleimsdk.ApiCode, string, error) {
@@ -35,6 +36,76 @@ var (
 )
 
 const ticketConversationTagMyTicket = "my_ticket"
+
+func QryTicketInboxMembers(ctx context.Context, req *apiModels.QryTicketInboxMembersReq) (errs.IMErrorCode, *apiModels.QryTicketInboxMembersResp) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	requesterId := ctxs.GetRequesterIdFromCtx(ctx)
+	if appkey == "" || requesterId == "" {
+		return errs.IMErrorCode_APP_NOT_LOGIN, nil
+	}
+	if req == nil || strings.TrimSpace(req.TicketId) == "" || req.StartId < 0 || req.Limit <= 0 || req.Limit > 100 {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+
+	userStorage := newUserStorageForTicket()
+	requester, err := userStorage.FindByUserId(appkey, requesterId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if requester == nil {
+		return errs.IMErrorCode_APP_USER_NOT_EXIST, nil
+	}
+	if requester.Role != storageModels.UserRoleAdmin && requester.Role != storageModels.UserRoleCustomerService {
+		return errs.IMErrorCode_APP_NOT_LOGIN, nil
+	}
+
+	ticket, err := newTicketStorageForQuery().FindByTicketId(appkey, strings.TrimSpace(req.TicketId))
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if ticket == nil || strings.TrimSpace(ticket.InboxId) == "" {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+
+	members, err := newInboxMemberStorageForTicket().QryByInbox(appkey, ticket.InboxId, req.StartId, req.Limit+1)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	hasMore := int64(len(members)) > req.Limit
+	if hasMore {
+		members = members[:req.Limit]
+	}
+	resp := &apiModels.QryTicketInboxMembersResp{
+		Items: make([]*apiModels.TicketInboxMemberInfo, 0, len(members)),
+	}
+	for _, member := range members {
+		if member == nil {
+			continue
+		}
+		user, err := userStorage.FindByUserId(appkey, member.MemberId)
+		if err != nil {
+			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+		}
+		if user == nil {
+			continue
+		}
+		resp.Items = append(resp.Items, &apiModels.TicketInboxMemberInfo{
+			UserId:   user.UserId,
+			Username: user.LoginAccount,
+			Avatar:   user.Avator,
+			Email:    user.Email,
+		})
+	}
+	if hasMore {
+		for i := len(members) - 1; i >= 0; i-- {
+			if members[i] != nil {
+				resp.NextStartId = members[i].ID
+				break
+			}
+		}
+	}
+	return errs.IMErrorCode_SUCCESS, resp
+}
 
 func QryTickets(ctx context.Context, req *apiModels.QryTicketsReq) (errs.IMErrorCode, *apiModels.QryTicketsResp) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)

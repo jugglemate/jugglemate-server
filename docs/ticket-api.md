@@ -525,6 +525,85 @@ curl -X GET 'http://localhost:8080/jmate/tickets/list?status=9' \
 }
 ```
 
+## 查询工单对应的 Inbox 成员
+
+根据工单 ID 查询该工单所属 Inbox 的成员列表，按 Inbox 成员记录 ID 倒序进行游标分页。
+
+### 请求
+
+`GET /jmate/tickets/inboxmembers/list`
+
+该接口需要登录，仅管理员和客服用户可以调用。
+
+### Headers
+
+| 名称 | 必填 | 说明 |
+| --- | --- | --- |
+| `appkey` | 是 | 当前应用的 appkey |
+| `Authorization` | 是 | 用户登录 token |
+
+### Query 参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `ticket_id` | string | 是 | 无 | 工单 ID，也兼容 `ticketId` |
+| `start_id` | int64 | 否 | `0` | 分页游标，首页传 `0` 或不传，后续页传上一页的 `next_start_id` |
+| `limit` | int | 否 | `50` | 每页数量，取值范围为 `1`–`100` |
+
+首次查询不传 `start_id`；当响应中的 `next_start_id` 非 `0` 时，将其作为下一次请求的 `start_id`。查询结果按 Inbox 成员记录 ID 倒序排列。
+
+### 请求示例
+
+```bash
+curl -X GET 'http://localhost:8080/jmate/tickets/inboxmembers/list?ticket_id=3xvJK7Xwq2sTnQp6aLm9Z0&limit=50' \
+  -H 'appkey: app_xxx' \
+  -H 'Authorization: user-token'
+```
+
+### 成功响应
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "items": [
+      {
+        "user_id": "u_123",
+        "username": "agent@example.com",
+        "avatar": "https://example.com/agent.png",
+        "email": "agent@example.com"
+      }
+    ],
+    "next_start_id": 128
+  }
+}
+```
+
+没有成员或已到最后一页时：
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "items": [],
+    "next_start_id": 0
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `items` | array | Inbox 成员列表 |
+| `items[].user_id` | string | 用户 ID |
+| `items[].username` | string | 用户登录账号 |
+| `items[].avatar` | string | 用户头像 |
+| `items[].email` | string | 用户邮箱 |
+| `next_start_id` | int64 | 下一页游标；值为 `0` 表示没有下一页 |
+
+工单不存在、不属于当前 app、缺少 `ticket_id`，或分页参数无效时返回 `17005`；当前登录用户不存在时返回 `17012`；未登录或用户角色不受支持时返回 `17003`。成员关联的用户已不存在时，该成员记录会被忽略。
+
 ## 认领工单
 
 将待处理工单分配给当前登录用户，并将该用户加入工单对应的 IM 群组。
