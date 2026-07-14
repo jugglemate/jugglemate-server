@@ -24,6 +24,24 @@ type QryTicketsResp struct {
 	Items []*TicketInfo `json:"items"`
 }
 
+type QryTicketInboxMembersReq struct {
+	TicketId string
+	StartId  int64
+	Limit    int64
+}
+
+type TicketInboxMemberInfo struct {
+	UserId   string `json:"user_id"`
+	Username string `json:"username"`
+	Avatar   string `json:"avatar"`
+	Email    string `json:"email"`
+}
+
+type QryTicketInboxMembersResp struct {
+	Items       []*TicketInboxMemberInfo `json:"items"`
+	NextStartId int64                    `json:"next_start_id"`
+}
+
 type QryCustomerTicketsReq struct {
 	CustomerId string
 	StartId    int64

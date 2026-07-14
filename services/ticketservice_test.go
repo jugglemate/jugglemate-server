@@ -115,6 +115,59 @@ func TestQryTicketsMissingRequester(t *testing.T) {
 	}
 }
 
+func TestQryTicketInboxMembersUsesTicketInboxAndPaginates(t *testing.T) {
+	userStorage := &mockUserStorage{users: map[string]*storageModels.User{
+		"admin": {UserId: "admin", Role: storageModels.UserRoleAdmin},
+		"u_1":   {UserId: "u_1", LoginAccount: "agent1@example.com", Avator: "a1.png", Email: "agent1@example.com"},
+		"u_2":   {UserId: "u_2", LoginAccount: "agent2@example.com", Avator: "a2.png", Email: "agent2@example.com"},
+	}}
+	ticketStorage := &mockTicketStorage{findTicket: &storageModels.Ticket{TicketId: "t_1", InboxId: "inbox_1"}}
+	memberStorage := &mockInboxMemberStorage{members: []*storageModels.InboxMember{
+		{ID: 10, InboxId: "inbox_1", MemberId: "u_1"},
+		{ID: 9, InboxId: "inbox_1", MemberId: "u_2"},
+		{ID: 8, InboxId: "inbox_1", MemberId: "u_3"},
+	}}
+	restore := mockTicketStorages(userStorage, &mockCustomerStorage{}, ticketStorage)
+	oldMemberStorage := newInboxMemberStorageForTicket
+	newInboxMemberStorageForTicket = func() storageModels.IInboxMemberStorage { return memberStorage }
+	defer func() {
+		restore()
+		newInboxMemberStorageForTicket = oldMemberStorage
+	}()
+
+	code, resp := QryTicketInboxMembers(ticketTestContext("app_1", "admin"), &apiModels.QryTicketInboxMembersReq{
+		TicketId: "t_1",
+		StartId:  20,
+		Limit:    2,
+	})
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("QryTicketInboxMembers code = %d, want success", code)
+	}
+	if memberStorage.appkey != "app_1" || memberStorage.inboxId != "inbox_1" || memberStorage.startId != 20 || memberStorage.limit != 3 {
+		t.Fatalf("member query args = appkey:%q inbox:%q start:%d limit:%d", memberStorage.appkey, memberStorage.inboxId, memberStorage.startId, memberStorage.limit)
+	}
+	if len(resp.Items) != 2 || resp.Items[0].UserId != "u_1" || resp.Items[1].UserId != "u_2" {
+		t.Fatalf("items = %+v", resp.Items)
+	}
+	if resp.NextStartId != 9 {
+		t.Fatalf("next_start_id = %d, want 9", resp.NextStartId)
+	}
+}
+
+func TestQryTicketInboxMembersRejectsMissingTicket(t *testing.T) {
+	restore := mockTicketStorages(
+		&mockUserStorage{user: &storageModels.User{UserId: "u_1", Role: storageModels.UserRoleCustomerService}},
+		&mockCustomerStorage{},
+		&mockTicketStorage{},
+	)
+	defer restore()
+
+	code, _ := QryTicketInboxMembers(ticketTestContext("app_1", "u_1"), &apiModels.QryTicketInboxMembersReq{TicketId: "missing", Limit: 50})
+	if code != errs.IMErrorCode_APP_ParamError {
+		t.Fatalf("QryTicketInboxMembers code = %d, want param error", code)
+	}
+}
+
 func TestClaimTicketSuccess(t *testing.T) {
 	ticketStorage := &mockTicketStorage{
 		claimTicket: &storageModels.Ticket{
@@ -588,6 +641,38 @@ type mockTicketStorage struct {
 	transferOldId    string
 	transferNewId    string
 	transferTicket   *storageModels.Ticket
+}
+
+type mockInboxMemberStorage struct {
+	appkey  string
+	inboxId string
+	startId int64
+	limit   int64
+	members []*storageModels.InboxMember
+	err     error
+}
+
+func (s *mockInboxMemberStorage) Create(item storageModels.InboxMember) error   { return nil }
+func (s *mockInboxMemberStorage) Upsert(item storageModels.InboxMember) error   { return nil }
+func (s *mockInboxMemberStorage) Delete(appkey, inboxId, memberId string) error { return nil }
+func (s *mockInboxMemberStorage) Find(appkey, inboxId, memberId string) (*storageModels.InboxMember, error) {
+	return nil, nil
+}
+func (s *mockInboxMemberStorage) QryByInbox(appkey, inboxId string, startId, limit int64) ([]*storageModels.InboxMember, error) {
+	s.appkey = appkey
+	s.inboxId = inboxId
+	s.startId = startId
+	s.limit = limit
+	return s.members, s.err
+}
+func (s *mockInboxMemberStorage) QryByMember(appkey, memberId string, startId, limit int64) ([]*storageModels.InboxMember, error) {
+	return nil, nil
+}
+func (s *mockInboxMemberStorage) CountByInboxes(appkey string, inboxIds []string) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+func (s *mockInboxMemberStorage) ReplaceByInbox(appkey, inboxId string, memberIds []string) error {
+	return nil
 }
 
 func (s *mockTicketStorage) Create(item storageModels.Ticket) error {

@@ -55,6 +55,33 @@ func TestParseQryTicketsReqInvalidStatus(t *testing.T) {
 	}
 }
 
+func TestParseQryTicketInboxMembersReq(t *testing.T) {
+	req, ok := parseQryTicketInboxMembersReq(newTicketTestContext("/tickets/inboxmembers/list?ticket_id=t_1"))
+	if !ok || req.TicketId != "t_1" || req.StartId != 0 || req.Limit != 50 {
+		t.Fatalf("req=%+v ok=%v", req, ok)
+	}
+
+	req, ok = parseQryTicketInboxMembersReq(newTicketTestContext("/tickets/inboxmembers/list?ticketId=t_2&start_id=99&limit=100"))
+	if !ok || req.TicketId != "t_2" || req.StartId != 99 || req.Limit != 100 {
+		t.Fatalf("req=%+v ok=%v", req, ok)
+	}
+}
+
+func TestParseQryTicketInboxMembersReqRejectsInvalidPagination(t *testing.T) {
+	for _, target := range []string{
+		"/tickets/inboxmembers/list",
+		"/tickets/inboxmembers/list?ticket_id=t_1&start_id=-1",
+		"/tickets/inboxmembers/list?ticket_id=t_1&start_id=abc",
+		"/tickets/inboxmembers/list?ticket_id=t_1&limit=0",
+		"/tickets/inboxmembers/list?ticket_id=t_1&limit=101",
+		"/tickets/inboxmembers/list?ticket_id=t_1&limit=abc",
+	} {
+		if req, ok := parseQryTicketInboxMembersReq(newTicketTestContext(target)); ok {
+			t.Fatalf("target=%q req=%+v, want invalid", target, req)
+		}
+	}
+}
+
 func newTicketTestContext(target string) *gin.Context {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
