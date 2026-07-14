@@ -11,7 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/juggleim/imserver-sdk-go"
 	"github.com/juggleim/jugglemate-server/commons/agentclient"
-	"github.com/juggleim/jugglemate-server/commons/agentconfig"
 	"github.com/juggleim/jugglemate-server/commons/imsdk"
 	"github.com/juggleim/jugglemate-server/commons/responses"
 	"github.com/juggleim/jugglemate-server/services"
@@ -37,10 +36,12 @@ type msgCallbackMsg struct {
 	MsgTime     int64           `json:"msg_time"`
 }
 
+// MsgCallback 接收 IM 服务直接推送的消息事件并进入 Agent 自动回复链路。
 func MsgCallback(ctx *gin.Context) {
 	handleMsgCallback(ctx, "im")
 }
 
+// MsgCallbackForward 接收节点转发的消息事件并复用同一处理链路。
 func MsgCallbackForward(ctx *gin.Context) {
 	handleMsgCallback(ctx, "node")
 }
@@ -71,12 +72,7 @@ func handleMsgCallback(ctx *gin.Context, source string) {
 
 	storage := storages.NewAgentStorage()
 	sdk := imsdk.GetImSdk(appkey)
-	client := agentclient.New(agentclient.Config{
-		BaseURL:       strings.TrimRight(agentconfig.BaseURL(), "/"),
-		Timeout:       agentconfig.Timeout(),
-		Authorization: agentconfig.Authorization(),
-		TwinsToken:    agentconfig.TwinsToken(),
-	})
+	client := agentclient.New(agentclient.Config{})
 	// use detached context so chat calls survive beyond request timeout
 	chatCtx := context.Background()
 	for i, item := range body.Payload {

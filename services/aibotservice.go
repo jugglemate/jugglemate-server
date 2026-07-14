@@ -15,7 +15,6 @@ import (
 
 	apiModels "github.com/juggleim/jugglemate-server/apis/models"
 	"github.com/juggleim/jugglemate-server/commons/agentclient"
-	"github.com/juggleim/jugglemate-server/commons/agentconfig"
 	"github.com/juggleim/jugglemate-server/commons/configures"
 	"github.com/juggleim/jugglemate-server/commons/ctxs"
 	"github.com/juggleim/jugglemate-server/commons/errs"
@@ -48,13 +47,10 @@ func getOssClient() (*oss.Client, error) {
 }
 
 func newAgentClient() *agentclient.Client {
-	return agentclient.New(agentclient.Config{
-		BaseURL:    strings.TrimRight(agentconfig.BaseURL(), "/"),
-		Timeout:    agentconfig.Timeout(),
-		TwinsToken: agentconfig.TwinsToken(),
-	})
+	return agentclient.New(agentclient.Config{})
 }
 
+// CreateAiBot 创建本地客服机器人，并同步创建进程内 Go Agent Twin 映射。
 func CreateAiBot(ctx context.Context, bot *apiModels.AiBotInfo) (errs.IMErrorCode, *apiModels.AiBotInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -83,6 +79,8 @@ func CreateAiBot(ctx context.Context, bot *apiModels.AiBotInfo) (errs.IMErrorCod
 		"unique_name":  uniqueName,
 		"display_name": displayName,
 		"avatar_url":   avatarURL,
+		"greeting":     bot.Greeting,
+		"prompts":      bot.Prompts,
 	}
 	_, syncCode, syncErr := agentCli.CreateTwin(ctx, userId, createReq)
 	if syncErr != nil || (syncCode != 200 && syncCode != 201) {
@@ -126,6 +124,7 @@ func CreateAiBot(ctx context.Context, bot *apiModels.AiBotInfo) (errs.IMErrorCod
 	}
 }
 
+// UpdateAiBot 更新客服机器人、IM Bot 与 Go Agent 的展示和提示词配置。
 func UpdateAiBot(ctx context.Context, bot *apiModels.UpdateAiBotReq) (errs.IMErrorCode, *apiModels.AiBotInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -165,6 +164,8 @@ func UpdateAiBot(ctx context.Context, bot *apiModels.UpdateAiBotReq) (errs.IMErr
 	updateReq := map[string]any{
 		"display_name": displayName,
 		"avatar_url":   avatarURL,
+		"greeting":     greeting,
+		"prompts":      prompts,
 	}
 	_, syncCode, syncErr := agentCli.UpdateTwin(ctx, userId, oldBot.UniqueName, updateReq)
 	if syncErr != nil || (syncCode != 200 && syncCode != 201) {
@@ -201,6 +202,7 @@ func UpdateAiBot(ctx context.Context, bot *apiModels.UpdateAiBotReq) (errs.IMErr
 	return errs.IMErrorCode_SUCCESS, twinToAPI(current, current.DisplayName, current.AvatarURL, current.Greeting)
 }
 
+// RemoveAiBot 删除客服机器人并归档其对应 Go Agent。
 func RemoveAiBot(ctx context.Context, botId string) errs.IMErrorCode {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -230,6 +232,7 @@ func RemoveAiBot(ctx context.Context, botId string) errs.IMErrorCode {
 	return errs.IMErrorCode_SUCCESS
 }
 
+// QryMyAiBots 分页查询当前用户拥有的客服机器人。
 func QryMyAiBots(ctx context.Context, limit int64, offset string) (errs.IMErrorCode, *apiModels.AiBotInfos) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -255,6 +258,7 @@ func QryMyAiBots(ctx context.Context, limit int64, offset string) (errs.IMErrorC
 	return errs.IMErrorCode_SUCCESS, ret
 }
 
+// AddAiMaterial 新增文本或链接训练材料并同步到 Go Knowledge。
 func AddAiMaterial(ctx context.Context, uniqueName string, req *apiModels.AiMaterialInfo) (errs.IMErrorCode, *apiModels.AiMaterialInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -321,6 +325,7 @@ func AddAiMaterial(ctx context.Context, uniqueName string, req *apiModels.AiMate
 	return errs.IMErrorCode_SUCCESS, materialToAPI(&item)
 }
 
+// StartTraining 启动兼容训练流程并返回持久化任务编号。
 func StartTraining(ctx context.Context, uniqueName, mode string) (errs.IMErrorCode, *apiModels.AiBotInfo, string) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -409,7 +414,9 @@ func StartTraining(ctx context.Context, uniqueName, mode string) (errs.IMErrorCo
 	_ = storage.UpdateJobStatus(appkey, jobID, agentJob.Status, "")
 
 	// Start background polling to sync job status from agent service
-	go backgroundPollJob(appkey, uniqueName, jobID, agentJob.JobID, userId, 10*time.Minute)
+	if agentJob.Status != "succeeded" && agentJob.Status != "failed" && agentJob.Status != "cancelled" {
+		go backgroundPollJob(appkey, uniqueName, jobID, agentJob.JobID, userId, 10*time.Minute)
+	}
 
 	current, err := storage.FindTwin(appkey, uniqueName)
 	if err != nil {
@@ -418,6 +425,7 @@ func StartTraining(ctx context.Context, uniqueName, mode string) (errs.IMErrorCo
 	return errs.IMErrorCode_SUCCESS, twinToAPI(current, current.DisplayName, current.AvatarURL, current.Greeting), jobID
 }
 
+// ListJobs 分页查询机器人训练与评估任务。
 func ListJobs(ctx context.Context, uniqueName, status, jobType string, limit int64, offset string) (errs.IMErrorCode, *apiModels.AiBotInfos) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -450,6 +458,7 @@ func ListJobs(ctx context.Context, uniqueName, status, jobType string, limit int
 	return errs.IMErrorCode_SUCCESS, ret
 }
 
+// ListVersions 分页查询机器人训练版本。
 func ListVersions(ctx context.Context, uniqueName string, limit int64, offset string) (errs.IMErrorCode, *apiModels.AiBotInfos) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -483,6 +492,7 @@ func ListVersions(ctx context.Context, uniqueName string, limit int64, offset st
 	return errs.IMErrorCode_SUCCESS, ret
 }
 
+// ActivateVersion 激活指定机器人训练版本。
 func ActivateVersion(ctx context.Context, uniqueName, version string) (errs.IMErrorCode, *apiModels.AiBotInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -514,6 +524,7 @@ func ActivateVersion(ctx context.Context, uniqueName, version string) (errs.IMEr
 	return errs.IMErrorCode_SUCCESS, twinToAPI(current, current.DisplayName, current.AvatarURL, current.Greeting)
 }
 
+// GetCurrentVersion 查询机器人当前激活版本。
 func GetCurrentVersion(ctx context.Context, uniqueName string) (errs.IMErrorCode, *apiModels.AiBotInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -540,6 +551,7 @@ func GetCurrentVersion(ctx context.Context, uniqueName string) (errs.IMErrorCode
 	}
 }
 
+// ListEvaluations 分页查询机器人的知识就绪度评估记录。
 func ListEvaluations(ctx context.Context, uniqueName string, limit int64, offset string) (errs.IMErrorCode, *apiModels.AiBotInfos) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -551,10 +563,19 @@ func ListEvaluations(ctx context.Context, uniqueName string, limit int64, offset
 	if twin.OwnerId != userId {
 		return errs.IMErrorCode_APP_AIBOT_NoPermission, nil
 	}
-	// TODO: 评估功能待实现，当前返回空列表占位
-	return errs.IMErrorCode_SUCCESS, &apiModels.AiBotInfos{Items: []*apiModels.AiBotInfo{}}
+	query := fmt.Sprintf("?limit=%d&cursor=%s", limit, offset)
+	evaluations, code, err := newAgentClient().ListEvaluations(ctx, userId, uniqueName, query)
+	if err != nil || code != 200 {
+		return errs.IMErrorCode_APP_AIBOT_DEFAULT, nil
+	}
+	result := &apiModels.AiBotInfos{Items: make([]*apiModels.AiBotInfo, 0, len(evaluations))}
+	for _, item := range evaluations {
+		result.Items = append(result.Items, &apiModels.AiBotInfo{BotId: item.EvaluationID, UniqueName: item.Twin, DisplayName: item.Version, Greeting: item.SummaryMD, Prompts: fmt.Sprintf("%.4f", item.OverallScore), OwnerId: userId})
+	}
+	return errs.IMErrorCode_SUCCESS, result
 }
 
+// QryAiMaterials 分页查询机器人训练材料。
 func QryAiMaterials(ctx context.Context, uniqueName string, limit int64, offset string) (errs.IMErrorCode, *apiModels.AiMaterialInfos) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -578,6 +599,7 @@ func QryAiMaterials(ctx context.Context, uniqueName string, limit int64, offset 
 	return errs.IMErrorCode_SUCCESS, ret
 }
 
+// RemoveAiMaterial 删除本地训练材料及其 Go Knowledge 分块。
 func RemoveAiMaterial(ctx context.Context, uniqueName, materialId string) errs.IMErrorCode {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -614,7 +636,7 @@ func RemoveAiMaterial(ctx context.Context, uniqueName, materialId string) errs.I
 	return errs.IMErrorCode_SUCCESS
 }
 
-// SyncTwin retries syncing a twin to the agent service.
+// SyncTwin 重试将本地机器人配置同步到进程内 Go Agent。
 func SyncTwin(ctx context.Context, uniqueName string) (errs.IMErrorCode, *apiModels.AiBotInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -633,6 +655,8 @@ func SyncTwin(ctx context.Context, uniqueName string) (errs.IMErrorCode, *apiMod
 		"unique_name":  twin.UniqueName,
 		"display_name": twin.DisplayName,
 		"avatar_url":   twin.AvatarURL,
+		"greeting":     twin.Greeting,
+		"prompts":      twin.Prompts,
 	}
 	_, syncCode, syncErr := agentCli.CreateTwin(ctx, userId, createReq)
 	if syncErr != nil || (syncCode != 200 && syncCode != 201) {
@@ -640,6 +664,8 @@ func SyncTwin(ctx context.Context, uniqueName string) (errs.IMErrorCode, *apiMod
 		updateReq := map[string]any{
 			"display_name": twin.DisplayName,
 			"avatar_url":   twin.AvatarURL,
+			"greeting":     twin.Greeting,
+			"prompts":      twin.Prompts,
 		}
 		_, syncCode, syncErr = agentCli.UpdateTwin(ctx, userId, uniqueName, updateReq)
 	}
@@ -657,7 +683,7 @@ func SyncTwin(ctx context.Context, uniqueName string) (errs.IMErrorCode, *apiMod
 	return errs.IMErrorCode_SUCCESS, agentTwinToAPI(twin)
 }
 
-// SyncMaterial retries syncing a single material to the agent service.
+// SyncMaterial 重试将单个训练材料同步到进程内 Go Knowledge。
 func SyncMaterial(ctx context.Context, uniqueName, materialId string) (errs.IMErrorCode, *apiModels.AiMaterialInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -887,8 +913,7 @@ func extractVersionSeq(v string) int {
 	return tools.ToInt(v[1:])
 }
 
-// QueryJobStatus looks up a local job and syncs its status from the agent service.
-// When the job is terminal (succeeded/failed), it also updates twin status and syncs versions.
+// QueryJobStatus 查询任务状态，并在终态时同步机器人状态和版本。
 func QueryJobStatus(ctx context.Context, uniqueName, jobId string) (errs.IMErrorCode, *apiModels.AiBotInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -1108,12 +1133,12 @@ func parseTimeToMilli(s string) int64 {
 	return t.UnixMilli()
 }
 
-// BatchQueryJobStatusRequest is the request body for batch querying job statuses.
+// BatchQueryJobStatusRequest 表示批量查询任务状态的请求体。
 type BatchQueryJobStatusRequest struct {
 	JobIds []string `json:"job_ids"`
 }
 
-// BatchQueryJobStatus queries multiple local jobs and syncs non-terminal ones from agent service.
+// BatchQueryJobStatus 批量查询任务，并同步尚未结束任务的最新状态。
 func BatchQueryJobStatus(ctx context.Context, req *BatchQueryJobStatusRequest) (errs.IMErrorCode, []map[string]interface{}) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -1166,8 +1191,7 @@ func BatchQueryJobStatus(ctx context.Context, req *BatchQueryJobStatusRequest) (
 	return errs.IMErrorCode_SUCCESS, results
 }
 
-// UploadAiMaterial handles file upload for agent training materials.
-// The file is saved locally for training and also uploaded to Qiniu CDN for public access.
+// UploadAiMaterial 上传机器人训练文件，并同步写入 Go Knowledge。
 func UploadAiMaterial(ctx context.Context, uniqueName string, file multipart.File, header *multipart.FileHeader, title, source string) (errs.IMErrorCode, *apiModels.AiMaterialInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	userId := ctxs.GetRequesterIdFromCtx(ctx)
@@ -1295,7 +1319,7 @@ func UploadAiMaterial(ctx context.Context, uniqueName string, file multipart.Fil
 	return errs.IMErrorCode_SUCCESS, materialToAPI(&item)
 }
 
-// UploadAvatar handles avatar image upload to OSS CDN and returns the public CDN URL.
+// UploadAvatar 上传机器人头像到 OSS 并返回公开访问地址。
 func UploadAvatar(ctx context.Context, file multipart.File, header *multipart.FileHeader) (errs.IMErrorCode, string) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	contentType := header.Header.Get("Content-Type")

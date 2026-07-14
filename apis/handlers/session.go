@@ -2,24 +2,33 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	juggleimsdk "github.com/juggleim/imserver-sdk-go"
 	"github.com/juggleim/jugglemate-server/apis/models"
 	"github.com/juggleim/jugglemate-server/commons/agentclient"
-	"github.com/juggleim/jugglemate-server/commons/agentconfig"
+	"github.com/juggleim/jugglemate-server/commons/imsdk"
 	"github.com/juggleim/jugglemate-server/storages"
 	stomodels "github.com/juggleim/jugglemate-server/storages/models"
 )
 
+var (
+	getFeedbackIMSDK = imsdk.GetImSdk
+	sendFeedbackIM   = func(sdk *juggleimsdk.JuggleIMSdk, message juggleimsdk.Message) (juggleimsdk.ApiCode, string, error) {
+		return sdk.SendPrivateMsg(message)
+	}
+)
+
 // ==================== Session ====================
 
+// GetSession 查询客服会话详情及其消息记录。
 func GetSession(c *gin.Context) {
 	appkey := getAppkey(c)
 	sessionId := c.Param("session_id")
@@ -76,6 +85,7 @@ func GetSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": info})
 }
 
+// TakeoverSession 切换会话的人工、协助或自动接管模式。
 func TakeoverSession(c *gin.Context) {
 	appkey := getAppkey(c)
 	sessionId := c.Param("session_id")
@@ -122,7 +132,7 @@ func TakeoverSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": info})
 }
 
-// LookupSession 按 session_id 查找 session（用于前端"点击会话"时回显状态）
+// LookupSession 按 session_id 查找会话，用于前端点击会话时回显状态。
 func LookupSession(c *gin.Context) {
 	appkey := getAppkey(c)
 	sessionId := c.Query("session_id")
@@ -150,6 +160,7 @@ func LookupSession(c *gin.Context) {
 	}})
 }
 
+// SubmitFeedback 提交对 Agent 建议的采纳、编辑或拒绝反馈。
 func SubmitFeedback(c *gin.Context) {
 	appkey := getAppkey(c)
 	sessionId := c.Param("session_id")
@@ -196,19 +207,53 @@ func SubmitFeedback(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": -1, "msg": "agent message not found"})
 		return
 	}
+	if (req.Action == "adopted" || req.Action == "edited") && targetMsg == nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": -1, "msg": "没有可发送的 Agent 建议"})
+		return
+	}
+	if req.Action == "edited" && req.FinalReplyText == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "final_reply_text required"})
+		return
+	}
 
 	feedbackId := "af_" + uuid.New().String()[:13]
 	agentReplyText := ""
 	if targetMsg != nil {
 		agentReplyText = targetMsg.Text
+		if req.AgentMsgId == "" {
+			req.AgentMsgId = strconv.FormatInt(targetMsg.ID, 10)
+		}
+	}
+
+	// 简要描述：采纳或编辑建议必须先真实发送给客户；IM 不可用时不写入“已处理”反馈，
+	// 防止控制台显示成功但客户实际未收到消息。拒绝动作不产生外发消息。
+	if req.Action == "adopted" || req.Action == "edited" {
+		text := agentReplyText
+		if req.Action == "edited" {
+			text = req.FinalReplyText
+		}
+		twin, err := as.FindTwin(appkey, sess.UniqueName)
+		if err != nil || twin == nil || twin.BotId == "" {
+			log.Printf("[SubmitFeedback] 查询 IM Bot 失败: session_id=%s err=%v", sessionId, err)
+			c.JSON(http.StatusBadGateway, gin.H{"code": -1, "msg": "未找到可用 IM Bot"})
+			return
+		}
+		if err := sendSessionFeedbackReply(appkey, twin.BotId, sess.CustomerId, text); err != nil {
+			log.Printf("[SubmitFeedback] 发送 IM 回复失败: session_id=%s err=%v", sessionId, err)
+			c.JSON(http.StatusBadGateway, gin.H{"code": -1, "msg": "发送客户回复失败"})
+			return
+		}
 	}
 
 	switch req.Action {
 	case "adopted":
 		if targetMsg != nil {
-			as.UpdateMessageSuggestionStatus(appkey, targetMsg.ID, "adopted")
+			if err := as.UpdateMessageSuggestionStatus(appkey, targetMsg.ID, "adopted"); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "更新建议状态失败"})
+				return
+			}
 		}
-		as.CreateFeedback(stomodels.AgentFeedback{
+		if err := as.CreateFeedback(stomodels.AgentFeedback{
 			AppKey:         appkey,
 			FeedbackId:     feedbackId,
 			SessionId:      sessionId,
@@ -218,13 +263,18 @@ func SubmitFeedback(c *gin.Context) {
 			AgentReplyText: agentReplyText,
 			FinalReplyText: agentReplyText,
 			OperatorId:     operatorId,
-		})
-		// TODO: send IM reply via imsdk
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "保存反馈失败"})
+			return
+		}
 	case "edited":
 		if targetMsg != nil {
-			as.UpdateMessageSuggestionStatus(appkey, targetMsg.ID, "edited")
+			if err := as.UpdateMessageSuggestionStatus(appkey, targetMsg.ID, "edited"); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "更新建议状态失败"})
+				return
+			}
 		}
-		as.CreateFeedback(stomodels.AgentFeedback{
+		if err := as.CreateFeedback(stomodels.AgentFeedback{
 			AppKey:         appkey,
 			FeedbackId:     feedbackId,
 			SessionId:      sessionId,
@@ -234,13 +284,18 @@ func SubmitFeedback(c *gin.Context) {
 			AgentReplyText: agentReplyText,
 			FinalReplyText: req.FinalReplyText,
 			OperatorId:     operatorId,
-		})
-		// TODO: send edited reply via imsdk
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "保存反馈失败"})
+			return
+		}
 	case "rejected":
 		if targetMsg != nil {
-			as.UpdateMessageSuggestionStatus(appkey, targetMsg.ID, "rejected")
+			if err := as.UpdateMessageSuggestionStatus(appkey, targetMsg.ID, "rejected"); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "更新建议状态失败"})
+				return
+			}
 		}
-		as.CreateFeedback(stomodels.AgentFeedback{
+		if err := as.CreateFeedback(stomodels.AgentFeedback{
 			AppKey:       appkey,
 			FeedbackId:   feedbackId,
 			SessionId:    sessionId,
@@ -249,12 +304,36 @@ func SubmitFeedback(c *gin.Context) {
 			Action:       "rejected",
 			RejectReason: req.RejectReason,
 			OperatorId:   operatorId,
-		})
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "保存反馈失败"})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": gin.H{"feedback_id": feedbackId}})
 }
 
+// sendSessionFeedbackReply 将运营采纳或编辑后的文本以机器人身份发送给会话客户。
+func sendSessionFeedbackReply(appkey, botID, customerID, text string) error {
+	if appkey == "" || botID == "" || customerID == "" || text == "" {
+		return errors.New("应用、机器人、客户或回复内容为空")
+	}
+	sdk := getFeedbackIMSDK(appkey)
+	if sdk == nil {
+		return errors.New("IM SDK 未初始化")
+	}
+	store, count := true, true
+	code, messageID, err := sendFeedbackIM(sdk, juggleimsdk.Message{SenderId: botID, TargetIds: []string{customerID}, MsgType: "jg:text", MsgContent: fmt.Sprintf(`{"content":%q}`, text), IsStorage: &store, IsCount: &count})
+	if err != nil {
+		return err
+	}
+	if code != juggleimsdk.ApiCode_Success {
+		return fmt.Errorf("IM 返回失败状态: code=%d message_id=%s", code, messageID)
+	}
+	return nil
+}
+
+// ListAgentSessions 分页查询指定 Agent 的客服会话。
 func ListAgentSessions(c *gin.Context) {
 	appkey := getAppkey(c)
 	uniqueName := c.Param("unique_name")
@@ -295,6 +374,7 @@ func ListAgentSessions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": resp})
 }
 
+// ListAgentFeedbacks 分页查询指定 Agent 的运营反馈。
 func ListAgentFeedbacks(c *gin.Context) {
 	appkey := getAppkey(c)
 	uniqueName := c.Param("unique_name")
@@ -338,7 +418,7 @@ func ListAgentFeedbacks(c *gin.Context) {
 
 // ==================== Create / Update Session Agent ====================
 
-// CreateSession 点击会话时调用：查 session 是否存在，不存在则创建，返回 session + agent 快照
+// CreateSession 获取或创建客服会话，并返回会话及 Agent 快照。
 func CreateSession(c *gin.Context) {
 	appkey := getAppkey(c)
 	var req models.CreateSessionReq
@@ -409,7 +489,7 @@ func CreateSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": info, "created": true})
 }
 
-// UpdateSessionAgent 点击 agent 时调用：更新 session 绑定的 agent
+// UpdateSessionAgent 更新客服会话绑定的 Agent。
 func UpdateSessionAgent(c *gin.Context) {
 	appkey := getAppkey(c)
 	sessionId := c.Param("session_id")
@@ -442,7 +522,7 @@ func UpdateSessionAgent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": info})
 }
 
-// SessionChat 前端给大模型发消息，调用 /v1/twins/{unique_name}/chat
+// SessionChat 将前端会话消息交给进程内 Go Agent 推理并持久化问答记录。
 func SessionChat(c *gin.Context) {
 	appkey := getAppkey(c)
 	sessionId := c.Param("session_id")
@@ -535,12 +615,7 @@ func SessionChat(c *gin.Context) {
 // ==================== Helpers ====================
 
 func newAgentClient() *agentclient.Client {
-	return agentclient.New(agentclient.Config{
-		BaseURL:       strings.TrimRight(agentconfig.BaseURL(), "/"),
-		Timeout:       agentconfig.Timeout(),
-		Authorization: agentconfig.Authorization(),
-		TwinsToken:    agentconfig.TwinsToken(),
-	})
+	return agentclient.New(agentclient.Config{})
 }
 
 func buildSessionInfo(sess *stomodels.AgentSession) *models.AgentSessionInfo {
