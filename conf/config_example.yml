@@ -17,12 +17,62 @@ jmateBaseUrl: http://127.0.0.1:8050
 botConnector:
   domain: <bot-connector url>
 
-agentServer:
-  baseURL: http://127.0.0.1:8080/v1
-  timeoutSeconds: 5
-
-# agent-server Python 管理 API 反向代理目标（/jmate/agentapi/* -> baseURL/api/v1/*）。
-# internalSecret 为 Go 代理与 Python 之间的可信内部共享密钥，两侧必须一致，且禁止下发浏览器。
-agentAdmin:
-  baseURL: http://127.0.0.1:8000
-  internalSecret: change-me-shared-internal-secret
+# Go 版 Agent 平台。完整部署必须启用并配置 PostgreSQL、Redis 与模型 Provider。
+agent:
+  enabled: true
+  postgres:
+    dsn: host=127.0.0.1 user=postgres password=postgres dbname=jmate_db port=5432 sslmode=disable TimeZone=Asia/Shanghai
+    debug: false
+    maxIdleConns: 10
+    maxOpenConns: 50
+    connMaxLifetimeSeconds: 3600
+  redis:
+    address: 127.0.0.1:6379
+    username: ""
+    password: ""
+    db: 0
+    dialTimeoutSeconds: 5
+  auth:
+    enabled: true
+    adminUsername: admin
+    adminPassword: change-me
+    tokenSecret: change-me-agent-token-secret
+    tokenExpireMinutes: 720
+    internalSecret: change-me-shared-internal-secret
+  security:
+    secretKey: "jmate-agent-secret-key"
+    secretSalt: "jmate-agent-secret-salt"
+  knowledge:
+    workerEnabled: false
+    vectorDimension: 1536
+    vectorBatchSize: 32
+    maxFileSizeMB: 10
+    vectorizeStream: knowledge_vectorize_stream
+    consumerGroup: knowledge_vectorize_group
+    consumerName: knowledge_vectorize_worker_1
+    taskTimeoutSeconds: 600
+    maxRetries: 3
+    objectStorageRoot: ./data/agent/knowledge
+  tools:
+    # 系统内置支付查询工具的服务地址；生产环境必须显式覆盖。
+    innerAPIBaseURL: https://t.JG.pro
+  billing:
+    directFreeDailyEnabled: true
+    directFreeDailyTokens: 500000
+    directQuotaTimezone: Asia/Shanghai
+  profile:
+    # 首个 Agent 创建成功后赠送的 Credit；赠送失败不回滚 Agent。
+    firstAgentRechargeAmount: "10000"
+    activationPointsCheckEnabled: true
+  im:
+    enabled: true
+    wsAddress: wss://127.0.0.1
+    appKey: ""
+    appSecret: ""
+    serverAPIURL: ""
+    # 仅可信测试环境允许跳过 Server API TLS 校验。
+    serverAPIInsecure: false
+    defaultBotToken: ""
+    defaultBotUserId: ""
+    defaultBotName: JG Agent Bot
+    defaultAgentId: ""

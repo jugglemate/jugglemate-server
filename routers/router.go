@@ -6,10 +6,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/juggleim/jugglemate-server/apis"
 	"github.com/juggleim/jugglemate-server/apis/handlers"
+	"github.com/juggleim/jugglemate-server/commons/errs"
+	"github.com/juggleim/jugglemate-server/commons/responses"
 	consoleApis "github.com/juggleim/jugglemate-server/console/apis"
 )
 
-func Route(eng *gin.Engine, prefix string) {
+// AgentRouter 定义 Go Agent 模块向当前控制台注册路由所需的最小接口。
+type AgentRouter interface {
+	// Enabled 返回 Go Agent 模块是否启用。
+	Enabled() bool
+	// RegisterConsoleRoutes 注册 `/jmate/agentapi` 下的本地接口。
+	RegisterConsoleRoutes(group *gin.RouterGroup)
+}
+
+// Route 注册当前服务的全部 HTTP 路由。
+func Route(eng *gin.Engine, prefix string, agentRouters ...AgentRouter) {
 	eng.Use(corsHandler())
 
 	publicGroup := eng.Group("/" + prefix)
@@ -64,10 +75,18 @@ func Route(eng *gin.Engine, prefix string) {
 
 	RouteConsole(group.Group("/console"))
 
-	// 反向代理到 agent-server 管理 API（智能体/工具/模型设置菜单）。
-	RouteAgentAdminProxy(group)
+	// 简要描述：Agent 控制台只允许进入本进程 Go 模块；模块配置错误或未启用时返回
+	// 明确不可用错误，禁止再次回退已下线的 Python agent-server。
+	if len(agentRouters) > 0 && agentRouters[0] != nil && agentRouters[0].Enabled() {
+		agentRouters[0].RegisterConsoleRoutes(group.Group("/agentapi"))
+	} else {
+		group.Any("/agentapi/*proxyPath", func(ctx *gin.Context) {
+			responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_INTERNAL_TIMEOUT)
+		})
+	}
 }
 
+// RouteMsgCallback 注册 IM 消息回调与节点转发入口。
 func RouteMsgCallback(group *gin.RouterGroup) {
 	group.POST("/msgcallback", apis.MsgCallback)
 	group.POST("/forward", apis.MsgCallbackForward)
@@ -89,6 +108,7 @@ func corsHandler() gin.HandlerFunc {
 	}
 }
 
+// RouteConsole 注册原有 JMate 管理控制台接口。
 func RouteConsole(group *gin.RouterGroup) {
 	group.Use(consoleApis.Validate)
 

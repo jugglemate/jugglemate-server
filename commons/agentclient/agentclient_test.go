@@ -3,11 +3,20 @@ package agentclient
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 )
 
+func requireIntegration(t *testing.T) {
+	t.Helper()
+	if os.Getenv("AGENTCLIENT_INTEGRATION") != "1" {
+		t.Skip("设置 AGENTCLIENT_INTEGRATION=1 后运行旧远端客户端集成测试")
+	}
+}
+
 func TestHealthCheck(t *testing.T) {
+	requireIntegration(t)
 	client := New(Config{
 		BaseURL: "http://8.218.63.116:8080",
 		Timeout: 5 * time.Second,
@@ -21,6 +30,7 @@ func TestHealthCheck(t *testing.T) {
 }
 
 func TestListTwins(t *testing.T) {
+	requireIntegration(t)
 	client := New(Config{
 		BaseURL:       "http://8.218.63.116:8080",
 		Timeout:       5 * time.Second,
@@ -36,6 +46,7 @@ func TestListTwins(t *testing.T) {
 }
 
 func TestGetTwin(t *testing.T) {
+	requireIntegration(t)
 	client := New(Config{
 		BaseURL:       "http://8.218.63.116:8080",
 		Timeout:       5 * time.Second,
@@ -50,6 +61,7 @@ func TestGetTwin(t *testing.T) {
 }
 
 func TestChat(t *testing.T) {
+	requireIntegration(t)
 	client := New(Config{
 		BaseURL:       "http://8.218.63.116:8080",
 		Timeout:       5 * time.Second,
@@ -66,6 +78,7 @@ func TestChat(t *testing.T) {
 }
 
 func TestChatWithOwnerID(t *testing.T) {
+	requireIntegration(t)
 	client := New(Config{
 		BaseURL:       "http://8.218.63.116:8080",
 		Timeout:       5 * time.Second,
@@ -83,6 +96,7 @@ func TestChatWithOwnerID(t *testing.T) {
 }
 
 func TestAdminListTwins(t *testing.T) {
+	requireIntegration(t)
 	client := New(Config{
 		BaseURL:       "http://8.218.63.116:8080",
 		Timeout:       5 * time.Second,
@@ -122,6 +136,7 @@ func TestConfig(t *testing.T) {
 }
 
 func TestCreateTwin(t *testing.T) {
+	requireIntegration(t)
 	client := New(Config{
 		BaseURL:       "http://8.218.63.116:8080",
 		Timeout:       5 * time.Second,
@@ -167,6 +182,7 @@ func TestToErrorResponse(t *testing.T) {
 }
 
 func TestUnauthorized(t *testing.T) {
+	requireIntegration(t)
 	client := New(Config{
 		BaseURL:       "http://8.218.63.116:8080",
 		Timeout:       5 * time.Second,
@@ -179,6 +195,38 @@ func TestUnauthorized(t *testing.T) {
 	t.Logf("Unauthorized request: code=%d, err=%v", code, err)
 	// The key is that wrong token should not give us valid data
 	// We just verify the request completed (whether error or not)
+}
+
+type createOnlyBackend struct {
+	Backend
+	called bool
+}
+
+func (backend *createOnlyBackend) CreateTwin(_ context.Context, ownerID string, request map[string]any) (*Twin, int, error) {
+	backend.called = true
+	return &Twin{OwnerID: ownerID, UniqueName: request["unique_name"].(string)}, 201, nil
+}
+
+// TestClientUsesInProcessBackend 校验公开 Twin 方法只调用 Go 进程内实现。
+func TestClientUsesInProcessBackend(t *testing.T) {
+	backend := &createOnlyBackend{}
+	SetBackend(backend)
+	defer SetBackend(nil)
+	client := New(Config{BaseURL: "http://不应访问.example"})
+	result, code, err := client.CreateTwin(context.Background(), "owner-1", map[string]any{"unique_name": "bot-1"})
+	if err != nil || code != 201 || result.UniqueName != "bot-1" || !backend.called {
+		t.Fatalf("进程内调用结果异常: result=%+v code=%d err=%v called=%v", result, code, err, backend.called)
+	}
+}
+
+// TestClientRefusesLegacyTwinHTTP 校验未启动 Go 模块时不会回退 Python Twin HTTP。
+func TestClientRefusesLegacyTwinHTTP(t *testing.T) {
+	SetBackend(nil)
+	client := New(Config{BaseURL: "http://127.0.0.1:1"})
+	_, code, err := client.GetTwin(context.Background(), "owner-1", "bot-1")
+	if code != 503 || err != ErrBackendUnavailable {
+		t.Fatalf("应返回 Go Backend 不可用，实际 code=%d err=%v", code, err)
+	}
 }
 
 // TestMain runs all tests

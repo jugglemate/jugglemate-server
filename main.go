@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	agentbootstrap "github.com/juggleim/jugglemate-server/agent/bootstrap"
 	"github.com/juggleim/jugglemate-server/commons/configures"
 	"github.com/juggleim/jugglemate-server/commons/dbcommons"
 	"github.com/juggleim/jugglemate-server/commons/logs"
@@ -48,8 +51,19 @@ func main() {
 	// upgrade db
 	dbcommons.Upgrade()
 
+	// 初始化 Go Agent 平台。默认关闭，启用后会连接独立 PostgreSQL 与 Redis。
+	agentModule := agentbootstrap.New(configures.Config.Agent)
+	startupCtx, startupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := agentModule.Start(startupCtx); err != nil {
+		startupCancel()
+		logs.Error("Init Agent module failed.", err)
+		return
+	}
+	startupCancel()
+
 	httpServer := gin.Default()
-	routers.Route(httpServer, "jmate")
+	agentModule.RegisterNativeRoutes(httpServer)
+	routers.Route(httpServer, "jmate", agentModule)
 	console.LoadConsoleWeb(httpServer)
 
 	// Serve uploaded static files (avatars, etc.) publicly
@@ -70,4 +84,9 @@ func main() {
 	}()
 
 	<-closeChan
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := agentModule.Stop(shutdownCtx); err != nil {
+		logs.Error("Stop Agent module failed.", err)
+	}
 }
