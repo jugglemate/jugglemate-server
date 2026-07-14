@@ -47,7 +47,7 @@ type CreateWidgetInboxReq struct {
 }
 
 type InboxMemberItem struct {
-	ID       string `json:"id"`
+	UserId   string `json:"user_id"`
 	Username string `json:"username"`
 	Avatar   string `json:"avatar"`
 	Email    string `json:"email"`

@@ -356,7 +356,7 @@ func normalizeAndValidateMemberIds(appkey string, userIds []string) ([]string, e
 
 func toInboxMemberItem(user *storageModels.User) consoleModels.InboxMemberItem {
 	return consoleModels.InboxMemberItem{
-		ID:       user.UserId,
+		UserId:   user.UserId,
 		Username: user.LoginAccount,
 		Avatar:   user.Avator,
 		Email:    user.Email,

@@ -247,6 +247,66 @@ curl -X GET 'http://localhost:8080/jmate/customers/tickets?customer_id=7nKs4PmQ1
 
 customer 不存在时返回 `17012`。缺少 customer ID、`start_id` 小于 `0`，或 `limit` 不在 `1`–`100` 范围内时返回 `17005`。
 
+## 查询 Inbox 成员列表
+
+根据 inbox ID 查询当前 app 下配置的全部代表用户。
+
+### 请求
+
+`GET /jmate/inboxes/members/list`
+
+该接口需要登录。
+
+### Headers
+
+| 名称 | 必填 | 说明 |
+| --- | --- | --- |
+| `appkey` | 是 | 当前应用的 appkey |
+| `Authorization` | 是 | 用户登录 token |
+
+### Query 参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `inbox_id` | string | 是 | 要查询成员的 inbox ID |
+
+### 请求示例
+
+```bash
+curl -X GET 'http://localhost:8080/jmate/inboxes/members/list?inbox_id=inbox_001' \
+  -H 'appkey: app_xxx' \
+  -H 'Authorization: user-token'
+```
+
+### 成功响应
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "list": [
+      {
+        "user_id": "u_123",
+        "username": "agent@example.com",
+        "avatar": "https://example.com/agent.png",
+        "email": "agent@example.com"
+      }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `list` | array | Inbox 成员列表 |
+| `list[].user_id` | string | 用户 ID |
+| `list[].username` | string | 用户登录账号 |
+| `list[].avatar` | string | 用户头像 |
+| `list[].email` | string | 用户邮箱 |
+
+不存在的用户成员记录会被忽略。Inbox 不存在、不属于当前 app 或渠道类型不受支持时返回 `17005`。
+
 ## Telegram Webhook
 
 Telegram 渠道由管理后台创建 inbox 时自动配置 webhook。服务端会先通过 Telegram Bot API 校验 `bot_token`，再把回调地址设置为：

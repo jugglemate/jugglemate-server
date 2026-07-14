@@ -69,6 +69,9 @@ func CreateWidgetInbox(ctx *gin.Context) {
 
 func QryInboxMembers(ctx *gin.Context) {
 	inboxId := ctx.Param("inbox_id")
+	if inboxId == "" {
+		inboxId = ctx.Query("inbox_id")
+	}
 	code, resp := consoleServices.QryInboxMembers(ctxs.ToCtx(ctx), inboxId)
 	if code != errs.IMErrorCode_SUCCESS {
 		responses.ErrorHttpResp(ctx, code)
