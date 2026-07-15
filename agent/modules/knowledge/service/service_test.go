@@ -27,6 +27,16 @@ func TestNormalizeVectorPadsAndTruncates(t *testing.T) {
 	}
 }
 
+// TestNormalizeVectorMatchesStorageDimension 回归 1024 维模型向量检索 1536 维存储向量的故障。
+func TestNormalizeVectorMatchesStorageDimension(t *testing.T) {
+	input := make([]float32, 1024)
+	input[0], input[1023] = 1, 2
+	result := normalizeVector(input, StorageVectorDimension).Slice()
+	if len(result) != 1536 || result[0] != 1 || result[1023] != 2 || result[1024] != 0 || result[1535] != 0 {
+		t.Fatalf("查询向量未正确归一化到存储维度: len=%d", len(result))
+	}
+}
+
 func TestValidateRemoteURLRejectsInternalNetwork(t *testing.T) {
 	for _, raw := range []string{"http://127.0.0.1/a.pdf", "http://localhost/a.pdf", "file:///etc/passwd"} {
 		if err := validateRemoteURL(context.Background(), raw); err == nil {

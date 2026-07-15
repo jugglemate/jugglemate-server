@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,7 +31,15 @@ func SetLogger(info *logrus.Logger, err *logrus.Logger) {
 
 func initInfoLogger() {
 	infoLogger = logrus.New()
-	_, err := rotatelogs.New(
+	infoLogger.SetOutput(os.Stdout)
+	infoLogger.SetReportCaller(true)
+	infoLogger.SetFormatter(&LogFormatter{})
+	infoLogger.SetLevel(logrus.DebugLevel)
+	if err := os.MkdirAll(configures.Config.Log.LogPath, 0o750); err != nil {
+		log.Printf("create log path error: %s", err)
+		return
+	}
+	writer, err := rotatelogs.New(
 		fmt.Sprintf(`%s/%s.%%Y%%m%%d.log`, configures.Config.Log.LogPath, configures.Config.Log.LogName),
 		rotatelogs.WithLinkName(fmt.Sprintf(`%s/%s.log`, configures.Config.Log.LogPath, configures.Config.Log.LogName)),
 		rotatelogs.WithMaxAge(7*24*time.Hour),
@@ -40,12 +50,7 @@ func initInfoLogger() {
 		log.Printf("init log error: %s", err)
 		return
 	}
-
-	infoLogger.SetOutput(os.Stdout)
-	infoLogger.SetReportCaller(true)
-
-	infoLogger.SetFormatter(&LogFormatter{})
-	infoLogger.SetLevel(logrus.DebugLevel)
+	infoLogger.SetOutput(io.MultiWriter(os.Stdout, writer))
 }
 
 type LogFormatter struct {
@@ -60,15 +65,22 @@ func (m *LogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	}
 
 	timestamp := entry.Time.Format("060102150405.000")
-	newLog := fmt.Sprintf("%s\t%s\n", timestamp, entry.Message)
+	newLog := fmt.Sprintf("%s\t%s\t%s\n", timestamp, strings.ToUpper(entry.Level.String()), entry.Message)
 	b.WriteString(newLog)
 	return b.Bytes(), nil
 }
 
 func initErrorLogger() {
 	errorLogger = logrus.New()
-	//writer
-	_, err := rotatelogs.New(
+	errorLogger.SetOutput(os.Stdout)
+	errorLogger.SetReportCaller(true)
+	errorLogger.SetFormatter(&LogFormatter{})
+	errorLogger.SetLevel(logrus.WarnLevel)
+	if err := os.MkdirAll(configures.Config.Log.LogPath, 0o750); err != nil {
+		log.Printf("create log path error: %s", err)
+		return
+	}
+	writer, err := rotatelogs.New(
 		fmt.Sprintf(`%s/%s.%%Y%%m%%d.log`, configures.Config.Log.LogPath, configures.Config.Log.LogName+"_err"),
 		rotatelogs.WithLinkName(fmt.Sprintf(`%s/%s.log`, configures.Config.Log.LogPath, configures.Config.Log.LogName+"_err")),
 		rotatelogs.WithMaxAge(7*24*time.Hour),
@@ -79,12 +91,7 @@ func initErrorLogger() {
 		log.Printf("init log error: %s", err)
 		return
 	}
-
-	//errorLogger.SetOutput(writer)
-	errorLogger.SetOutput(os.Stdout)
-	errorLogger.SetReportCaller(true)
-	errorLogger.SetFormatter(&LogFormatter{})
-	errorLogger.SetLevel(logrus.WarnLevel)
+	errorLogger.SetOutput(io.MultiWriter(os.Stdout, writer))
 }
 
 func Panic(f interface{}, v ...interface{}) {
@@ -153,12 +160,7 @@ func (log *LogEntity) WithField(key string, value interface{}) *LogEntity {
 }
 
 func (log *LogEntity) Errorf(format string, v ...interface{}) {
-	arr := []interface{}{}
-	initFormat := ""
-	for k, v := range log.fields {
-		initFormat = initFormat + k + ":" + "%v\t"
-		arr = append(arr, v)
-	}
+	initFormat, arr := log.fieldsFormat()
 	arr = append(arr, v...)
 	Errorf(initFormat+format, arr...)
 }
@@ -168,29 +170,36 @@ func (log *LogEntity) Error(errMsg string) {
 }
 
 func (log *LogEntity) Warnf(format string, v ...interface{}) {
-	arr := []interface{}{}
-	initFormat := ""
-	for k, v := range log.fields {
-		initFormat = initFormat + k + ":" + "%v\t"
-		arr = append(arr, v)
-	}
+	initFormat, arr := log.fieldsFormat()
 	arr = append(arr, v...)
 	Warnf(initFormat+format, arr...)
 }
 
-func (log *LogEntity) Warn(warnMsg string) {
-	log.Warnf(warnMsg)
-}
-
+// Infof 使用与错误日志一致的上下文字段记录普通运行埋点。
 func (log *LogEntity) Infof(format string, v ...interface{}) {
-	arr := []interface{}{}
-	initFormat := ""
-	for k, v := range log.fields {
-		initFormat = initFormat + k + ":" + "%v\t"
-		arr = append(arr, v)
-	}
+	initFormat, arr := log.fieldsFormat()
 	arr = append(arr, v...)
 	Infof(initFormat+format, arr...)
+}
+
+func (log *LogEntity) fieldsFormat() (string, []interface{}) {
+	keys := make([]string, 0, len(log.fields))
+	for key := range log.fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	values := make([]interface{}, 0, len(keys))
+	var format strings.Builder
+	for _, key := range keys {
+		format.WriteString(key)
+		format.WriteString(":%v\t")
+		values = append(values, log.fields[key])
+	}
+	return format.String(), values
+}
+
+func (log *LogEntity) Warn(warnMsg string) {
+	log.Warnf(warnMsg)
 }
 
 func (log *LogEntity) Info(infoMsg string) {

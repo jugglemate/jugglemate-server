@@ -89,6 +89,9 @@ func (module *Module) Start(ctx context.Context) error {
 	if module.started {
 		return nil
 	}
+	if module.cfg.Knowledge.VectorDimension != knowledgeservice.StorageVectorDimension {
+		return fmt.Errorf("Agent 知识向量维度配置必须与最终态数据库一致: configured=%d required=%d", module.cfg.Knowledge.VectorDimension, knowledgeservice.StorageVectorDimension)
+	}
 
 	db, err := database.Open(ctx, module.cfg.Postgres)
 	if err != nil {

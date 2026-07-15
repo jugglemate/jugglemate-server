@@ -25,6 +25,7 @@ import (
 	"github.com/juggleim/jugglemate-server/agent/modules/knowledge/repository"
 	llmservice "github.com/juggleim/jugglemate-server/agent/modules/llm/service"
 	"github.com/juggleim/jugglemate-server/commons/configures"
+	"github.com/juggleim/jugglemate-server/commons/logs"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -388,18 +389,40 @@ func (service *Service) SearchForReasoning(ctx context.Context, ownerID string, 
 	if topK > 20 {
 		topK = 20
 	}
+	logEntry := logs.WithContext(ctx).
+		WithField("module", "agent.knowledge").
+		WithField("trace_id", mapString(metadata, "trace_id")).
+		WithField("owner_id", ownerID).
+		WithField("knowledge_count", len(knowledgeIDs))
 	keywordRows, err := service.repo.SearchKeywordScoped(ctx, ownerID, knowledgeIDs, query, topK)
 	if err != nil {
+		logEntry.Errorf("知识库关键词检索失败 error:%v", err)
 		return nil, err
 	}
 	vectorRows := []repository.SearchRow{}
 	if service.llm != nil {
-		embeddings, _, _, embedErr := service.llm.EmbedWithMetadata(ctx, "", []string{query}, metadata)
+		embeddings, _, modelID, embedErr := service.llm.EmbedWithMetadata(ctx, "", []string{query}, metadata)
+		logEntry.WithField("model_id", modelID)
 		if embedErr == nil && len(embeddings) > 0 {
-			vectorRows, err = service.repo.SearchVectorScoped(ctx, ownerID, knowledgeIDs, embeddings[0], topK)
+			rawDimension := len(embeddings[0])
+			logEntry.WithField("embedding_dimension", rawDimension).WithField("vector_dimension", service.cfg.VectorDimension)
+			if rawDimension == 0 {
+				logEntry.Warnf("Embedding 模型返回空向量，知识检索降级为关键词")
+			} else {
+				if rawDimension != service.cfg.VectorDimension {
+					logEntry.Warnf("查询向量维度与知识库存储维度不一致，已归一化")
+				}
+				normalized := normalizeVector(embeddings[0], service.cfg.VectorDimension).Slice()
+				vectorRows, err = service.repo.SearchVectorScoped(ctx, ownerID, knowledgeIDs, normalized, topK)
+			}
 			if err != nil {
+				logEntry.Errorf("知识库向量检索失败 error:%v", err)
 				return nil, err
 			}
+		} else if embedErr != nil {
+			logEntry.Warnf("生成查询向量失败，知识检索降级为关键词 error:%v", embedErr)
+		} else {
+			logEntry.Warnf("Embedding 模型未返回查询向量，知识检索降级为关键词")
 		}
 	}
 	type merged struct {
@@ -426,7 +449,16 @@ func (service *Service) SearchForReasoning(ctx context.Context, ownerID string, 
 	if len(result) > topK {
 		result = result[:topK]
 	}
+	logEntry.WithField("keyword_hits", len(keywordRows)).WithField("vector_hits", len(vectorRows)).WithField("result_count", len(result)).Infof("知识库融合检索完成")
 	return result, nil
+}
+
+func mapString(values map[string]any, key string) string {
+	if values == nil {
+		return ""
+	}
+	value, _ := values[key].(string)
+	return value
 }
 
 func validType(value string) bool {

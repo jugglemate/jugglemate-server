@@ -12,11 +12,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/juggleim/jugglemate-server/agent/modules/message/dto"
 	messageservice "github.com/juggleim/jugglemate-server/agent/modules/message/service"
 	reasoningservice "github.com/juggleim/jugglemate-server/agent/modules/reasoning/service"
 	"github.com/juggleim/jugglemate-server/agent/shared/httpresponse"
 	"github.com/juggleim/jugglemate-server/agent/shared/identity"
+	"github.com/juggleim/jugglemate-server/commons/logs"
 )
 
 // Handler 暴露 Message 域 14 个源兼容接口。
@@ -74,9 +76,18 @@ func (handler *Handler) stream(ctx *gin.Context) {
 		validation(ctx, err)
 		return
 	}
+	request.TraceID = ensureTraceID(request.TraceID)
 	prepareSSE(ctx)
 	ctx.Stream(func(writer io.Writer) bool {
+		errorEventSent := false
+		traceID := stringValue(request.TraceID)
 		err := handler.service.Stream(ctx.Request.Context(), principal.ID, request, func(event reasoningservice.Event) error {
+			if event.TraceID != "" {
+				traceID = event.TraceID
+			}
+			if event.Event == "error" {
+				errorEventSent = true
+			}
 			raw, marshalErr := json.Marshal(event)
 			if marshalErr != nil {
 				return marshalErr
@@ -88,9 +99,14 @@ func (handler *Handler) stream(ctx *gin.Context) {
 			return writeErr
 		})
 		if err != nil {
-			event := reasoningservice.Event{Event: "error", Payload: map[string]any{"code": errorCode(err), "message": err.Error()}}
-			raw, _ := json.Marshal(event)
-			_, _ = fmt.Fprintf(writer, "data: %s\n\n", raw)
+			logs.WithContext(ctx.Request.Context()).WithField("module", "agent.message").WithField("trace_id", traceID).WithField("agent_id", request.AgentID).WithField("user_id", request.UserID).Errorf("Agent 流式对话失败 error:%v", err)
+			// 简要描述：Reasoning.Stream 已发送业务 error 时不再由 HTTP 层重复发送，
+			// 保证客户端只收到一条带 trace_id 的错误事件。
+			if !errorEventSent {
+				event := reasoningservice.Event{Event: "error", TraceID: traceID, Payload: map[string]any{"code": errorCode(err), "message": err.Error()}}
+				raw, _ := json.Marshal(event)
+				_, _ = fmt.Fprintf(writer, "data: %s\n\n", raw)
+			}
 		}
 		_, _ = fmt.Fprint(writer, "data: [DONE]\n\n")
 		return false
@@ -133,13 +149,25 @@ func (handler *Handler) appStream(ctx *gin.Context) {
 		validation(ctx, err)
 		return
 	}
+	request.TraceID = ensureTraceID(request.TraceID)
 	prepareSSE(ctx)
+	errorEventSent := false
+	traceID := stringValue(request.TraceID)
 	err := handler.service.AppStream(ctx.Request.Context(), principal.ID, userID, request, func(event reasoningservice.Event) error {
+		if event.TraceID != "" {
+			traceID = event.TraceID
+		}
+		if event.Event == "error" {
+			errorEventSent = true
+		}
 		writeEvent(ctx, event)
 		return nil
 	})
 	if err != nil {
-		writeEvent(ctx, reasoningservice.Event{Event: "error", Payload: map[string]any{"code": errorCode(err), "message": err.Error()}})
+		logs.WithContext(ctx.Request.Context()).WithField("module", "agent.message").WithField("trace_id", traceID).WithField("agent_name", request.AgentName).WithField("user_id", userID).Errorf("Agent 应用流式对话失败 error:%v", err)
+		if !errorEventSent {
+			writeEvent(ctx, reasoningservice.Event{Event: "error", TraceID: traceID, Payload: map[string]any{"code": errorCode(err), "message": err.Error()}})
+		}
 	}
 	ctx.Writer.WriteString("data: [DONE]\n\n")
 }
@@ -312,3 +340,18 @@ func messageserviceError(status int, code, message string) error {
 	return &messageservice.Error{Status: status, Code: code, Message: message}
 }
 func errorCode(err error) string { return messageservice.ErrorCode(err) }
+
+func ensureTraceID(traceID *string) *string {
+	if traceID != nil && strings.TrimSpace(*traceID) != "" {
+		return traceID
+	}
+	value := "trace-" + uuid.NewString()
+	return &value
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}

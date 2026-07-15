@@ -85,42 +85,60 @@ export function AgentConfigView({ mode, agentId }: { mode: "create" | "edit"; ag
   const isEdit = mode === "edit" && !!agentId;
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const [m, k, tl, sk] = await Promise.all([
-          agentApi.get<{
-            items: Array<
-              RefItem & {
-                modelId?: string;
-                status?: string;
-                supportsReasoning?: boolean;
-                providerId?: string;
-                providerName?: string;
-              }
-            >;
-          }>("/admin/llm/models", { params: { capability: "reasoning" } }),
-          agentApi.get<{ items: RefItem[] }>("/knowledge", { params: { page: 1, pageSize: 100 } }),
-          agentApi.get<{ items: RefItem[] }>("/capabilities/tools/public", {
-            params: { page: 1, pageSize: 100 },
-          }),
-          agentApi.get<{ items: RefItem[] }>("/capabilities/skills/public"),
-        ]);
+    // 简要描述：四类下拉选项互不依赖，必须独立加载；任一能力接口失败时，
+    // 已成功返回的模型数据仍应填充表单，不能被 Promise.all 整批丢弃。
+    void agentApi
+      .get<{
+        items: Array<
+          RefItem & {
+            modelId?: string;
+            status?: string;
+            supportsReasoning?: boolean;
+            providerId?: string;
+            providerName?: string;
+          }
+        >;
+      }>("/admin/llm/models", { params: { capability: "reasoning" } })
+      .then((response) =>
         setModels(
-          (m?.items ?? [])
-            .filter((x) => x.status === "active" && x.supportsReasoning)
-            .map((x) => ({
-              value: x.modelId ?? x.id,
-              label: `${x.displayName} (${x.modelId ?? x.id})${x.providerName ? ` - ${x.providerName}` : ""}`,
-              providerId: x.providerId ?? "",
+          (response?.items ?? [])
+            .filter((item) => item.status === "active" && item.supportsReasoning)
+            .map((item) => ({
+              value: item.modelId ?? item.id,
+              label: `${item.displayName} (${item.modelId ?? item.id})${item.providerName ? ` - ${item.providerName}` : ""}`,
+              providerId: item.providerId ?? "",
             })),
-        );
-        setKnowledgeOpts(k?.items ?? []);
-        setTools(tl?.items ?? []);
-        setSkills(sk?.items ?? []);
-      } catch {
-        /* ignore option load errors */
-      }
-    })();
+        ),
+      )
+      .catch((error: unknown) => {
+        console.error("加载推理模型选项失败", error);
+        setModels([]);
+      });
+    void agentApi
+      .get<{ items: RefItem[] }>("/knowledge", { params: { page: 1, pageSize: 100 } })
+      .then((response) => setKnowledgeOpts(response?.items ?? []))
+      .catch((error: unknown) => {
+        console.error("加载知识库选项失败", error);
+        setKnowledgeOpts([]);
+      });
+    void agentApi
+      .get<{ items: RefItem[] }>("/capabilities/tools/public", {
+        params: { page: 1, pageSize: 100 },
+      })
+      .then((response) => setTools(response?.items ?? []))
+      .catch((error: unknown) => {
+        console.error("加载 Tool 选项失败", error);
+        setTools([]);
+      });
+    void agentApi
+      .get<{ items: RefItem[] }>("/capabilities/skills/public", {
+        params: { page: 1, pageSize: 100 },
+      })
+      .then((response) => setSkills(response?.items ?? []))
+      .catch((error: unknown) => {
+        console.error("加载 Skill 选项失败", error);
+        setSkills([]);
+      });
   }, []);
 
   useEffect(() => {

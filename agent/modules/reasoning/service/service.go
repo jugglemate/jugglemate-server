@@ -19,6 +19,7 @@ import (
 	llmservice "github.com/juggleim/jugglemate-server/agent/modules/llm/service"
 	"github.com/juggleim/jugglemate-server/agent/modules/reasoning/model"
 	toolsservice "github.com/juggleim/jugglemate-server/agent/modules/tools/service"
+	"github.com/juggleim/jugglemate-server/commons/logs"
 	"gorm.io/gorm"
 )
 
@@ -152,8 +153,9 @@ func (service *Service) run(ctx context.Context, request Request, sink EventSink
 	}
 	retrieval := []knowledgedto.SearchResult{}
 	if len(knowledgeIDs) > 0 && service.knowledge != nil {
-		retrieval, err = service.knowledge.SearchForReasoning(ctx, agent.OwnerID, knowledgeIDs, request.Input, 5, map[string]any{"agent_id": agent.ID, "conversation_id": conversation.ID})
+		retrieval, err = service.knowledge.SearchForReasoning(ctx, agent.OwnerID, knowledgeIDs, request.Input, 5, map[string]any{"agent_id": agent.ID, "conversation_id": conversation.ID, "trace_id": request.TraceID})
 		if err != nil {
+			logs.WithContext(ctx).WithField("module", "agent.reasoning").WithField("trace_id", request.TraceID).WithField("agent_id", agent.ID).WithField("conversation_id", conversation.ID).WithField("knowledge_count", len(knowledgeIDs)).Errorf("Agent 知识检索失败 error:%v", err)
 			return Result{}, fmt.Errorf("知识检索失败: %w", err)
 		}
 	}

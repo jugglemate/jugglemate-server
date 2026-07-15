@@ -2,3 +2,5 @@ conf/config.yml
 .claude/
 .DS_Store
 *.test
+.agents
+docs

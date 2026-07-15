@@ -23,8 +23,8 @@ import (
 	"github.com/juggleim/jugglemate-server/agent/modules/knowledge/repository"
 	llmservice "github.com/juggleim/jugglemate-server/agent/modules/llm/service"
 	"github.com/juggleim/jugglemate-server/commons/configures"
+	"github.com/juggleim/jugglemate-server/commons/logs"
 	"github.com/ledongthuc/pdf"
-	"github.com/pgvector/pgvector-go"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/net/html"
 )
@@ -111,8 +111,10 @@ func (worker *Worker) handle(ctx context.Context, message redis.XMessage) {
 		_, _ = worker.redis.XAck(ctx, worker.cfg.VectorizeStream, worker.cfg.ConsumerGroup, message.ID).Result()
 		return
 	}
+	logEntry := logs.WithContext(ctx).WithField("module", "agent.knowledge.worker").WithField("knowledge_id", knowledgeID).WithField("task_id", taskID)
 	err := worker.process(ctx, knowledgeID, taskID)
 	if err != nil {
+		logEntry.WithField("retry", retry).Errorf("知识库向量化任务失败 error:%v", err)
 		retry++
 		if retry <= worker.cfg.MaxRetries {
 			_ = worker.repo.FailTask(context.WithoutCancel(ctx), taskID, "VECTORIZE_RETRY", err.Error(), retry)
@@ -120,6 +122,8 @@ func (worker *Worker) handle(ctx context.Context, message redis.XMessage) {
 		} else {
 			_ = worker.repo.FailTask(context.WithoutCancel(ctx), taskID, "VECTORIZE_FAILED", err.Error(), retry)
 		}
+	} else {
+		logEntry.Infof("知识库向量化任务完成")
 	}
 	_, _ = worker.redis.XAck(context.WithoutCancel(ctx), worker.cfg.VectorizeStream, worker.cfg.ConsumerGroup, message.ID).Result()
 }
@@ -175,6 +179,18 @@ func (worker *Worker) process(ctx context.Context, knowledgeID, taskID string) e
 		totalTokens += call.Usage.TotalTokens
 		resolvedModelID = call.ModelID
 		resolvedProviderID = call.ProviderID
+		if len(call.Embeddings) > 0 && len(call.Embeddings[0]) != worker.cfg.VectorDimension {
+			logs.WithContext(ctx).
+				WithField("module", "agent.knowledge.worker").
+				WithField("knowledge_id", knowledgeID).
+				WithField("task_id", taskID).
+				WithField("model_id", call.ModelID).
+				WithField("embedding_dimension", len(call.Embeddings[0])).
+				WithField("vector_dimension", worker.cfg.VectorDimension).
+				WithField("batch_start", start).
+				WithField("batch_size", len(call.Embeddings)).
+				Warnf("Embedding 原始维度与知识库存储维度不一致，已归一化")
+		}
 		for index, embedding := range call.Embeddings {
 			normalized := normalizeVector(embedding, worker.cfg.VectorDimension)
 			chunkIndex := start + index
@@ -336,14 +352,6 @@ func splitText(text string, chunkSize, overlap int) []string {
 		}
 	}
 	return result
-}
-func normalizeVector(input []float32, dimension int) pgvector.Vector {
-	if dimension <= 0 {
-		dimension = 1536
-	}
-	output := make([]float32, dimension)
-	copy(output, input)
-	return pgvector.NewVector(output)
 }
 func extensionForMIME(value string) string {
 	switch value {

@@ -42,3 +42,14 @@ func TestHandlerRegistersAllMessageRoutes(t *testing.T) {
 		t.Fatalf("Message 路由数量应为 %d，实际 %d: %+v", len(expected), len(actual), actual)
 	}
 }
+
+// TestEnsureTraceIDPreservesOrGenerates 校验流式错误始终具备可用于日志检索的 trace_id。
+func TestEnsureTraceIDPreservesOrGenerates(t *testing.T) {
+	existing := "trace-existing"
+	if result := ensureTraceID(&existing); result == nil || *result != existing {
+		t.Fatalf("已有 trace_id 不应被覆盖: %v", result)
+	}
+	if result := ensureTraceID(nil); result == nil || len(*result) <= len("trace-") || (*result)[:len("trace-")] != "trace-" {
+		t.Fatalf("未提供 trace_id 时应自动生成: %v", result)
+	}
+}

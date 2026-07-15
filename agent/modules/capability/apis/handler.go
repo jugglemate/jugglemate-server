@@ -19,9 +19,25 @@ type Handler struct{ service *capabilityservice.Service }
 // NewHandler 创建 Capability Handler。
 func NewHandler(service *capabilityservice.Service) *Handler { return &Handler{service: service} }
 
-// RegisterRoutes 注册 Capability 域全部 17 个接口。
+// RegisterRoutes 注册 Capability 域接口及 Python 源服务兼容路由。
+//
+// 简要描述：迁移初期的 Go 控制台曾使用 `/tools`、`/skills` 和
+// `/capabilities/public`，Python 源服务则使用 `/capabilities/tools`、
+// `/capabilities/skills` 和 `/capabilities/capabilities`。两套路由复用同一组
+// Handler，既保证源接口完整兼容，也避免已接入 Go 路径的客户端回归。
 func (handler *Handler) RegisterRoutes(group *gin.RouterGroup) {
-	tools := group.Group("/tools")
+	handler.registerToolRoutes(group.Group("/tools"))
+	handler.registerSkillRoutes(group.Group("/skills"))
+
+	capabilities := group.Group("/capabilities")
+	capabilities.GET("/public", handler.publicCapabilities)
+	handler.registerToolRoutes(capabilities.Group("/tools"))
+	handler.registerSkillRoutes(capabilities.Group("/skills"))
+	handler.registerDiscoveryRoutes(capabilities.Group("/capabilities"))
+}
+
+// registerToolRoutes 注册一组 Tool 管理与发现路由。
+func (handler *Handler) registerToolRoutes(tools *gin.RouterGroup) {
 	tools.POST("", handler.createTool)
 	tools.GET("/public", handler.publicTools)
 	tools.GET("/mine", handler.myTools)
@@ -29,7 +45,10 @@ func (handler *Handler) RegisterRoutes(group *gin.RouterGroup) {
 	tools.PUT("/:tool_id", handler.updateTool)
 	tools.DELETE("/:tool_id", handler.deleteTool)
 	tools.POST("/:tool_id/test", handler.testTool)
-	skills := group.Group("/skills")
+}
+
+// registerSkillRoutes 注册一组 Skill 管理与发现路由。
+func (handler *Handler) registerSkillRoutes(skills *gin.RouterGroup) {
 	skills.POST("", handler.createSkill)
 	skills.GET("/public", handler.publicSkills)
 	skills.GET("/mine", handler.mySkills)
@@ -37,7 +56,10 @@ func (handler *Handler) RegisterRoutes(group *gin.RouterGroup) {
 	skills.PUT("/:skill_id", handler.updateSkill)
 	skills.DELETE("/:skill_id", handler.deleteSkill)
 	skills.POST("/:skill_id/test", handler.testSkill)
-	capabilities := group.Group("/capabilities")
+}
+
+// registerDiscoveryRoutes 注册 Python 源服务的混合能力发现路由。
+func (handler *Handler) registerDiscoveryRoutes(capabilities *gin.RouterGroup) {
 	capabilities.GET("/public", handler.publicCapabilities)
 	capabilities.GET("/tools/mine", handler.myTools)
 	capabilities.GET("/skills/mine", handler.mySkills)
