@@ -278,6 +278,112 @@ func ReplaceInboxMembers(ctx context.Context, inboxId string, req *consoleModels
 	return errs.IMErrorCode_SUCCESS
 }
 
+// GetInbox 获取单个收件箱详情（含成员数），用于设置页加载。
+func GetInbox(ctx context.Context, inboxId string) (errs.IMErrorCode, *consoleModels.InboxItem) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	if appkey == "" {
+		return errs.IMErrorCode_APP_NOT_EXISTED, nil
+	}
+	if inboxId == "" {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+	inbox, err := newInboxStorageForConsole().FindByInboxId(appkey, inboxId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if inbox == nil {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+	counts, err := newInboxMemberStorageForConsole().CountByInboxes(appkey, []string{inboxId})
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	item := ToInboxItem(inbox, counts[inboxId])
+	return errs.IMErrorCode_SUCCESS, &item
+}
+
+// UpdateInbox 更新收件箱名称；对网站挂件渠道同时更新欢迎语。
+// TIPS: 机器人渠道（telegram/juggleim）仅更新名称，保留原有 bot 配置，避免误触发 webhook 重新注册。
+func UpdateInbox(ctx context.Context, inboxId string, req *consoleModels.UpdateInboxReq) (errs.IMErrorCode, *consoleModels.InboxItem) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	if appkey == "" {
+		return errs.IMErrorCode_APP_NOT_EXISTED, nil
+	}
+	if inboxId == "" || req == nil {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+
+	inboxStorage := newInboxStorageForConsole()
+	existing, err := inboxStorage.FindByInboxId(appkey, inboxId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if existing == nil {
+		return errs.IMErrorCode_APP_ParamError, nil
+	}
+
+	channelConf := existing.ChannelConf
+	if existing.ChannelType == string(appServices.ChannelType_Widget) {
+		welcomeMessage := strings.TrimSpace(req.WelcomeMessage)
+		if len(welcomeMessage) > maxWidgetWelcomeMessageLen {
+			return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+		}
+		marshalled, mErr := json.Marshal(appServices.WebWidgetChannelConf{WelcomeMessage: welcomeMessage})
+		if mErr != nil {
+			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+		}
+		channelConf = string(marshalled)
+	}
+
+	updated := storageModels.Inbox{
+		InboxId:     inboxId,
+		ChannelType: existing.ChannelType,
+		ChannelConf: channelConf,
+		Name:        name,
+		AppKey:      appkey,
+	}
+	if err := inboxStorage.Update(updated); err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+
+	refreshed, err := inboxStorage.FindByInboxId(appkey, inboxId)
+	if err != nil || refreshed == nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	counts, err := newInboxMemberStorageForConsole().CountByInboxes(appkey, []string{inboxId})
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	item := ToInboxItem(refreshed, counts[inboxId])
+	return errs.IMErrorCode_SUCCESS, &item
+}
+
+// DeleteInbox 删除收件箱并清理其成员关系。
+func DeleteInbox(ctx context.Context, inboxId string) errs.IMErrorCode {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	if appkey == "" {
+		return errs.IMErrorCode_APP_NOT_EXISTED
+	}
+	if inboxId == "" {
+		return errs.IMErrorCode_APP_ParamError
+	}
+	if ok, code := inboxExists(appkey, inboxId); !ok {
+		return code
+	}
+	// 先清空成员关系，再删除收件箱本体。
+	if err := newInboxMemberStorageForConsole().ReplaceByInbox(appkey, inboxId, nil); err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
+	}
+	if err := newInboxStorageForConsole().Delete(appkey, inboxId); err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
+	}
+	return errs.IMErrorCode_SUCCESS
+}
+
 func ToInboxItem(inbox *storageModels.Inbox, memberCount int64) consoleModels.InboxItem {
 	item := consoleModels.InboxItem{
 		ID:          inbox.InboxId,

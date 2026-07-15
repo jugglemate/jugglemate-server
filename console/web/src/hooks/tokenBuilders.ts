@@ -1,5 +1,6 @@
 import { theme } from "antd";
 import type { ConfigProviderProps, ThemeConfig } from "antd";
+import { BRAND } from "@/utils/brandColors";
 
 /**
  * Common theme token builders
@@ -8,8 +9,10 @@ import type { ConfigProviderProps, ThemeConfig } from "antd";
 
 export const SHARED_DESIGN_TOKENS = {
   fontFamily:
-    "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
+    "'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
 
+  /** 主色对齐设计稿 Material Design 3 蓝 */
+  colorPrimary: BRAND.primary,
   borderRadius: 8,
   borderRadiusSM: 6,
   borderRadiusLG: 12,
@@ -74,7 +77,9 @@ export const MENU_DARK = {
  */
 export function buildLightThemeConfig(): ConfigProviderProps {
   const lightSeed: ThemeConfig["token"] = {
-    colorBgLayout: "#ffffff",
+    colorBgLayout: BRAND.pageBg,
+    colorBgContainer: BRAND.cardBg,
+    colorBorderSecondary: BRAND.borderLow,
     ...SHARED_DESIGN_TOKENS,
   };
 

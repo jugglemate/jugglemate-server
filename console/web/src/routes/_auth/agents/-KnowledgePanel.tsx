@@ -2,8 +2,8 @@ import {
   Alert,
   App,
   Button,
-  Card,
   Empty,
+  Flex,
   Form,
   Input,
   Modal,
@@ -12,34 +12,38 @@ import {
   Select,
   Space,
   Table,
-  Tag,
   Typography,
   Upload,
+  theme,
 } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Eye,
   File as FileIcon,
+  FileText,
   Link as LinkIcon,
-  Pencil,
   Plus,
   RefreshCw,
   Trash2,
+  UploadCloud,
   Upload as UploadIcon,
 } from "lucide-react";
 import { agentApi } from "@/utils/agentHttp";
+import { BRAND } from "@/utils/brandColors";
 import { KnowledgeEditDrawer, type KnowledgeRecord } from "./-KnowledgeEditDrawer";
 
-const { Text } = Typography;
+const { Text, Title } = Typography;
 
-const STATUS_COLORS: Record<string, string> = {
-  draft: "default",
-  pending: "blue",
-  processing: "orange",
-  ready: "green",
-  failed: "red",
-  archived: "default",
+/** 状态点颜色映射（对齐设计稿的状态圆点 + 文案）。 */
+const STATUS_TONE: Record<string, string> = {
+  draft: BRAND.outline,
+  pending: BRAND.primary,
+  processing: BRAND.primary,
+  ready: BRAND.success,
+  failed: "#ba1a1a",
+  archived: BRAND.outline,
 };
 const STATUS_LABELS: Record<string, string> = {
   draft: "草稿",
@@ -49,6 +53,12 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "失败",
   archived: "已归档",
 };
+
+/** 从文件/知识名推断展示用的文件类型标签（PDF/TXT/DOCX…）。 */
+function inferFileType(name: string): string {
+  const m = /\.([a-z0-9]+)$/i.exec(name.trim());
+  return m ? m[1].toUpperCase() : "DOC";
+}
 const TYPE_OPTIONS = [
   { value: "offline_document", label: "离线文档" },
   { value: "web_crawler", label: "网页爬虫" },
@@ -68,6 +78,7 @@ interface CreateFormValues {
 export function KnowledgePanel({ agentId }: { agentId?: string }) {
   const { t } = useTranslation();
   const { message } = App.useApp();
+  const { token } = theme.useToken();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<KnowledgeItem[]>([]);
   const [mountedIds, setMountedIds] = useState<string[]>([]);
@@ -191,75 +202,108 @@ export function KnowledgePanel({ agentId }: { agentId?: string }) {
     }
   };
 
+  const totals = useMemo(() => {
+    let docs = 0;
+    let vectors = 0;
+    for (const r of data) {
+      docs += r.stats?.documentCount ?? 0;
+      vectors += r.stats?.vectorCount ?? 0;
+    }
+    return { docs, vectors };
+  }, [data]);
+
+  const th = (label: string) => (
+    <span
+      style={{
+        textTransform: "uppercase",
+        letterSpacing: 0.6,
+        fontSize: 12,
+        fontWeight: 700,
+        color: BRAND.outline,
+      }}
+    >
+      {label}
+    </span>
+  );
+
   const columns = [
     {
-      title: t("agents.knowledge.name"),
+      title: th(t("agents.knowledge.fileName")),
       dataIndex: "name",
-      width: 160,
       ellipsis: true,
-      render: (v: string) => <Text strong>{v}</Text>,
-    },
-    {
-      title: t("models.colStatus"),
-      dataIndex: "status",
-      width: 120,
       render: (v: string) => (
-        <Tag color={STATUS_COLORS[v] ?? "default"}>{STATUS_LABELS[v] ?? v}</Tag>
+        <Flex align="center" gap={token.marginSM} style={{ minWidth: 0 }}>
+          <FileText size={18} color={BRAND.primary} style={{ flex: "0 0 auto" }} />
+          <Text strong ellipsis>
+            {v}
+          </Text>
+        </Flex>
       ),
     },
     {
-      title: t("agents.knowledge.size"),
-      key: "size",
+      title: th(t("agents.knowledge.type")),
+      key: "type",
       width: 110,
       render: (_: unknown, r: KnowledgeItem) => (
-        <Space direction="vertical" size={0}>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {r.stats?.documentCount ?? 0} {t("agents.knowledge.docs")}
-          </Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {r.stats?.vectorCount ?? 0} {t("agents.knowledge.vectors")}
-          </Text>
-        </Space>
+        <Text type="secondary">{inferFileType(r.name ?? "")}</Text>
       ),
     },
     {
-      title: t("agents.knowledge.createdAt"),
+      title: th(t("agents.knowledge.uploadDate")),
       dataIndex: "createdAt",
-      width: 160,
+      width: 150,
       render: (v: string) => (
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {v ? new Date(v).toLocaleString() : "--"}
-        </Text>
+        <Text type="secondary">{v ? new Date(v).toLocaleDateString() : "--"}</Text>
       ),
     },
     {
-      title: t("common.actions"),
+      title: th(t("models.colStatus")),
+      dataIndex: "status",
+      width: 140,
+      render: (v: string) => {
+        const tone = STATUS_TONE[v] ?? BRAND.outline;
+        return (
+          <Flex align="center" gap={6}>
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                background: tone,
+                display: "inline-block",
+              }}
+            />
+            <span style={{ color: tone, fontWeight: 500 }}>{STATUS_LABELS[v] ?? v}</span>
+          </Flex>
+        );
+      },
+    },
+    {
+      title: th(t("common.actions")),
       key: "actions",
+      width: agentId ? 200 : 120,
+      align: "right" as const,
       render: (_: unknown, r: KnowledgeItem) => {
         const isMounted = mountedIds.includes(r.id);
         return (
-          <Space>
+          <Space size={2}>
             <Button
-              type="link"
+              type="text"
               size="small"
-              icon={<Pencil size={14} />}
+              icon={<Eye size={16} />}
+              aria-label={t("agents.knowledge.view")}
               onClick={() => {
                 setEditing(r);
                 setDrawerOpen(true);
               }}
-            >
-              {t("common.edit")}
-            </Button>
-            {r.status === "failed" ? (
-              <Button
-                type="link"
-                size="small"
-                icon={<RefreshCw size={14} />}
-                onClick={() => void revectorize(r.id)}
-              >
-                {t("agents.knowledge.revectorize")}
-              </Button>
-            ) : null}
+            />
+            <Button
+              type="text"
+              size="small"
+              icon={<RefreshCw size={16} />}
+              aria-label={t("agents.knowledge.revectorize")}
+              onClick={() => void revectorize(r.id)}
+            />
             {agentId ? (
               isMounted ? (
                 <Button type="link" size="small" onClick={() => void unmount(r.id)}>
@@ -278,9 +322,13 @@ export function KnowledgePanel({ agentId }: { agentId?: string }) {
               cancelText={t("common.cancel")}
               okButtonProps={{ danger: true }}
             >
-              <Button type="link" size="small" danger icon={<Trash2 size={14} />}>
-                {t("common.delete")}
-              </Button>
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<Trash2 size={16} />}
+                aria-label={t("common.delete")}
+              />
             </Popconfirm>
           </Space>
         );
@@ -290,42 +338,145 @@ export function KnowledgePanel({ agentId }: { agentId?: string }) {
 
   return (
     <>
-      <Card
-        style={{ borderRadius: 16 }}
-        title={
-          <Space>
-            <Text strong style={{ fontSize: 16 }}>
-              {agentId ? t("agents.knowledge.mountedTitle") : t("menu.tools")}
+      <Flex vertical gap={token.marginLG}>
+        {/* 头部：标题 + 副标题 + 新建集合 */}
+        <Flex justify="space-between" align="flex-start" gap={token.marginMD} wrap="wrap">
+          <Flex vertical gap={token.marginXXS}>
+            <Title level={4} style={{ margin: 0 }}>
+              {t("agents.knowledge.baseTitle")}
+            </Title>
+            <Text type="secondary">{t("agents.knowledge.baseSubtitle")}</Text>
+          </Flex>
+          <Button type="primary" icon={<Plus size={18} />} onClick={() => setCreateOpen(true)}>
+            {t("agents.knowledge.newCollection")}
+          </Button>
+        </Flex>
+
+        {/* 上传拖拽区 + AI 训练上下文 */}
+        <Flex gap={token.marginLG} align="stretch" wrap="wrap">
+          <Flex
+            vertical
+            align="center"
+            justify="center"
+            gap={token.marginSM}
+            onClick={() => setCreateOpen(true)}
+            style={{
+              flex: "1 1 480px",
+              minHeight: 200,
+              cursor: "pointer",
+              borderRadius: token.borderRadiusLG,
+              border: `1.5px dashed ${BRAND.borderLow}`,
+              background: BRAND.cardBg,
+              padding: token.paddingLG,
+              textAlign: "center",
+            }}
+          >
+            <Flex
+              align="center"
+              justify="center"
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: "50%",
+                background: BRAND.primarySoft,
+                color: BRAND.primary,
+              }}
+            >
+              <UploadCloud size={26} />
+            </Flex>
+            <Title level={5} style={{ margin: 0 }}>
+              {t("agents.knowledge.uploadTitle")}
+            </Title>
+            <Text type="secondary">{t("agents.knowledge.uploadHint")}</Text>
+            <Space size={token.marginXS}>
+              {["PDF", "TXT", "DOCX"].map((x) => (
+                <span
+                  key={x}
+                  style={{
+                    padding: "2px 10px",
+                    borderRadius: 9999,
+                    background: BRAND.subtleBg,
+                    border: `1px solid ${BRAND.borderLow}`,
+                    fontSize: 12,
+                    color: BRAND.onSurfaceVariant,
+                  }}
+                >
+                  {x}
+                </span>
+              ))}
+            </Space>
+          </Flex>
+
+          <div
+            style={{
+              flex: "1 1 300px",
+              maxWidth: 360,
+              borderRadius: token.borderRadiusLG,
+              border: `1px solid ${BRAND.borderLow}`,
+              background: BRAND.cardBg,
+              padding: token.paddingLG,
+            }}
+          >
+            <Text
+              style={{
+                display: "block",
+                textAlign: "center",
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: 0.6,
+                textTransform: "uppercase",
+                color: BRAND.outline,
+                marginBottom: token.margin,
+              }}
+            >
+              {t("agents.knowledge.aiTrainingContext")}
             </Text>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {t("agents.knowledge.total", { count: data.length })}
-            </Text>
-          </Space>
-        }
-        extra={
-          <Space>
-            <Button icon={<RefreshCw size={14} />} onClick={() => void load()}>
-              {t("agents.knowledge.refresh")}
-            </Button>
-            <Button type="primary" icon={<Plus size={16} />} onClick={() => setCreateOpen(true)}>
-              {t("agents.knowledge.new")}
-            </Button>
-          </Space>
-        }
-      >
-        {agentId && data.length === 0 && !loading ? (
-          <Empty description={t("agents.knowledge.noneMounted")} style={{ padding: 32 }} />
-        ) : (
-          <Table<KnowledgeItem>
-            rowKey="id"
-            columns={columns}
-            dataSource={data}
-            loading={loading}
-            pagination={false}
-            size="small"
-          />
-        )}
-      </Card>
+            <Flex justify="space-between" align="center" style={{ marginBottom: token.marginSM }}>
+              <Text type="secondary">{t("agents.knowledge.docCount")}</Text>
+              <Text strong>{totals.docs}</Text>
+            </Flex>
+            <Flex justify="space-between" align="center">
+              <Text type="secondary">{t("agents.knowledge.vectorCount")}</Text>
+              <Text strong>{totals.vectors}</Text>
+            </Flex>
+          </div>
+        </Flex>
+
+        {/* 源文件表格 */}
+        <div
+          style={{
+            borderRadius: token.borderRadiusLG,
+            border: `1px solid ${BRAND.borderLow}`,
+            background: BRAND.cardBg,
+            overflow: "hidden",
+          }}
+        >
+          <Flex align="center" justify="space-between" style={{ padding: token.paddingLG }}>
+            <Title level={5} style={{ margin: 0 }}>
+              {t("agents.knowledge.sourceFiles")}
+            </Title>
+            <Button
+              type="text"
+              icon={<RefreshCw size={16} />}
+              onClick={() => void load()}
+              aria-label={t("agents.knowledge.refresh")}
+            />
+          </Flex>
+          {agentId && data.length === 0 && !loading ? (
+            <Empty description={t("agents.knowledge.noneMounted")} style={{ padding: 32 }} />
+          ) : (
+            <Table<KnowledgeItem>
+              rowKey="id"
+              columns={columns}
+              dataSource={data}
+              loading={loading}
+              pagination={{ pageSize: 8, hideOnSinglePage: true }}
+              size="middle"
+              scroll={{ x: "max-content" }}
+            />
+          )}
+        </div>
+      </Flex>
 
       <KnowledgeEditDrawer
         open={drawerOpen}

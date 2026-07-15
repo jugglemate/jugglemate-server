@@ -1,26 +1,16 @@
 import { useNavigate } from "@tanstack/react-router";
-import { App, Button, Card, Flex, Form, Input, Menu, Select, Space, Tag, Typography } from "antd";
+import { App, Button, Card, Flex, Form, Input, Select, Space, Tag, Typography, theme } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  ArrowLeft,
-  Bot,
-  BookText,
-  CloudUpload,
-  Gauge,
-  Pause,
-  Play,
-  Save,
-  Settings,
-} from "lucide-react";
+import { ArrowLeft, Bot, Cpu, Pause, Play, Rocket, Sparkles, Wrench } from "lucide-react";
 import { agentApi } from "@/utils/agentHttp";
+import { BRAND } from "@/utils/brandColors";
 import { KnowledgePanel } from "./-KnowledgePanel";
-import { LogsPanel, type ConversationDetail } from "./-LogsPanel";
 import { ChatPanel } from "./-ChatPanel";
 
 const { Text } = Typography;
 
-type TabKey = "workspace" | "knowledge" | "logs" | "monitor";
+type TabKey = "configuration" | "knowledge";
 
 interface ModelOption {
   value: string;
@@ -55,16 +45,9 @@ function idsOf(value: unknown): string[] {
     .filter((v): v is string => typeof v === "string" && v.length > 0);
 }
 
-const sectionStyle = {
-  background: "#FAFAFA",
-  border: "1px solid #F0F0F0",
-  borderRadius: 16,
-  padding: 20,
-  marginBottom: 20,
-} as const;
 const cardStyle = {
-  borderRadius: 20,
-  border: "1px solid #ECEEF2",
+  borderRadius: 16,
+  border: "1px solid #E5E7EB",
   boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
 } as const;
 
@@ -76,12 +59,12 @@ export function AgentConfigView({ mode, agentId }: { mode: "create" | "edit"; ag
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("workspace");
+  const [activeTab, setActiveTab] = useState<TabKey>("configuration");
   const [models, setModels] = useState<ModelOption[]>([]);
   const [knowledgeOpts, setKnowledgeOpts] = useState<RefItem[]>([]);
   const [tools, setTools] = useState<RefItem[]>([]);
   const [skills, setSkills] = useState<RefItem[]>([]);
-  const [selectedConv, setSelectedConv] = useState<ConversationDetail | null>(null);
+  const { token } = theme.useToken();
   const isEdit = mode === "edit" && !!agentId;
 
   useEffect(() => {
@@ -230,14 +213,24 @@ export function AgentConfigView({ mode, agentId }: { mode: "create" | "edit"; ag
   const toolOptions = tools.map((x) => ({ value: x.id, label: x.name ?? x.displayName ?? x.id }));
   const skillOptions = skills.map((x) => ({ value: x.id, label: x.name ?? x.displayName ?? x.id }));
 
-  const menuItems = [
-    { key: "workspace", icon: <Settings size={16} />, label: "Workspace" },
-    { key: "knowledge", icon: <CloudUpload size={16} />, label: "Knowledge" },
-    { key: "logs", icon: <BookText size={16} />, label: "Logs" },
-    { key: "monitor", icon: <Gauge size={16} />, label: "Monitor" },
+  const tabs: Array<{ key: TabKey; label: string }> = [
+    { key: "configuration", label: t("agents.tabConfiguration") },
+    { key: "knowledge", label: t("agents.tabKnowledgeBase") },
   ];
 
-  const chatPreview = (conv?: ConversationDetail | null) => (
+  const sectionTitle = (Icon: typeof Bot, title: string, extra?: React.ReactNode) => (
+    <Flex align="center" justify="space-between" style={{ marginBottom: token.margin }}>
+      <Flex align="center" gap={token.marginSM}>
+        <Icon size={20} color={BRAND.primary} />
+        <Text strong style={{ fontSize: token.fontSizeLG }}>
+          {title}
+        </Text>
+      </Flex>
+      {extra}
+    </Flex>
+  );
+
+  const chatPreview = () => (
     <Card
       style={{
         ...cardStyle,
@@ -250,22 +243,16 @@ export function AgentConfigView({ mode, agentId }: { mode: "create" | "edit"; ag
       styles={{ body: { flex: 1, display: "flex", flexDirection: "column", padding: 0 } }}
     >
       {agentId ? (
-        <ChatPanel
-          agentId={conv?.agentId ?? agentId}
-          agentStatus={status}
-          conversationId={conv?.id}
-          targetUserId={conv?.userId}
-          initialMessages={conv?.messages}
-        />
+        <ChatPanel agentId={agentId} agentStatus={status} />
       ) : (
         <Flex
           vertical
           align="center"
           justify="center"
-          style={{ flex: 1, padding: 32, color: "#999" }}
+          style={{ flex: 1, padding: 32, color: BRAND.outline }}
         >
-          <Bot size={48} color="#2287fc" />
-          <Text style={{ color: "#111", marginTop: 12 }}>{t("agents.chat.title")}</Text>
+          <Bot size={48} color={BRAND.primary} />
+          <Text style={{ color: BRAND.onSurface, marginTop: 12 }}>{t("agents.chat.title")}</Text>
           <Text type="secondary">{t("agents.chat.saveFirst")}</Text>
         </Flex>
       )}
@@ -273,189 +260,192 @@ export function AgentConfigView({ mode, agentId }: { mode: "create" | "edit"; ag
   );
 
   return (
-    <Flex vertical gap={16}>
-      <Space align="center" size={12}>
-        <Button icon={<ArrowLeft size={16} />} onClick={() => void navigate({ to: "/agents" })} />
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          {isEdit ? t("agents.editAgent") : t("agents.newAgent")}
-        </Typography.Title>
-        {isEdit && status ? (
-          <Tag color={status === "active" ? "green" : status === "paused" ? "orange" : "default"}>
-            {status}
-          </Tag>
-        ) : null}
-      </Space>
-
-      <Flex gap={16} align="flex-start">
-        {/* Left rail */}
-        <div style={{ width: 240, flexShrink: 0 }}>
-          <Card style={{ ...cardStyle, borderRadius: 20 }} styles={{ body: { padding: 16 } }}>
-            <Space direction="vertical" size={16} style={{ width: "100%" }}>
-              <Menu
-                mode="inline"
-                selectedKeys={[activeTab]}
-                style={{ borderInlineEnd: 0, background: "transparent" }}
-                items={menuItems}
-                onClick={({ key }) => setActiveTab(key as TabKey)}
-              />
-              <div
-                style={{
-                  background: "#F7F8FA",
-                  borderRadius: 16,
-                  padding: 12,
-                  border: "1px solid #F0F0F0",
-                }}
-              >
-                <Space direction="vertical" style={{ width: "100%" }}>
-                  <Button
-                    type="primary"
-                    icon={<Save size={16} />}
-                    style={{ width: "100%", height: 40 }}
-                    loading={saving}
-                    onClick={() => form.submit()}
-                  >
-                    {t("agents.save")}
-                  </Button>
-                  {isEdit && status !== "active" ? (
-                    <Button
-                      icon={<Play size={16} />}
-                      style={{ width: "100%", height: 40 }}
-                      onClick={() => void lifecycle("activate")}
-                    >
-                      {t("agents.activate")}
-                    </Button>
-                  ) : null}
-                  {isEdit && status === "active" ? (
-                    <Button
-                      icon={<Pause size={16} />}
-                      danger
-                      style={{ width: "100%", height: 40 }}
-                      onClick={() => void lifecycle("pause")}
-                    >
-                      {t("agents.pause")}
-                    </Button>
-                  ) : null}
-                </Space>
-              </div>
-            </Space>
-          </Card>
-        </div>
-
-        {/* Content */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {/* Workspace（表单常挂载，保证左侧保存按钮始终可用） */}
-          <Flex
-            gap={16}
-            align="stretch"
-            style={{ display: activeTab === "workspace" ? "flex" : "none" }}
+    <Flex vertical gap={token.marginLG} style={{ maxWidth: 1280, width: "100%", margin: "0 auto" }}>
+      {/* 顶部：返回 + 标题 + 状态 + Publish；下方分段标签（Configuration / Knowledge Base / Logs） */}
+      <Flex justify="space-between" align="center" gap={token.margin} wrap="wrap">
+        <Flex align="center" gap={token.marginSM} style={{ minWidth: 0 }}>
+          <Button
+            type="text"
+            icon={<ArrowLeft size={18} />}
+            onClick={() => void navigate({ to: "/agents" })}
+          />
+          <Typography.Title level={4} style={{ margin: 0 }}>
+            {isEdit ? t("agents.editAgent") : t("agents.newAgent")}
+          </Typography.Title>
+          {isEdit && status ? (
+            <Tag
+              color={status === "active" ? "green" : status === "paused" ? "orange" : "default"}
+              style={{ borderRadius: 9999, marginInlineEnd: 0 }}
+            >
+              {status}
+            </Tag>
+          ) : null}
+        </Flex>
+        <Space size={token.marginSM}>
+          {isEdit && status === "active" ? (
+            <Button icon={<Pause size={16} />} danger onClick={() => void lifecycle("pause")}>
+              {t("agents.pause")}
+            </Button>
+          ) : isEdit ? (
+            <Button icon={<Play size={16} />} onClick={() => void lifecycle("activate")}>
+              {t("agents.activate")}
+            </Button>
+          ) : null}
+          <Button
+            type="primary"
+            icon={<Rocket size={16} />}
+            loading={saving}
+            onClick={() => form.submit()}
           >
-            <Card loading={loading} style={{ ...cardStyle, flex: "1 1 56%", minWidth: 420 }}>
-              <Form<AgentFormValues>
-                layout="vertical"
-                form={form}
-                onFinish={submit}
-                initialValues={{ knowledgeIds: [], toolIds: [], skillIds: [] }}
-              >
-                <div style={sectionStyle}>
-                  <Form.Item label={t("agents.colName")} name="name" rules={[{ required: true }]}>
-                    <Input placeholder={t("agents.namePlaceholder")} />
-                  </Form.Item>
-                  <Form.Item label={t("agents.prompt")} name="prompt" rules={[{ required: true }]}>
-                    <Input.TextArea rows={3} placeholder={t("agents.promptPlaceholder")} />
-                  </Form.Item>
-                  <Form.Item
-                    label={t("agents.reasoningModel")}
-                    name="llmModel"
-                    rules={[{ required: true }]}
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Select
-                      placeholder={t("agents.selectModel")}
-                      options={models}
-                      showSearch
-                      optionFilterProp="label"
-                    />
-                  </Form.Item>
-                </div>
-                <div style={{ ...sectionStyle, marginBottom: 0 }}>
-                  <Space direction="vertical" size={4} style={{ width: "100%", marginBottom: 20 }}>
-                    <Text strong style={{ fontSize: 16 }}>
-                      Capabilities
-                    </Text>
-                    <Text type="secondary">{t("agents.capabilitiesDesc")}</Text>
-                  </Space>
-                  <Form.Item label={t("agents.knowledgeLabel")} name="knowledgeIds">
-                    <Select
-                      mode="multiple"
-                      placeholder={t("agents.selectKnowledge")}
-                      options={knowledgeOptions}
-                      showSearch
-                      optionFilterProp="label"
-                    />
-                  </Form.Item>
-                  <Form.Item shouldUpdate noStyle>
-                    {({ getFieldValue }) =>
-                      selectedTags(getFieldValue("knowledgeIds") || [], knowledgeOptions, "blue")
-                    }
-                  </Form.Item>
-                  <Form.Item label={t("agents.tools")} name="toolIds">
-                    <Select
-                      mode="multiple"
-                      placeholder={t("agents.selectTools")}
-                      options={toolOptions}
-                      showSearch
-                      optionFilterProp="label"
-                    />
-                  </Form.Item>
-                  <Form.Item shouldUpdate noStyle>
-                    {({ getFieldValue }) =>
-                      selectedTags(getFieldValue("toolIds") || [], toolOptions, "orange")
-                    }
-                  </Form.Item>
-                  <Form.Item
-                    label={t("agents.skills")}
-                    name="skillIds"
-                    style={{ marginBottom: 12 }}
-                  >
-                    <Select
-                      mode="multiple"
-                      placeholder={t("agents.selectSkills")}
-                      options={skillOptions}
-                      showSearch
-                      optionFilterProp="label"
-                    />
-                  </Form.Item>
-                  <Form.Item shouldUpdate noStyle>
-                    {({ getFieldValue }) =>
-                      selectedTags(getFieldValue("skillIds") || [], skillOptions, "purple")
-                    }
-                  </Form.Item>
-                </div>
-              </Form>
-            </Card>
-            {chatPreview()}
-          </Flex>
-
-          {activeTab === "knowledge" ? <KnowledgePanel agentId={agentId} /> : null}
-
-          {activeTab === "logs" ? (
-            <Flex gap={16} align="flex-start">
-              <Card style={{ ...cardStyle, flex: "1 1 56%", minWidth: 380 }}>
-                <LogsPanel agentId={agentId as string} onSelect={setSelectedConv} />
-              </Card>
-              {chatPreview(selectedConv)}
-            </Flex>
-          ) : null}
-
-          {activeTab === "monitor" ? (
-            <Card style={cardStyle}>
-              <Flex align="center" justify="center" style={{ padding: 40 }}>
-                <Text type="secondary">{t("agents.monitorSoon")}</Text>
-              </Flex>
-            </Card>
-          ) : null}
-        </div>
+            {t("agents.publish")}
+          </Button>
+        </Space>
       </Flex>
+
+      {/* 分段标签栏 */}
+      <Flex gap={token.marginLG} style={{ borderBottom: `1px solid ${BRAND.borderLow}` }}>
+        {tabs.map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <div
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              style={{
+                cursor: "pointer",
+                padding: `${token.paddingSM}px 0`,
+                fontWeight: 600,
+                fontSize: token.fontSize,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                color: active ? BRAND.primary : BRAND.outline,
+                borderBottom: `2px solid ${active ? BRAND.primary : "transparent"}`,
+                marginBottom: -1,
+              }}
+            >
+              {tab.label}
+            </div>
+          );
+        })}
+      </Flex>
+
+      {/* Configuration（表单常挂载，保证 Publish 始终可提交） */}
+      <Flex
+        gap={token.marginLG}
+        align="stretch"
+        style={{ display: activeTab === "configuration" ? "flex" : "none" }}
+      >
+        <Card loading={loading} style={{ ...cardStyle, flex: "1 1 56%", minWidth: 420 }}>
+          <Form<AgentFormValues>
+            layout="vertical"
+            form={form}
+            onFinish={submit}
+            initialValues={{ knowledgeIds: [], toolIds: [], skillIds: [] }}
+          >
+            {/* Core Identity */}
+            {sectionTitle(
+              Sparkles,
+              t("agents.coreIdentity"),
+              <Tag color="blue" style={{ borderRadius: 9999, marginInlineEnd: 0 }}>
+                {t("agents.activePrompt")}
+              </Tag>,
+            )}
+            <Form.Item label={t("agents.colName")} name="name" rules={[{ required: true }]}>
+              <Input placeholder={t("agents.namePlaceholder")} />
+            </Form.Item>
+            <Form.Item label={t("agents.systemPrompt")} name="prompt" rules={[{ required: true }]}>
+              {/* TIPS: System Prompt 采用深色代码块样式，对齐设计稿 */}
+              <Input.TextArea
+                rows={10}
+                placeholder={t("agents.promptPlaceholder")}
+                style={{
+                  background: BRAND.sidebarBg,
+                  color: "#e2e8f0",
+                  fontFamily:
+                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  borderRadius: token.borderRadiusLG,
+                  border: "none",
+                }}
+              />
+            </Form.Item>
+            <Form.Item
+              label={
+                <Flex align="center" gap={6}>
+                  <Cpu size={15} color={BRAND.primary} /> {t("agents.reasoningModel")}
+                </Flex>
+              }
+              name="llmModel"
+              rules={[{ required: true }]}
+              style={{ marginBottom: token.marginLG }}
+            >
+              <Select
+                placeholder={t("agents.selectModel")}
+                options={models}
+                showSearch
+                optionFilterProp="label"
+              />
+            </Form.Item>
+
+            <div style={{ borderTop: `1px solid ${BRAND.borderLow}`, paddingTop: token.marginLG }}>
+              {sectionTitle(Wrench, t("agents.activeSkills"))}
+              <Form.Item label={t("agents.tools")} name="toolIds">
+                <Select
+                  mode="multiple"
+                  placeholder={t("agents.selectTools")}
+                  options={toolOptions}
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+              <Form.Item shouldUpdate noStyle>
+                {({ getFieldValue }) =>
+                  selectedTags(getFieldValue("toolIds") || [], toolOptions, "orange")
+                }
+              </Form.Item>
+              <Form.Item label={t("agents.skills")} name="skillIds">
+                <Select
+                  mode="multiple"
+                  placeholder={t("agents.selectSkills")}
+                  options={skillOptions}
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+              <Form.Item shouldUpdate noStyle>
+                {({ getFieldValue }) =>
+                  selectedTags(getFieldValue("skillIds") || [], skillOptions, "purple")
+                }
+              </Form.Item>
+            </div>
+
+            <div style={{ borderTop: `1px solid ${BRAND.borderLow}`, paddingTop: token.marginLG }}>
+              {sectionTitle(Bot, t("agents.knowledgeCollections"))}
+              <Form.Item
+                label={t("agents.knowledgeLabel")}
+                name="knowledgeIds"
+                style={{ marginBottom: 0 }}
+              >
+                <Select
+                  mode="multiple"
+                  placeholder={t("agents.selectKnowledge")}
+                  options={knowledgeOptions}
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+              <Form.Item shouldUpdate noStyle>
+                {({ getFieldValue }) =>
+                  selectedTags(getFieldValue("knowledgeIds") || [], knowledgeOptions, "blue")
+                }
+              </Form.Item>
+            </div>
+          </Form>
+        </Card>
+        {chatPreview()}
+      </Flex>
+
+      {activeTab === "knowledge" ? <KnowledgePanel agentId={agentId} /> : null}
     </Flex>
   );
 }

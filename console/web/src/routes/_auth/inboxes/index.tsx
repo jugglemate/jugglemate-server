@@ -1,206 +1,88 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, stripSearchParams, useNavigate } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import {
-  App,
   Button,
-  Card,
+  ConfigProvider,
   Empty,
   Flex,
-  Form,
   Input,
-  Modal,
-  Select,
   Space,
-  Steps,
   Table,
   Tag,
+  Tooltip,
   Typography,
   theme,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
-  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Globe,
-  Inbox as InboxIcon,
   MessageSquare,
   Plus,
   Send,
+  Settings,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import type { LucideIcon } from "lucide-react";
+import { useMemo, useState } from "react";
 import { z } from "zod/v4";
 import { useTranslation } from "react-i18next";
-import {
-  createJuggleIMInbox,
-  createTelegramInbox,
-  createWidgetInbox,
-  inboxChannelLabel,
-  inboxSubtitle,
-  listInboxMembers,
-  listInboxes,
-  replaceInboxMembers,
-  type CreateJuggleIMInboxRequest,
-  type CreateTelegramInboxRequest,
-  type CreateWidgetInboxRequest,
-  type Inbox,
-} from "@/api/inbox";
-import { USER_ENDPOINTS } from "@/api/user";
-import {
-  CreateJuggleIMInboxRequestSchema,
-  CreateTelegramInboxRequestSchema,
-  CreateWidgetInboxRequestSchema,
-  PaginatedResponseSchema,
-  UserSchema,
-} from "@/api/schemas";
-import { httpClient } from "@/utils/http";
+import { BRAND } from "@/utils/brandColors";
+import { inboxChannelLabel, inboxSubtitle, listInboxes, type Inbox } from "@/api/inbox";
 
 const { Text, Title } = Typography;
-const { TextArea } = Input;
 
 const InboxSearchParamsSchema = z.object({
   limit: z.number().int().positive().catch(100),
   offset: z.number().int().nonnegative().catch(0),
 });
 
+type InboxSearch = z.infer<typeof InboxSearchParamsSchema>;
+
+/** 搜索参数默认值：与之相等的参数不会写入 URL（stripSearchParams），保持地址整洁。 */
+const INBOX_SEARCH_DEFAULTS: InboxSearch = { limit: 100, offset: 0 };
+
 export const Route = createFileRoute("/_auth/inboxes/")({
-  validateSearch: (search) => InboxSearchParamsSchema.parse(search),
+  validateSearch: (search: Record<string, unknown>): InboxSearch =>
+    InboxSearchParamsSchema.parse(search),
+  search: { middlewares: [stripSearchParams(INBOX_SEARCH_DEFAULTS)] },
   component: InboxesPage,
 });
 
-const UsersListResponseSchema = PaginatedResponseSchema(UserSchema);
+/** 渠道图标底色映射：网站=蓝、Telegram=青、JuggleIM=紫，对齐设计稿的彩色圆角图标。 */
+const CHANNEL_VISUAL: Record<Inbox["channel_type"], { icon: LucideIcon; bg: string; fg: string }> =
+  {
+    widget: { icon: Globe, bg: BRAND.primarySoft, fg: BRAND.primary },
+    telegram: { icon: Send, bg: BRAND.tertiarySoft, fg: BRAND.tertiary },
+    juggleim: { icon: MessageSquare, bg: "rgba(101, 80, 185, 0.1)", fg: BRAND.aiAccent },
+  };
 
-async function listUsersForMembers() {
-  const raw = await httpClient.get(USER_ENDPOINTS.list, {
-    params: {
-      limit: 500,
-      offset: 0,
-    },
-  });
-  return UsersListResponseSchema.shape.data.parse(raw).list;
+/**
+ * 格式化 Unix 时间戳为本地日期。
+ * @param value 秒或毫秒级时间戳（后端 created_time）
+ * @param locale 当前语言，用于日期本地化
+ */
+function formatInboxDate(value: number, locale: string): string {
+  if (!value) return "—";
+  const ms = value < 1e12 ? value * 1000 : value;
+  return new Intl.DateTimeFormat(locale, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(ms));
 }
 
-type FlowStep = 0 | 1 | 2 | 3;
-type CreateChannel = "widget" | "telegram" | "juggleim";
-
 function InboxesPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const search = Route.useSearch();
-  const queryClient = useQueryClient();
-  const { message } = App.useApp();
+  const navigate = useNavigate({ from: Route.fullPath });
   const { token } = theme.useToken();
   const [query, setQuery] = useState("");
-  const [modalOpen, setModalOpen] = useState(false);
-  const [step, setStep] = useState<FlowStep>(0);
-  const [selectedChannel, setSelectedChannel] = useState<CreateChannel | null>(null);
-  const [activeInbox, setActiveInbox] = useState<Inbox | null>(null);
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [telegramForm] = Form.useForm<CreateTelegramInboxRequest>();
-  const [juggleIMForm] = Form.useForm<CreateJuggleIMInboxRequest>();
-  const [widgetForm] = Form.useForm<CreateWidgetInboxRequest>();
-
-  const channelOptions = useMemo(
-    () =>
-      [
-        {
-          key: "widget" as const,
-          title: t("inboxes.websiteTitle"),
-          description: t("inboxes.websiteDesc"),
-          icon: Globe,
-        },
-        {
-          key: "telegram" as const,
-          title: t("inboxes.telegramTitle"),
-          description: t("inboxes.telegramDesc"),
-          icon: Send,
-        },
-        {
-          key: "juggleim" as const,
-          title: t("inboxes.juggleIMTitle"),
-          description: t("inboxes.juggleIMDesc"),
-          icon: MessageSquare,
-        },
-      ] satisfies Array<{
-        key: CreateChannel;
-        title: string;
-        description: string;
-        icon: typeof Globe;
-      }>,
-    [t],
-  );
 
   const inboxQuery = useQuery({
     queryKey: ["inboxes", search.limit, search.offset],
     queryFn: () => listInboxes({ limit: search.limit, offset: search.offset }),
-  });
-
-  const usersQuery = useQuery({
-    queryKey: ["inbox-member-users"],
-    queryFn: listUsersForMembers,
-    staleTime: 60_000,
-  });
-
-  const membersQuery = useQuery({
-    queryKey: ["inbox-members", activeInbox?.id],
-    queryFn: () => listInboxMembers(activeInbox?.id ?? ""),
-    enabled: modalOpen && step === 2 && Boolean(activeInbox),
-  });
-
-  const createTelegramMutation = useMutation({
-    mutationFn: (values: CreateTelegramInboxRequest) =>
-      createTelegramInbox(CreateTelegramInboxRequestSchema.parse(values)),
-    onSuccess: (inbox) => {
-      void queryClient.invalidateQueries({ queryKey: ["inboxes"] });
-      setActiveInbox(inbox);
-      setSelectedUserIds([]);
-      setStep(2);
-      message.success(t("inboxes.telegramCreated"));
-    },
-    onError: () => {
-      message.error(t("inboxes.telegramCreateFailed"));
-    },
-  });
-
-  const createJuggleIMMutation = useMutation({
-    mutationFn: (values: CreateJuggleIMInboxRequest) =>
-      createJuggleIMInbox(CreateJuggleIMInboxRequestSchema.parse(values)),
-    onSuccess: (inbox) => {
-      void queryClient.invalidateQueries({ queryKey: ["inboxes"] });
-      setActiveInbox(inbox);
-      setSelectedUserIds([]);
-      setStep(2);
-      message.success(t("inboxes.juggleIMCreated"));
-    },
-    onError: () => {
-      message.error(t("inboxes.juggleIMCreateFailed"));
-    },
-  });
-
-  const createWidgetMutation = useMutation({
-    mutationFn: (values: CreateWidgetInboxRequest) =>
-      createWidgetInbox(CreateWidgetInboxRequestSchema.parse(values)),
-    onSuccess: (inbox) => {
-      void queryClient.invalidateQueries({ queryKey: ["inboxes"] });
-      setActiveInbox(inbox);
-      setSelectedUserIds([]);
-      setStep(2);
-      message.success(t("inboxes.widgetCreated"));
-    },
-    onError: () => {
-      message.error(t("inboxes.widgetCreateFailed"));
-    },
-  });
-
-  const membersMutation = useMutation({
-    mutationFn: () => replaceInboxMembers(activeInbox?.id ?? "", selectedUserIds),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["inboxes"] });
-      void queryClient.invalidateQueries({ queryKey: ["inbox-members", activeInbox?.id] });
-      setStep(3);
-      message.success(t("inboxes.representativesSaved"));
-    },
-    onError: () => {
-      message.error(t("inboxes.representativesSaveFailed"));
-    },
   });
 
   const inboxes = inboxQuery.data?.list ?? [];
@@ -209,107 +91,56 @@ function InboxesPage() {
     if (!q) return inboxes;
     return inboxes.filter((inbox) => {
       if (inbox.name.toLowerCase().includes(q)) return true;
-      if (inbox.channel_type === "telegram") {
-        return inbox.channel_conf.bot_name.toLowerCase().includes(q);
+      if (inbox.channel_type === "widget") {
+        return inbox.channel_conf.welcome_message.toLowerCase().includes(q);
       }
-      if (inbox.channel_type === "juggleim") {
-        return inbox.channel_conf.bot_name.toLowerCase().includes(q);
-      }
-      return inbox.channel_conf.welcome_message.toLowerCase().includes(q);
+      return inbox.channel_conf.bot_name.toLowerCase().includes(q);
     });
   }, [inboxes, query]);
 
-  const userOptions = useMemo(
-    () =>
-      (usersQuery.data ?? []).map((user) => ({
-        value: user.id,
-        label: `${user.username}${user.email ? ` (${user.email})` : ""}`,
-      })),
-    [usersQuery.data],
+  const th = (label: string) => (
+    <span
+      style={{
+        textTransform: "uppercase",
+        letterSpacing: 0.6,
+        fontSize: 12,
+        fontWeight: 700,
+        color: BRAND.outline,
+      }}
+    >
+      {label}
+    </span>
   );
-
-  const openCreate = () => {
-    telegramForm.resetFields();
-    juggleIMForm.resetFields();
-    widgetForm.resetFields();
-    setActiveInbox(null);
-    setSelectedUserIds([]);
-    setSelectedChannel(null);
-    setStep(0);
-    setModalOpen(true);
-  };
-
-  const openMembers = (inbox: Inbox) => {
-    setActiveInbox(inbox);
-    setSelectedChannel(inbox.channel_type);
-    setSelectedUserIds([]);
-    setStep(2);
-    setModalOpen(true);
-  };
-
-  useEffect(() => {
-    if (membersQuery.isSuccess) {
-      setSelectedUserIds(membersQuery.data.map((member) => member.id));
-    }
-  }, [membersQuery.data, membersQuery.isSuccess]);
-
-  const closeModal = () => {
-    setModalOpen(false);
-    setStep(0);
-    setSelectedChannel(null);
-    setActiveInbox(null);
-    setSelectedUserIds([]);
-    telegramForm.resetFields();
-    juggleIMForm.resetFields();
-    widgetForm.resetFields();
-  };
-
-  const modalTitle =
-    step === 0
-      ? t("inboxes.modalChooseChannel")
-      : step === 1
-        ? selectedChannel === "widget"
-          ? t("inboxes.modalConfigureWidget")
-          : selectedChannel === "juggleim"
-            ? t("inboxes.modalConfigureJuggleIM")
-            : t("inboxes.modalConfigureTelegram")
-        : step === 2
-          ? t("inboxes.modalRepresentatives")
-          : t("inboxes.modalComplete");
 
   const columns: ColumnsType<Inbox> = [
     {
-      title: t("inboxes.inbox"),
+      title: th(t("inboxes.colChannel")),
       dataIndex: "name",
       key: "name",
       render: (_, record) => {
-        const Icon =
-          record.channel_type === "widget"
-            ? Globe
-            : record.channel_type === "juggleim"
-              ? MessageSquare
-              : Send;
+        const visual = CHANNEL_VISUAL[record.channel_type];
+        const Icon = visual.icon;
         return (
-          <Flex align="center" gap={token.marginSM}>
+          <Flex align="center" gap={token.margin}>
             <Flex
               align="center"
               justify="center"
               style={{
-                width: 36,
-                height: 36,
-                borderRadius: token.borderRadius,
-                background: token.colorFillTertiary,
-                color: token.colorTextSecondary,
+                width: 40,
+                height: 40,
+                borderRadius: token.borderRadiusLG,
+                background: visual.bg,
+                color: visual.fg,
                 flex: "0 0 auto",
               }}
             >
-              <Icon size={18} aria-hidden />
+              <Icon size={20} aria-hidden />
             </Flex>
             <Flex vertical style={{ minWidth: 0 }}>
-              <Text strong ellipsis>
+              <Text strong ellipsis style={{ color: BRAND.onSurface }}>
                 {record.name}
               </Text>
-              <Text type="secondary" ellipsis>
+              <Text type="secondary" ellipsis style={{ fontSize: token.fontSizeSM }}>
                 {inboxSubtitle(record)}
               </Text>
             </Flex>
@@ -318,327 +149,170 @@ function InboxesPage() {
       },
     },
     {
-      title: t("inboxes.channel"),
+      title: th(t("inboxes.colType")),
       dataIndex: "channel_type",
       key: "channel_type",
+      width: 160,
       render: (channelType: Inbox["channel_type"]) => (
         <Tag
-          color={
-            channelType === "widget" ? "green" : channelType === "juggleim" ? "purple" : "blue"
-          }
+          color={channelType === "widget" ? "blue" : channelType === "juggleim" ? "purple" : "cyan"}
+          style={{ borderRadius: 9999, paddingInline: 10 }}
         >
           {inboxChannelLabel(channelType)}
         </Tag>
       ),
     },
     {
-      title: t("inboxes.representatives"),
+      title: th(t("inboxes.representatives")),
       dataIndex: "member_count",
       key: "member_count",
       width: 160,
       render: (count: number) => (
-        <Space size={token.marginXS}>
-          <Users size={14} aria-hidden />
-          <span>{count}</span>
+        <Space size={6} style={{ color: BRAND.onSurface }}>
+          <Users size={15} aria-hidden style={{ color: BRAND.outline }} />
+          <span style={{ fontWeight: 500 }}>{count}</span>
         </Space>
       ),
     },
     {
-      title: t("common.actions"),
-      key: "actions",
+      title: th(t("inboxes.colCreated")),
+      dataIndex: "created_time",
+      key: "created_time",
       width: 160,
+      render: (value: number) => (
+        <span style={{ color: BRAND.onSurfaceVariant }}>
+          {formatInboxDate(value, i18n.language)}
+        </span>
+      ),
+    },
+    {
+      title: th(t("common.actions")),
+      key: "actions",
+      width: 100,
+      align: "right",
       render: (_, record) => (
-        <Button onClick={() => openMembers(record)} icon={<Users size={14} aria-hidden />}>
-          {t("inboxes.members")}
-        </Button>
+        <Tooltip title={t("inboxes.settings")}>
+          <Button
+            type="text"
+            onClick={() =>
+              void navigate({ to: "/inboxes/$inboxId/settings", params: { inboxId: record.id } })
+            }
+            icon={<Settings size={18} aria-hidden />}
+            aria-label={t("inboxes.settings")}
+          />
+        </Tooltip>
       ),
     },
   ];
 
-  return (
-    <Flex vertical gap={token.marginLG} style={{ minHeight: 0 }}>
-      <Flex justify="space-between" align="flex-start" gap={token.marginMD} wrap="wrap">
-        <Flex vertical gap={token.marginXXS}>
-          <Title level={3} style={{ margin: 0 }}>
-            {t("inboxes.title")}
-          </Title>
-          <Text type="secondary">{t("inboxes.subtitle")}</Text>
-        </Flex>
-        <Button type="primary" icon={<Plus size={16} aria-hidden />} onClick={openCreate}>
-          {t("inboxes.newInbox")}
-        </Button>
-      </Flex>
+  /* TIPS: 分页基于后端 total 与 URL 中的 limit/offset；搜索为当前页客户端过滤，搜索态下禁用翻页。 */
+  const total = inboxQuery.data?.total ?? 0;
+  const isSearching = query.trim().length > 0;
+  const rangeStart = filteredInboxes.length ? search.offset + 1 : 0;
+  const rangeEnd = search.offset + filteredInboxes.length;
+  const rangeTotal = isSearching ? filteredInboxes.length : total;
+  const prevDisabled = isSearching || search.offset <= 0;
+  const nextDisabled = isSearching || search.offset + search.limit >= total;
 
-      <Card styles={{ body: { padding: token.paddingLG } }}>
-        <Flex vertical gap={token.marginMD}>
+  const goToOffset = (nextOffset: number) => {
+    void navigate({ search: { ...search, offset: Math.max(0, nextOffset) } });
+  };
+
+  return (
+    <Flex
+      vertical
+      gap={token.marginLG}
+      style={{ minHeight: 0, maxWidth: 1120, width: "100%", margin: "0 auto" }}
+    >
+      <Flex justify="space-between" align="flex-end" gap={token.margin} wrap="wrap">
+        <Flex vertical gap={token.marginXXS} style={{ minWidth: 0 }}>
+          <Title level={4} style={{ margin: 0 }}>
+            {t("inboxes.connectedTitle")}
+          </Title>
+          <Text type="secondary">{t("inboxes.connectedSubtitle")}</Text>
+        </Flex>
+        <Flex gap={token.marginSM} align="center" wrap="wrap">
           <Input.Search
             allowClear
             placeholder={t("inboxes.searchPlaceholder")}
+            style={{ width: 260 }}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            style={{ maxWidth: 360 }}
           />
+          <Button
+            type="primary"
+            icon={<Plus size={18} aria-hidden />}
+            onClick={() => void navigate({ to: "/inboxes/new" })}
+          >
+            {t("inboxes.addInbox")}
+          </Button>
+        </Flex>
+      </Flex>
+
+      <ConfigProvider
+        theme={{
+          components: {
+            Table: {
+              headerBg: BRAND.subtleBg,
+              headerColor: BRAND.outline,
+              headerSplitColor: "transparent",
+              borderColor: BRAND.borderLow,
+              rowHoverBg: BRAND.subtleBg,
+              cellPaddingBlock: 14,
+              cellPaddingInline: 20,
+            },
+          },
+        }}
+      >
+        <div
+          style={{
+            background: BRAND.cardBg,
+            border: `1px solid ${BRAND.borderLow}`,
+            borderRadius: token.borderRadiusLG,
+            overflow: "hidden",
+          }}
+        >
           <Table<Inbox>
             rowKey="id"
             columns={columns}
             dataSource={filteredInboxes}
             loading={inboxQuery.isLoading}
             pagination={false}
+            scroll={{ x: "max-content" }}
             locale={{
               emptyText: (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("inboxes.empty")} />
               ),
             }}
           />
-        </Flex>
-      </Card>
+        </div>
+      </ConfigProvider>
 
-      <Modal
-        open={modalOpen}
-        title={modalTitle}
-        onCancel={closeModal}
-        footer={null}
-        destroyOnHidden
-        width={step === 0 ? 720 : 560}
+      <Flex
+        align="center"
+        justify="space-between"
+        gap={token.marginMD}
+        wrap="wrap"
+        style={{ borderTop: `1px solid ${BRAND.borderLow}`, paddingTop: token.paddingMD }}
       >
-        <Flex vertical gap={token.marginLG}>
-          <Steps
-            size="small"
-            current={step}
-            items={[
-              { title: t("inboxes.stepChannel") },
-              { title: t("inboxes.stepConfigure") },
-              { title: t("inboxes.stepRepresentatives") },
-              { title: t("inboxes.stepFinish") },
-            ]}
+        <Text type="secondary">
+          {t("inboxes.showingChannels", { start: rangeStart, end: rangeEnd, total: rangeTotal })}
+        </Text>
+        <Space size={token.marginXS}>
+          <Button
+            icon={<ChevronLeft size={18} aria-hidden />}
+            disabled={prevDisabled}
+            onClick={() => goToOffset(search.offset - search.limit)}
+            aria-label={t("common.back")}
           />
-
-          {step === 0 ? (
-            <Flex gap={token.marginMD} wrap="wrap">
-              {channelOptions.map((channel) => {
-                const Icon = channel.icon;
-                return (
-                  <Card
-                    key={channel.key}
-                    hoverable
-                    style={{ flex: "1 1 240px", maxWidth: 320, cursor: "pointer" }}
-                    onClick={() => {
-                      setSelectedChannel(channel.key);
-                      setStep(1);
-                    }}
-                  >
-                    <Flex vertical gap={token.marginSM}>
-                      <Flex align="center" gap={token.marginSM}>
-                        <Icon size={20} aria-hidden />
-                        <Text strong>{channel.title}</Text>
-                      </Flex>
-                      <Text type="secondary">{channel.description}</Text>
-                    </Flex>
-                  </Card>
-                );
-              })}
-            </Flex>
-          ) : null}
-
-          {step === 1 && selectedChannel === "widget" ? (
-            <Form<CreateWidgetInboxRequest>
-              form={widgetForm}
-              layout="vertical"
-              onFinish={(values) => createWidgetMutation.mutate(values)}
-            >
-              <Form.Item
-                name="name"
-                label={t("inboxes.inboxName")}
-                rules={[{ required: true, message: t("inboxes.inboxNameRequired") }]}
-              >
-                <Input
-                  prefix={<InboxIcon size={14} aria-hidden />}
-                  placeholder={t("inboxes.websitePlaceholder")}
-                />
-              </Form.Item>
-              <Form.Item
-                name="welcome_message"
-                label={t("inboxes.welcomeMessage")}
-                extra={t("inboxes.welcomeMessageExtra")}
-              >
-                <TextArea
-                  rows={3}
-                  placeholder={t("inboxes.welcomePlaceholder")}
-                  maxLength={500}
-                  showCount
-                />
-              </Form.Item>
-              <Flex justify="space-between" gap={token.marginSM}>
-                <Button onClick={() => setStep(0)}>{t("common.back")}</Button>
-                <Flex gap={token.marginSM}>
-                  <Button onClick={closeModal}>{t("common.cancel")}</Button>
-                  <Button type="primary" htmlType="submit" loading={createWidgetMutation.isPending}>
-                    {t("inboxes.createAndContinue")}
-                  </Button>
-                </Flex>
-              </Flex>
-            </Form>
-          ) : null}
-
-          {step === 1 && selectedChannel === "telegram" ? (
-            <Form<CreateTelegramInboxRequest>
-              form={telegramForm}
-              layout="vertical"
-              onFinish={(values) => createTelegramMutation.mutate(values)}
-            >
-              <Form.Item
-                name="name"
-                label={t("inboxes.inboxName")}
-                rules={[{ required: true, message: t("inboxes.inboxNameRequired") }]}
-              >
-                <Input
-                  prefix={<InboxIcon size={14} aria-hidden />}
-                  placeholder={t("inboxes.telegramPlaceholder")}
-                />
-              </Form.Item>
-              <Form.Item
-                name="bot_name"
-                label={t("inboxes.botName")}
-                rules={[{ required: true, message: t("inboxes.botNameRequired") }]}
-              >
-                <Input placeholder="support_bot" />
-              </Form.Item>
-              <Form.Item
-                name="bot_token"
-                label={t("inboxes.botToken")}
-                rules={[{ required: true, message: t("inboxes.botTokenRequired") }]}
-              >
-                <Input.Password placeholder="123456:ABC-DEF..." />
-              </Form.Item>
-              <Flex justify="space-between" gap={token.marginSM}>
-                <Button onClick={() => setStep(0)}>{t("common.back")}</Button>
-                <Flex gap={token.marginSM}>
-                  <Button onClick={closeModal}>{t("common.cancel")}</Button>
-                  <Button
-                    type="primary"
-                    htmlType="submit"
-                    loading={createTelegramMutation.isPending}
-                  >
-                    {t("inboxes.createAndContinue")}
-                  </Button>
-                </Flex>
-              </Flex>
-            </Form>
-          ) : null}
-
-          {step === 1 && selectedChannel === "juggleim" ? (
-            <Form<CreateJuggleIMInboxRequest>
-              form={juggleIMForm}
-              layout="vertical"
-              onFinish={(values) => createJuggleIMMutation.mutate(values)}
-            >
-              <Form.Item
-                name="name"
-                label={t("inboxes.inboxName")}
-                rules={[{ required: true, message: t("inboxes.inboxNameRequired") }]}
-              >
-                <Input
-                  prefix={<InboxIcon size={14} aria-hidden />}
-                  placeholder={t("inboxes.juggleIMPlaceholder")}
-                />
-              </Form.Item>
-              <Form.Item
-                name="bot_name"
-                label={t("inboxes.juggleIMBotName")}
-                rules={[{ required: true, message: t("inboxes.juggleIMBotNameRequired") }]}
-              >
-                <Input placeholder="support_bot" />
-              </Form.Item>
-              <Form.Item
-                name="bot_token"
-                label={t("inboxes.juggleIMBotToken")}
-                rules={[{ required: true, message: t("inboxes.juggleIMBotTokenRequired") }]}
-              >
-                <Input.Password placeholder="bot-token" />
-              </Form.Item>
-              <Flex justify="space-between" gap={token.marginSM}>
-                <Button onClick={() => setStep(0)}>{t("common.back")}</Button>
-                <Flex gap={token.marginSM}>
-                  <Button onClick={closeModal}>{t("common.cancel")}</Button>
-                  <Button
-                    type="primary"
-                    htmlType="submit"
-                    loading={createJuggleIMMutation.isPending}
-                  >
-                    {t("inboxes.createAndContinue")}
-                  </Button>
-                </Flex>
-              </Flex>
-            </Form>
-          ) : null}
-
-          {step === 2 ? (
-            <Flex vertical gap={token.marginMD}>
-              <Text type="secondary">
-                {t("inboxes.selectRepresentativesHint", {
-                  name: activeInbox?.name ?? t("inboxes.thisInbox"),
-                })}
-              </Text>
-              <Select
-                mode="multiple"
-                showSearch
-                placeholder={t("inboxes.selectRepresentatives")}
-                value={selectedUserIds}
-                onChange={setSelectedUserIds}
-                loading={usersQuery.isLoading || membersQuery.isLoading}
-                options={userOptions}
-                optionFilterProp="label"
-              />
-              <Flex justify="flex-end" gap={token.marginSM}>
-                <Button onClick={closeModal}>{t("common.cancel")}</Button>
-                <Button
-                  type="primary"
-                  loading={membersMutation.isPending}
-                  onClick={() => membersMutation.mutate()}
-                >
-                  {t("inboxes.saveRepresentatives")}
-                </Button>
-              </Flex>
-            </Flex>
-          ) : null}
-
-          {step === 3 ? (
-            <Flex vertical align="center" gap={token.marginMD} style={{ textAlign: "center" }}>
-              <CheckCircle2 size={48} color={token.colorSuccess} strokeWidth={1.5} aria-hidden />
-              <Flex vertical gap={token.marginXXS}>
-                <Text strong>
-                  {t("inboxes.inboxReady", { name: activeInbox?.name ?? t("inboxes.inbox") })}
-                </Text>
-                <Text type="secondary">{t("inboxes.inboxReadyDesc")}</Text>
-                {activeInbox?.channel_type === "widget" ? (
-                  <Flex
-                    vertical
-                    gap={token.marginXXS}
-                    style={{
-                      marginTop: token.marginSM,
-                      padding: token.paddingMD,
-                      borderRadius: token.borderRadius,
-                      background: token.colorFillTertiary,
-                      width: "100%",
-                    }}
-                  >
-                    <Flex align="center" justify="center" gap={token.marginXS}>
-                      <MessageSquare size={14} aria-hidden />
-                      <Text type="secondary">{t("inboxes.inboxIdHint")}</Text>
-                    </Flex>
-                    <Text code copyable>
-                      {activeInbox.id}
-                    </Text>
-                  </Flex>
-                ) : null}
-              </Flex>
-              <Button type="primary" onClick={closeModal}>
-                {t("inboxes.backToInboxes")}
-              </Button>
-            </Flex>
-          ) : null}
-        </Flex>
-      </Modal>
+          <Button
+            icon={<ChevronRight size={18} aria-hidden />}
+            disabled={nextDisabled}
+            onClick={() => goToOffset(search.offset + search.limit)}
+            aria-label={t("common.actions")}
+          />
+        </Space>
+      </Flex>
     </Flex>
   );
 }

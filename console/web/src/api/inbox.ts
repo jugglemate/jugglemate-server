@@ -19,8 +19,17 @@ export const INBOX_ENDPOINTS = {
   createTelegram: "/jmate/console/inboxes/telegram",
   createJuggleIM: "/jmate/console/inboxes/juggleim",
   createWidget: "/jmate/console/inboxes/widget",
+  detail: (id: string) => `/jmate/console/inboxes/${id}`,
+  update: (id: string) => `/jmate/console/inboxes/${id}`,
+  remove: (id: string) => `/jmate/console/inboxes/${id}`,
   members: (id: string) => `/jmate/console/inboxes/${id}/members`,
 } as const;
+
+/** 更新收件箱请求体（名称必填；欢迎语仅对网站挂件渠道生效）。 */
+export type UpdateInboxRequest = {
+  name: string;
+  welcome_message?: string;
+};
 
 const InboxListResponseSchema = PaginatedResponseSchema(InboxSchema);
 
@@ -45,6 +54,20 @@ export async function createWidgetInbox(values: CreateWidgetInboxRequest): Promi
   const body = CreateWidgetInboxRequestSchema.parse(values);
   const raw = await httpClient.post(INBOX_ENDPOINTS.createWidget, body);
   return InboxSchema.parse(raw);
+}
+
+export async function getInbox(inboxId: string): Promise<Inbox> {
+  const raw = await httpClient.get(INBOX_ENDPOINTS.detail(inboxId));
+  return InboxSchema.parse(raw);
+}
+
+export async function updateInbox(inboxId: string, values: UpdateInboxRequest): Promise<Inbox> {
+  const raw = await httpClient.put(INBOX_ENDPOINTS.update(inboxId), values);
+  return InboxSchema.parse(raw);
+}
+
+export async function deleteInbox(inboxId: string): Promise<void> {
+  await httpClient.delete(INBOX_ENDPOINTS.remove(inboxId));
 }
 
 export async function listInboxMembers(inboxId: string): Promise<InboxMember[]> {

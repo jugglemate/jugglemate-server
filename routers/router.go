@@ -121,6 +121,9 @@ func RouteConsole(group *gin.RouterGroup) {
 	group.POST("/inboxes/telegram", consoleApis.CreateTelegramInbox)
 	group.POST("/inboxes/juggleim", consoleApis.CreateJuggleIMInbox)
 	group.POST("/inboxes/widget", consoleApis.CreateWidgetInbox)
+	group.GET("/inboxes/:inbox_id", consoleApis.QryInbox)
+	group.PUT("/inboxes/:inbox_id", consoleApis.UpdateInbox)
+	group.DELETE("/inboxes/:inbox_id", consoleApis.DeleteInbox)
 	group.GET("/inboxes/:inbox_id/members", consoleApis.QryInboxMembers)
 	group.PUT("/inboxes/:inbox_id/members", consoleApis.ReplaceInboxMembers)
 }

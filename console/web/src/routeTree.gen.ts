@@ -23,9 +23,11 @@ import { Route as AuthAgentsIndexRouteImport } from './routes/_auth/agents/index
 import { Route as Auth403IndexRouteImport } from './routes/_auth/403/index'
 import { Route as AuthModelsConfigRouteImport } from './routes/_auth/models/config'
 import { Route as AuthModelsProviderIdRouteImport } from './routes/_auth/models/$providerId'
+import { Route as AuthInboxesNewRouteImport } from './routes/_auth/inboxes/new'
 import { Route as AuthAgentsNewRouteImport } from './routes/_auth/agents/new'
 import { Route as AuthAgentsAgentIdRouteImport } from './routes/_auth/agents/$agentId'
 import { Route as AuthSettingsInboxesIndexRouteImport } from './routes/_auth/settings/inboxes/index'
+import { Route as AuthInboxesInboxIdSettingsRouteImport } from './routes/_auth/inboxes/$inboxId.settings'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/_auth',
@@ -96,6 +98,11 @@ const AuthModelsProviderIdRoute = AuthModelsProviderIdRouteImport.update({
   path: '/models/$providerId',
   getParentRoute: () => AuthRoute,
 } as any)
+const AuthInboxesNewRoute = AuthInboxesNewRouteImport.update({
+  id: '/inboxes/new',
+  path: '/inboxes/new',
+  getParentRoute: () => AuthRoute,
+} as any)
 const AuthAgentsNewRoute = AuthAgentsNewRouteImport.update({
   id: '/agents/new',
   path: '/agents/new',
@@ -112,6 +119,12 @@ const AuthSettingsInboxesIndexRoute =
     path: '/settings/inboxes/',
     getParentRoute: () => AuthRoute,
   } as any)
+const AuthInboxesInboxIdSettingsRoute =
+  AuthInboxesInboxIdSettingsRouteImport.update({
+    id: '/inboxes/$inboxId/settings',
+    path: '/inboxes/$inboxId/settings',
+    getParentRoute: () => AuthRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -120,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/register/': typeof RegisterIndexRoute
   '/agents/$agentId': typeof AuthAgentsAgentIdRoute
   '/agents/new': typeof AuthAgentsNewRoute
+  '/inboxes/new': typeof AuthInboxesNewRoute
   '/models/$providerId': typeof AuthModelsProviderIdRoute
   '/models/config': typeof AuthModelsConfigRoute
   '/403/': typeof Auth403IndexRoute
@@ -129,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/models/': typeof AuthModelsIndexRoute
   '/tools/': typeof AuthToolsIndexRoute
   '/users/': typeof AuthUsersIndexRoute
+  '/inboxes/$inboxId/settings': typeof AuthInboxesInboxIdSettingsRoute
   '/settings/inboxes/': typeof AuthSettingsInboxesIndexRoute
 }
 export interface FileRoutesByTo {
@@ -138,6 +153,7 @@ export interface FileRoutesByTo {
   '/register': typeof RegisterIndexRoute
   '/agents/$agentId': typeof AuthAgentsAgentIdRoute
   '/agents/new': typeof AuthAgentsNewRoute
+  '/inboxes/new': typeof AuthInboxesNewRoute
   '/models/$providerId': typeof AuthModelsProviderIdRoute
   '/models/config': typeof AuthModelsConfigRoute
   '/403': typeof Auth403IndexRoute
@@ -147,6 +163,7 @@ export interface FileRoutesByTo {
   '/models': typeof AuthModelsIndexRoute
   '/tools': typeof AuthToolsIndexRoute
   '/users': typeof AuthUsersIndexRoute
+  '/inboxes/$inboxId/settings': typeof AuthInboxesInboxIdSettingsRoute
   '/settings/inboxes': typeof AuthSettingsInboxesIndexRoute
 }
 export interface FileRoutesById {
@@ -158,6 +175,7 @@ export interface FileRoutesById {
   '/register/': typeof RegisterIndexRoute
   '/_auth/agents/$agentId': typeof AuthAgentsAgentIdRoute
   '/_auth/agents/new': typeof AuthAgentsNewRoute
+  '/_auth/inboxes/new': typeof AuthInboxesNewRoute
   '/_auth/models/$providerId': typeof AuthModelsProviderIdRoute
   '/_auth/models/config': typeof AuthModelsConfigRoute
   '/_auth/403/': typeof Auth403IndexRoute
@@ -167,6 +185,7 @@ export interface FileRoutesById {
   '/_auth/models/': typeof AuthModelsIndexRoute
   '/_auth/tools/': typeof AuthToolsIndexRoute
   '/_auth/users/': typeof AuthUsersIndexRoute
+  '/_auth/inboxes/$inboxId/settings': typeof AuthInboxesInboxIdSettingsRoute
   '/_auth/settings/inboxes/': typeof AuthSettingsInboxesIndexRoute
 }
 export interface FileRouteTypes {
@@ -178,6 +197,7 @@ export interface FileRouteTypes {
     | '/register/'
     | '/agents/$agentId'
     | '/agents/new'
+    | '/inboxes/new'
     | '/models/$providerId'
     | '/models/config'
     | '/403/'
@@ -187,6 +207,7 @@ export interface FileRouteTypes {
     | '/models/'
     | '/tools/'
     | '/users/'
+    | '/inboxes/$inboxId/settings'
     | '/settings/inboxes/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -196,6 +217,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/agents/$agentId'
     | '/agents/new'
+    | '/inboxes/new'
     | '/models/$providerId'
     | '/models/config'
     | '/403'
@@ -205,6 +227,7 @@ export interface FileRouteTypes {
     | '/models'
     | '/tools'
     | '/users'
+    | '/inboxes/$inboxId/settings'
     | '/settings/inboxes'
   id:
     | '__root__'
@@ -215,6 +238,7 @@ export interface FileRouteTypes {
     | '/register/'
     | '/_auth/agents/$agentId'
     | '/_auth/agents/new'
+    | '/_auth/inboxes/new'
     | '/_auth/models/$providerId'
     | '/_auth/models/config'
     | '/_auth/403/'
@@ -224,6 +248,7 @@ export interface FileRouteTypes {
     | '/_auth/models/'
     | '/_auth/tools/'
     | '/_auth/users/'
+    | '/_auth/inboxes/$inboxId/settings'
     | '/_auth/settings/inboxes/'
   fileRoutesById: FileRoutesById
 }
@@ -335,6 +360,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthModelsProviderIdRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/_auth/inboxes/new': {
+      id: '/_auth/inboxes/new'
+      path: '/inboxes/new'
+      fullPath: '/inboxes/new'
+      preLoaderRoute: typeof AuthInboxesNewRouteImport
+      parentRoute: typeof AuthRoute
+    }
     '/_auth/agents/new': {
       id: '/_auth/agents/new'
       path: '/agents/new'
@@ -356,12 +388,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthSettingsInboxesIndexRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/_auth/inboxes/$inboxId/settings': {
+      id: '/_auth/inboxes/$inboxId/settings'
+      path: '/inboxes/$inboxId/settings'
+      fullPath: '/inboxes/$inboxId/settings'
+      preLoaderRoute: typeof AuthInboxesInboxIdSettingsRouteImport
+      parentRoute: typeof AuthRoute
+    }
   }
 }
 
 interface AuthRouteChildren {
   AuthAgentsAgentIdRoute: typeof AuthAgentsAgentIdRoute
   AuthAgentsNewRoute: typeof AuthAgentsNewRoute
+  AuthInboxesNewRoute: typeof AuthInboxesNewRoute
   AuthModelsProviderIdRoute: typeof AuthModelsProviderIdRoute
   AuthModelsConfigRoute: typeof AuthModelsConfigRoute
   Auth403IndexRoute: typeof Auth403IndexRoute
@@ -371,12 +411,14 @@ interface AuthRouteChildren {
   AuthModelsIndexRoute: typeof AuthModelsIndexRoute
   AuthToolsIndexRoute: typeof AuthToolsIndexRoute
   AuthUsersIndexRoute: typeof AuthUsersIndexRoute
+  AuthInboxesInboxIdSettingsRoute: typeof AuthInboxesInboxIdSettingsRoute
   AuthSettingsInboxesIndexRoute: typeof AuthSettingsInboxesIndexRoute
 }
 
 const AuthRouteChildren: AuthRouteChildren = {
   AuthAgentsAgentIdRoute: AuthAgentsAgentIdRoute,
   AuthAgentsNewRoute: AuthAgentsNewRoute,
+  AuthInboxesNewRoute: AuthInboxesNewRoute,
   AuthModelsProviderIdRoute: AuthModelsProviderIdRoute,
   AuthModelsConfigRoute: AuthModelsConfigRoute,
   Auth403IndexRoute: Auth403IndexRoute,
@@ -386,6 +428,7 @@ const AuthRouteChildren: AuthRouteChildren = {
   AuthModelsIndexRoute: AuthModelsIndexRoute,
   AuthToolsIndexRoute: AuthToolsIndexRoute,
   AuthUsersIndexRoute: AuthUsersIndexRoute,
+  AuthInboxesInboxIdSettingsRoute: AuthInboxesInboxIdSettingsRoute,
   AuthSettingsInboxesIndexRoute: AuthSettingsInboxesIndexRoute,
 }
 

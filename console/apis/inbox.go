@@ -67,6 +67,53 @@ func CreateWidgetInbox(ctx *gin.Context) {
 	responses.SuccessHttpResp(ctx, resp)
 }
 
+func QryInbox(ctx *gin.Context) {
+	inboxId := ctx.Param("inbox_id")
+	if inboxId == "" {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	code, resp := consoleServices.GetInbox(ctxs.ToCtx(ctx), inboxId)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, resp)
+}
+
+func UpdateInbox(ctx *gin.Context) {
+	inboxId := ctx.Param("inbox_id")
+	if inboxId == "" {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	var req consoleModels.UpdateInboxReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_REQ_BODY_ILLEGAL)
+		return
+	}
+	code, resp := consoleServices.UpdateInbox(ctxs.ToCtx(ctx), inboxId, &req)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, resp)
+}
+
+func DeleteInbox(ctx *gin.Context) {
+	inboxId := ctx.Param("inbox_id")
+	if inboxId == "" {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
+		return
+	}
+	code := consoleServices.DeleteInbox(ctxs.ToCtx(ctx), inboxId)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, nil)
+}
+
 func QryInboxMembers(ctx *gin.Context) {
 	inboxId := ctx.Param("inbox_id")
 	if inboxId == "" {

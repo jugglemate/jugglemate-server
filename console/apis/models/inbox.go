@@ -60,3 +60,10 @@ type InboxMembersResp struct {
 type ReplaceInboxMembersReq struct {
 	UserIds []string `json:"user_ids"`
 }
+
+// UpdateInboxReq 更新收件箱请求体。
+// Name 为必填；WelcomeMessage 仅对网站挂件（widget）渠道生效。
+type UpdateInboxReq struct {
+	Name           string `json:"name"`
+	WelcomeMessage string `json:"welcome_message"`
+}

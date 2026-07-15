@@ -1,4 +1,4 @@
-import { Menu, Layout, theme, Flex, Grid, Drawer, Button } from "antd";
+import { Menu, Layout, theme, Flex, Grid, Drawer, Button, ConfigProvider } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "@tanstack/react-router";
 import {
@@ -19,12 +19,12 @@ import {
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { APP_BRAND_NAME, APP_FAVICON_SRC } from "@/utils/constants";
+import { APP_BRAND_NAME } from "@/utils/constants";
+import { BRAND } from "@/utils/brandColors";
 import { useAuthStore } from "@/stores/auth";
 import { useSettingsStore } from "@/stores/settings";
 import type { MenuItem as MenuItemType } from "@/api/schemas";
 import type { MenuProps } from "antd";
-import { UserMenu } from "../UserMenu";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import "./index.css";
@@ -75,7 +75,7 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   IconLucideCpu: Cpu,
 };
 
-function renderMenuIcon(icon: string | null, size = 16) {
+function renderMenuIcon(icon: string | null, size = 18) {
   const Icon = (icon && MENU_ICON_MAP[icon]) || CircleDashed;
   return <Icon size={size} />;
 }
@@ -85,7 +85,7 @@ function buildMenuItems(
   token: ReturnType<typeof theme.useToken>["token"],
   t: TFunction,
   collapsed = false,
-  iconSize = 16,
+  iconSize = 18,
   parentKeys: string[] = [],
 ): BuildMenuResult {
   const sorted = menus.filter((m) => !m.hidden).sort((a, b) => a.sort - b.sort);
@@ -119,7 +119,7 @@ function buildMenuItems(
                   width: 6,
                   height: 6,
                   borderRadius: "50%",
-                  background: token.colorTextQuaternary,
+                  background: BRAND.sidebarTextMuted,
                   display: "inline-block",
                 }}
               />
@@ -128,7 +128,7 @@ function buildMenuItems(
             <span
               style={{
                 fontSize: token.fontSizeSM,
-                color: token.colorTextQuaternary,
+                color: BRAND.sidebarTextMuted,
               }}
             >
               {label}
@@ -169,8 +169,6 @@ function buildMenuItems(
 export function Sidebar() {
   const { t } = useTranslation();
   const menus = useAuthStore((s) => s.menus);
-  const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
   const collapsed = useSettingsStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
   const toggleSidebar = useSettingsStore((s) => s.toggleSidebar);
@@ -181,8 +179,8 @@ export function Sidebar() {
   const isMobile = !screens.lg;
   const mobileOpen = collapsed;
   const builtMenu = useMemo(
-    () => buildMenuItems(menus, token, t, !isMobile && collapsed, token.size),
-    [menus, token, t, isMobile, collapsed, token.size],
+    () => buildMenuItems(menus, token, t, !isMobile && collapsed, 18),
+    [menus, token, t, isMobile, collapsed],
   );
   const { selectedKey, routeOpenKeys } = useMemo(() => {
     const chain = builtMenu.pathToKeyChain[location.pathname] ?? [];
@@ -206,168 +204,146 @@ export function Sidebar() {
     });
   }, [location.pathname, routeOpenKeysSig]);
 
-  const userMenuItems: MenuProps["items"] = [
-    {
-      key: "logout",
-      label: t("userMenu.signOut"),
-      onClick: () => {
-        if (isMobile) {
-          setSidebarCollapsed(false);
-        }
-        logout();
-        void navigate({ to: "/login" });
-      },
-    },
-  ];
-
-  const sidebarContent = (isCollapsed: boolean, omitBrandToggle = false) => (
+  /* TIPS: 侧边栏采用固定深色导航（对齐设计稿），与主内容区的浅/深主题解耦。
+     Menu 的深色文字对比度通过嵌套 dark 算法的 ConfigProvider 保证，选中项渲染为品牌蓝胶囊。 */
+  const brandBlock = (isCollapsed: boolean) => (
     <Flex
-      vertical
+      align="center"
+      gap={token.marginSM}
       style={{
-        height: "100%",
+        minHeight: 40,
+        paddingInline: isCollapsed ? 0 : token.paddingXXS,
+        justifyContent: isCollapsed ? "center" : "flex-start",
         width: "100%",
         minWidth: 0,
-        maxWidth: "100%",
-        boxSizing: "border-box",
+      }}
+    >
+      <Flex
+        align="center"
+        justify="center"
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: token.borderRadiusLG,
+          background: BRAND.primary,
+          color: "#ffffff",
+          flexShrink: 0,
+        }}
+      >
+        <Bot size={20} />
+      </Flex>
+      {!isCollapsed ? (
+        <span
+          style={{
+            fontWeight: 700,
+            fontSize: token.fontSizeLG,
+            color: BRAND.sidebarText,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            minWidth: 0,
+          }}
+        >
+          {APP_BRAND_NAME}
+        </span>
+      ) : null}
+    </Flex>
+  );
+
+  const sidebarContent = (isCollapsed: boolean, showToggle = true) => (
+    <ConfigProvider
+      theme={{
+        algorithm: theme.darkAlgorithm,
+        token: {
+          colorPrimary: BRAND.primary,
+          borderRadius: 8,
+          borderRadiusSM: 8,
+        },
+        components: {
+          Menu: {
+            itemBg: "transparent",
+            itemColor: BRAND.sidebarItemText,
+            itemHoverBg: BRAND.sidebarItemHoverBg,
+            itemHoverColor: BRAND.sidebarText,
+            itemSelectedBg: BRAND.primary,
+            itemSelectedColor: "#ffffff",
+            itemActiveBg: BRAND.primary,
+            subMenuItemSelectedColor: "#ffffff",
+            itemBorderRadius: 8,
+            itemMarginInline: 0,
+            itemHeight: 42,
+            iconSize: 18,
+            iconMarginInlineEnd: 12,
+          },
+        },
       }}
     >
       <Flex
         vertical
-        justify="center"
-        align={isCollapsed ? "center" : "stretch"}
         style={{
-          paddingBlock: token.paddingSM,
-          /* Collapsed rail is 64px: keep horizontal padding minimal so 40px brand / icons are not clipped by Sider overflow. */
-          paddingInline: isCollapsed ? token.paddingXXS : token.paddingSM,
-          minHeight: 64,
-          flexShrink: 0,
+          height: "100%",
           width: "100%",
           minWidth: 0,
-          maxWidth: "100%",
           boxSizing: "border-box",
+          background: BRAND.sidebarBg,
+          padding: token.padding,
         }}
       >
         <Flex
           align="center"
-          gap={token.marginSM}
-          style={{
-            width: "100%",
-            minWidth: 0,
-            maxWidth: "100%",
-            boxSizing: "border-box",
-            /* Collapsed: outer row already has paddingSM; extra inline padding would clip the 40px brand box. */
-            paddingInline: isCollapsed ? 0 : token.paddingXS,
-            minHeight: 40,
-            justifyContent: isCollapsed ? "center" : "flex-start",
-          }}
+          justify="space-between"
+          style={{ marginBottom: token.marginLG, minHeight: 40 }}
         >
-          {isCollapsed ? (
-            <div className="sidebar-collapsed-brand">
-              <div className="sidebar-collapsed-brand__logoLayer">
-                <img
-                  src={APP_FAVICON_SRC}
-                  alt="logo"
-                  width={24}
-                  height={24}
-                  style={{
-                    borderRadius: token.borderRadius,
-                    display: "block",
-                    objectFit: "contain",
-                  }}
-                />
-              </div>
-              <div className="sidebar-collapsed-brand__toggleLayer">
-                <Button
-                  type="text"
-                  size="small"
-                  className="sidebar-collapsed-brand__toggle"
-                  onClick={toggleSidebar}
-                  icon={<PanelLeft size={token.size} />}
-                  aria-label={t("common.toggleSidebar")}
-                />
-              </div>
-            </div>
-          ) : (
-            <>
-              <Flex
-                align="center"
-                gap={token.marginSM}
-                style={{
-                  minWidth: 0,
-                  flex: 1,
-                  overflow: "hidden",
-                }}
-              >
-                <img
-                  src={APP_FAVICON_SRC}
-                  alt="logo"
-                  width={24}
-                  height={24}
-                  style={{
-                    borderRadius: token.borderRadius,
-                    display: "block",
-                    flexShrink: 0,
-                    objectFit: "contain",
-                  }}
-                />
-                <div
-                  style={{
-                    minWidth: 0,
-                    flex: 1,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    fontWeight: 600,
-                    fontSize: token.fontSizeLG,
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {APP_BRAND_NAME}
-                </div>
-              </Flex>
-              {!omitBrandToggle ? (
-                <Button
-                  type="text"
-                  size="small"
-                  onClick={toggleSidebar}
-                  icon={<PanelLeft size={token.size} />}
-                  aria-label={t("common.toggleSidebar")}
-                  style={{ flexShrink: 0 }}
-                />
-              ) : null}
-            </>
-          )}
+          {brandBlock(isCollapsed)}
+          {showToggle && !isCollapsed ? (
+            <Button
+              type="text"
+              size="small"
+              onClick={toggleSidebar}
+              icon={<PanelLeft size={18} />}
+              aria-label={t("common.toggleSidebar")}
+              style={{ color: BRAND.sidebarItemText, flexShrink: 0 }}
+            />
+          ) : null}
         </Flex>
+        <Menu
+          mode="inline"
+          selectedKeys={selectedKey ? [selectedKey] : []}
+          openKeys={openKeys}
+          onOpenChange={(keys) => setOpenKeys(keys as string[])}
+          items={builtMenu.items}
+          getPopupContainer={() => document.body}
+          onClick={({ key }) => {
+            const path = builtMenu.keyToPath[String(key)];
+            if (!path) return;
+            if (isMobile) {
+              setSidebarCollapsed(false);
+            }
+            void navigate({ to: path });
+          }}
+          style={{
+            borderRight: "none",
+            flex: 1,
+            minWidth: 0,
+            width: "100%",
+            boxSizing: "border-box",
+            overflowX: "hidden",
+            overflowY: "auto",
+            background: "transparent",
+          }}
+        />
+        {isCollapsed && showToggle ? (
+          <Button
+            type="text"
+            size="small"
+            onClick={toggleSidebar}
+            icon={<PanelLeft size={18} />}
+            aria-label={t("common.toggleSidebar")}
+            style={{ color: BRAND.sidebarItemText, marginTop: token.marginSM }}
+          />
+        ) : null}
       </Flex>
-      <Menu
-        mode="inline"
-        selectedKeys={selectedKey ? [selectedKey] : []}
-        openKeys={openKeys}
-        onOpenChange={(keys) => setOpenKeys(keys as string[])}
-        items={builtMenu.items}
-        getPopupContainer={() => document.body}
-        onClick={({ key }) => {
-          const path = builtMenu.keyToPath[String(key)];
-          if (!path) return;
-          if (isMobile) {
-            setSidebarCollapsed(false);
-          }
-          void navigate({ to: path });
-        }}
-        style={{
-          borderRight: "none",
-          flex: 1,
-          minWidth: 0,
-          maxWidth: "100%",
-          width: "100%",
-          boxSizing: "border-box",
-          overflowX: "hidden",
-          overflowY: "auto",
-          background: "transparent",
-        }}
-      />
-      <UserMenu collapsed={isCollapsed} user={user} userMenuItems={userMenuItems} />
-    </Flex>
+    </ConfigProvider>
   );
 
   if (isMobile) {
@@ -376,11 +352,11 @@ export function Sidebar() {
         open={mobileOpen}
         placement="left"
         onClose={() => setSidebarCollapsed(false)}
-        size={320}
+        size={280}
         styles={{
           body: {
             padding: 0,
-            background: token.colorBgLayout,
+            background: BRAND.sidebarBg,
             overflow: "hidden",
             maxWidth: "100%",
             boxSizing: "border-box",
@@ -389,7 +365,7 @@ export function Sidebar() {
           mask: { opacity: 0.5 },
         }}
       >
-        {sidebarContent(false, true)}
+        {sidebarContent(false, false)}
       </Drawer>
     );
   }
@@ -397,12 +373,12 @@ export function Sidebar() {
   return (
     <Sider
       key={collapsed ? "collapsed" : "expanded"}
-      theme="light"
+      theme="dark"
       collapsible
       collapsed={collapsed}
       trigger={null}
       width={240}
-      collapsedWidth={64}
+      collapsedWidth={72}
       breakpoint="lg"
       onBreakpoint={(broken) => {
         if (broken) {
@@ -410,8 +386,7 @@ export function Sidebar() {
         }
       }}
       style={{
-        borderRight: `1px solid ${token.colorBorderSecondary}`,
-        background: token.colorBgLayout,
+        background: BRAND.sidebarBg,
         alignSelf: "stretch",
         minHeight: "100vh",
         overflow: "visible",
