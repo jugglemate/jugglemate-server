@@ -219,14 +219,10 @@ function InboxesPage() {
   };
 
   return (
-    <Flex
-      vertical
-      gap={token.marginLG}
-      style={{ minHeight: 0, maxWidth: 1120, width: "100%", margin: "0 auto" }}
-    >
+    <Flex vertical gap={token.marginLG} style={{ minHeight: 0 }}>
       <Flex justify="space-between" align="flex-end" gap={token.margin} wrap="wrap">
         <Flex vertical gap={token.marginXXS} style={{ minWidth: 0 }}>
-          <Title level={4} style={{ margin: 0 }}>
+          <Title level={3} style={{ margin: 0 }}>
             {t("inboxes.connectedTitle")}
           </Title>
           <Text type="secondary">{t("inboxes.connectedSubtitle")}</Text>

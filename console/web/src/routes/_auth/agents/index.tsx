@@ -380,7 +380,7 @@ function AgentsPage() {
   };
 
   return (
-    <Flex vertical gap={token.marginLG} style={{ maxWidth: 1200, width: "100%", margin: "0 auto" }}>
+    <Flex vertical gap={token.marginLG}>
       <Flex justify="space-between" align="flex-start" gap={token.marginMD} wrap="wrap">
         <Flex vertical gap={token.marginXXS}>
           <Title level={3} style={{ margin: 0 }}>

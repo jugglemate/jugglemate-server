@@ -452,7 +452,7 @@ function TeamMembersPage() {
   }, [data?.list]);
 
   return (
-    <Flex vertical gap={token.marginLG} style={{ maxWidth: 1120, width: "100%", margin: "0 auto" }}>
+    <Flex vertical gap={token.marginLG}>
       <Toolbar
         keywordInput={keywordInput}
         onKeywordChange={setKeywordInput}
