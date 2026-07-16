@@ -359,6 +359,7 @@
     "listTitle": "智能体",
     "listSubtitle": "管理并监控你的 AI 智能体在各渠道的表现。",
     "addAgent": "新增智能体",
+    "searchPlaceholder": "按名称搜索…",
     "viewGrid": "网格",
     "viewList": "列表",
     "showingAgents": "共 {{count}} 个智能体",

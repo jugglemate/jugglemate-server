@@ -359,6 +359,7 @@
     "listTitle": "AI Agents",
     "listSubtitle": "Manage and monitor your AI agents across channels.",
     "addAgent": "Add Agent",
+    "searchPlaceholder": "Search by name...",
     "viewGrid": "Grid",
     "viewList": "List",
     "showingAgents": "Showing {{count}} agents",
