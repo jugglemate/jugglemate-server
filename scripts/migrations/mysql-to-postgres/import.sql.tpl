@@ -30,6 +30,60 @@ INSERT INTO customerinboxrels (id,customer_id,inbox_id,source_id,created_time,up
 INSERT INTO inboxmembers (id,inbox_id,member_id,created_time,app_key) SELECT id, convert_from(decode(inbox_id_hex,'hex'),'UTF8'), convert_from(decode(member_id_hex,'hex'),'UTF8'), created_time, convert_from(decode(app_key_hex,'hex'),'UTF8') FROM stage_inboxmembers;
 INSERT INTO tickets (id,ticket_id,source_id,assignee_id,customer_id,inbox_id,channel_type,status,created_time,updated_time,app_key) SELECT id, convert_from(decode(ticket_id_hex,'hex'),'UTF8'), convert_from(decode(source_id_hex,'hex'),'UTF8'), convert_from(decode(assignee_id_hex,'hex'),'UTF8'), convert_from(decode(customer_id_hex,'hex'),'UTF8'), convert_from(decode(inbox_id_hex,'hex'),'UTF8'), convert_from(decode(channel_type_hex,'hex'),'UTF8'), status, created_time, updated_time, convert_from(decode(app_key_hex,'hex'),'UTF8') FROM stage_tickets;
 
+-- TIPS: 000002 在 MySQL 用户导入前执行，历史 Agent/Bot 的 app_key 暂时为空。
+-- 必须先证明每条历史记录都只有一个候选 AppKey，再在本事务内回填；无法映射或跨应用
+-- 冲突时直接回滚全部业务数据，禁止让无租户归属的 Agent/Bot 进入新版本运行态。
+CREATE TEMP TABLE stage_agent_app_keys ON COMMIT DROP AS
+SELECT a.id, MIN(u.app_key) AS app_key, COUNT(DISTINCT u.app_key) AS candidate_count
+FROM agents a
+LEFT JOIN users u ON u.user_id = a.owner_id
+WHERE a.app_key = ''
+GROUP BY a.id;
+
+DO $$
+DECLARE invalid_count BIGINT;
+BEGIN
+	SELECT COUNT(*) INTO invalid_count FROM stage_agent_app_keys WHERE candidate_count <> 1;
+	IF invalid_count > 0 THEN
+		RAISE EXCEPTION '存在 % 个历史 Agent 无法唯一映射 AppKey，迁移已回滚', invalid_count;
+	END IF;
+END $$;
+
+UPDATE agents a
+SET app_key = mapped.app_key, updated_at = now()
+FROM stage_agent_app_keys mapped
+WHERE a.id = mapped.id;
+
+CREATE TEMP TABLE stage_bot_app_keys ON COMMIT DROP AS
+SELECT b.id, MIN(candidate.app_key) AS app_key, COUNT(DISTINCT candidate.app_key) AS candidate_count
+FROM bots b
+LEFT JOIN (
+	SELECT binding.bot_id, a.app_key
+	FROM bot_agent_bindings binding
+	JOIN agents a ON a.id = binding.agent_id
+	WHERE a.app_key <> ''
+	UNION
+	SELECT owned.id AS bot_id, u.app_key
+	FROM bots owned
+	JOIN users u ON u.user_id = owned.owner_id
+) candidate ON candidate.bot_id = b.id
+WHERE b.app_key = ''
+GROUP BY b.id;
+
+DO $$
+DECLARE invalid_count BIGINT;
+BEGIN
+	SELECT COUNT(*) INTO invalid_count FROM stage_bot_app_keys WHERE candidate_count <> 1;
+	IF invalid_count > 0 THEN
+		RAISE EXCEPTION '存在 % 个历史 Bot 无法唯一映射 AppKey，迁移已回滚', invalid_count;
+	END IF;
+END $$;
+
+UPDATE bots b
+SET app_key = mapped.app_key, updated_at = now()
+FROM stage_bot_app_keys mapped
+WHERE b.id = mapped.id;
+
 SELECT setval(pg_get_serial_sequence('apps','id'), COALESCE(MAX(id),1), MAX(id) IS NOT NULL) FROM apps;
 SELECT setval(pg_get_serial_sequence('appexts','id'), COALESCE(MAX(id),1), MAX(id) IS NOT NULL) FROM appexts;
 SELECT setval(pg_get_serial_sequence('users','id'), COALESCE(MAX(id),1), MAX(id) IS NOT NULL) FROM users;

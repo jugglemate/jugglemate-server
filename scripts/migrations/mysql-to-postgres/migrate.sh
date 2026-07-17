@@ -70,6 +70,9 @@ verify_data() {
   done
   [[ "$(pg_query "SELECT COUNT(*) FROM inboxmembers im LEFT JOIN inboxes i ON i.app_key=im.app_key AND i.inbox_id=im.inbox_id WHERE i.id IS NULL")" == "0" ]] || { echo "存在无主 InboxMember" >&2; exit 1; }
   [[ "$(pg_query "SELECT COUNT(*) FROM apps WHERE app_key='' OR app_secret=''")" == "0" ]] || { echo "存在空 AppKey/AppSecret" >&2; exit 1; }
+  [[ "$(pg_query "SELECT COUNT(*) FROM agents WHERE app_key=''")" == "0" ]] || { echo "存在未归属 AppKey 的 Agent" >&2; exit 1; }
+  [[ "$(pg_query "SELECT COUNT(*) FROM bots WHERE app_key=''")" == "0" ]] || { echo "存在未归属 AppKey 的 Bot" >&2; exit 1; }
+  [[ "$(pg_query "SELECT COUNT(*) FROM bot_agent_bindings binding JOIN bots b ON b.id=binding.bot_id JOIN agents a ON a.id=binding.agent_id WHERE binding.status='active' AND b.app_key<>a.app_key")" == "0" ]] || { echo "存在 Agent 与 Bot 跨 AppKey 绑定" >&2; exit 1; }
   echo "迁移校验通过"
 }
 
