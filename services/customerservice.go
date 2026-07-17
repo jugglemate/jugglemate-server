@@ -352,18 +352,26 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 	}
 }
 
-func QryCustomerInfo(ctx context.Context, customerId string) (errs.IMErrorCode, *apiModels.UserInfo) {
+func QryCustomerInfo(ctx context.Context, ticketId string) (errs.IMErrorCode, *apiModels.UserInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	requesterId := ctxs.GetRequesterIdFromCtx(ctx)
-	customerId = strings.TrimSpace(customerId)
+	ticketId = strings.TrimSpace(ticketId)
 	if appkey == "" || requesterId == "" {
 		return errs.IMErrorCode_APP_NOT_LOGIN, nil
 	}
-	if customerId == "" {
+	if ticketId == "" {
 		return errs.IMErrorCode_APP_ParamError, nil
 	}
 
-	customer, err := newCustomerStorageForCustomer().FindByCustomerId(appkey, customerId)
+	ticket, err := newTicketStorageForCustomer().FindByTicketId(appkey, ticketId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if ticket == nil || strings.TrimSpace(ticket.CustomerId) == "" {
+		return errs.IMErrorCode_APP_USER_NOT_EXIST, nil
+	}
+
+	customer, err := newCustomerStorageForCustomer().FindByCustomerId(appkey, ticket.CustomerId)
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}

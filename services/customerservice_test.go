@@ -14,8 +14,17 @@ import (
 )
 
 func TestQryCustomerInfo(t *testing.T) {
-	origStorage := newCustomerStorageForCustomer
-	defer func() { newCustomerStorageForCustomer = origStorage }()
+	origCustomerStorage := newCustomerStorageForCustomer
+	origTicketStorage := newTicketStorageForCustomer
+	defer func() {
+		newCustomerStorageForCustomer = origCustomerStorage
+		newTicketStorageForCustomer = origTicketStorage
+	}()
+	ticketStorage := &mockTicketStorage{findTicket: &storageModels.Ticket{
+		TicketId:   "ticket_1",
+		CustomerId: "customer_1",
+	}}
+	newTicketStorageForCustomer = func() storageModels.ITicketStorage { return ticketStorage }
 	newCustomerStorageForCustomer = func() storageModels.ICustomerStorage {
 		return &mockCustomerStorage{customers: map[string]*storageModels.Customer{
 			"customer_1": {CustomerId: "customer_1", Nickname: "Alice", Avator: "alice.png"},
@@ -24,30 +33,54 @@ func TestQryCustomerInfo(t *testing.T) {
 	ctx := context.WithValue(context.Background(), ctxs.CtxKey_AppKey, "app_1")
 	ctx = context.WithValue(ctx, ctxs.CtxKey_RequesterId, "agent_1")
 
-	code, info := QryCustomerInfo(ctx, "customer_1")
+	code, info := QryCustomerInfo(ctx, "ticket_1")
 	if code != errs.IMErrorCode_SUCCESS || info == nil || info.Id != "customer_1" || info.Nickname != "Alice" || info.Avatar != "alice.png" {
 		t.Fatalf("code=%d info=%+v", code, info)
+	}
+	if ticketStorage.findAppkey != "app_1" || ticketStorage.findTicketId != "ticket_1" {
+		t.Fatalf("ticket query appkey=%q ticket_id=%q", ticketStorage.findAppkey, ticketStorage.findTicketId)
 	}
 }
 
 func TestQryCustomerInfoNotFoundAndStorageError(t *testing.T) {
-	origStorage := newCustomerStorageForCustomer
-	defer func() { newCustomerStorageForCustomer = origStorage }()
+	origCustomerStorage := newCustomerStorageForCustomer
+	origTicketStorage := newTicketStorageForCustomer
+	defer func() {
+		newCustomerStorageForCustomer = origCustomerStorage
+		newTicketStorageForCustomer = origTicketStorage
+	}()
 	ctx := context.WithValue(context.Background(), ctxs.CtxKey_AppKey, "app_1")
 	ctx = context.WithValue(ctx, ctxs.CtxKey_RequesterId, "agent_1")
 
+	newTicketStorageForCustomer = func() storageModels.ITicketStorage {
+		return &mockTicketStorage{}
+	}
 	newCustomerStorageForCustomer = func() storageModels.ICustomerStorage {
 		return &mockCustomerStorage{}
 	}
 	if code, _ := QryCustomerInfo(ctx, "missing"); code != errs.IMErrorCode_APP_USER_NOT_EXIST {
-		t.Fatalf("not found code=%d", code)
+		t.Fatalf("ticket not found code=%d", code)
+	}
+
+	newTicketStorageForCustomer = func() storageModels.ITicketStorage {
+		return &mockTicketStorage{err: errors.New("query failed")}
+	}
+	if code, _ := QryCustomerInfo(ctx, "ticket_1"); code != errs.IMErrorCode_APP_INTERNAL_TIMEOUT {
+		t.Fatalf("ticket storage error code=%d", code)
+	}
+
+	newTicketStorageForCustomer = func() storageModels.ITicketStorage {
+		return &mockTicketStorage{findTicket: &storageModels.Ticket{TicketId: "ticket_1", CustomerId: "customer_1"}}
+	}
+	if code, _ := QryCustomerInfo(ctx, "ticket_1"); code != errs.IMErrorCode_APP_USER_NOT_EXIST {
+		t.Fatalf("customer not found code=%d", code)
 	}
 
 	newCustomerStorageForCustomer = func() storageModels.ICustomerStorage {
 		return &mockCustomerStorage{err: errors.New("query failed")}
 	}
-	if code, _ := QryCustomerInfo(ctx, "customer_1"); code != errs.IMErrorCode_APP_INTERNAL_TIMEOUT {
-		t.Fatalf("storage error code=%d", code)
+	if code, _ := QryCustomerInfo(ctx, "ticket_1"); code != errs.IMErrorCode_APP_INTERNAL_TIMEOUT {
+		t.Fatalf("customer storage error code=%d", code)
 	}
 }
 

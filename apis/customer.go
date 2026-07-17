@@ -54,20 +54,25 @@ func parseQryCustomerTicketsReq(ctx *gin.Context) (*models.QryCustomerTicketsReq
 }
 
 func QryCustomerInfo(ctx *gin.Context) {
-	customerId := strings.TrimSpace(ctx.Query("customer_id"))
-	if customerId == "" {
-		customerId = strings.TrimSpace(ctx.Query("customerId"))
-	}
-	if customerId == "" {
+	ticketId := qryCustomerInfoTicketId(ctx)
+	if ticketId == "" {
 		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_ParamError)
 		return
 	}
-	code, resp := services.QryCustomerInfo(ctxs.ToCtx(ctx), customerId)
+	code, resp := services.QryCustomerInfo(ctxs.ToCtx(ctx), ticketId)
 	if code != errs.IMErrorCode_SUCCESS {
 		responses.ErrorHttpResp(ctx, code)
 		return
 	}
 	responses.SuccessHttpResp(ctx, resp)
+}
+
+func qryCustomerInfoTicketId(ctx *gin.Context) string {
+	ticketId := strings.TrimSpace(ctx.Query("ticket_id"))
+	if ticketId == "" {
+		ticketId = strings.TrimSpace(ctx.Query("ticketId"))
+	}
+	return ticketId
 }
 
 func StartWebCustom(ctx *gin.Context) {

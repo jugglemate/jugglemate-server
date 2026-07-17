@@ -636,6 +636,8 @@ type mockTicketStorage struct {
 	revertTicketId   string
 	revertAssigneeId string
 	findTicket       *storageModels.Ticket
+	findAppkey       string
+	findTicketId     string
 	transferAppkey   string
 	transferTicketId string
 	transferOldId    string
@@ -692,6 +694,8 @@ func (s *mockTicketStorage) Delete(appkey, ticketId string) error {
 }
 
 func (s *mockTicketStorage) FindByTicketId(appkey, ticketId string) (*storageModels.Ticket, error) {
+	s.findAppkey = appkey
+	s.findTicketId = ticketId
 	return s.findTicket, s.err
 }
 
