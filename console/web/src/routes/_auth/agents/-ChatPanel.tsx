@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bot, Send } from "lucide-react";
 import { createChatSSE, type SSEEvent } from "@/utils/agentSSE";
+import { BRAND } from "@/utils/brandColors";
 
 interface ChatMsg {
   role: "user" | "assistant";
@@ -116,7 +117,7 @@ export function ChatPanel({
       <Flex
         align="center"
         justify="space-between"
-        style={{ padding: "12px 16px", borderBottom: "1px solid #ECEEF2" }}
+        style={{ padding: "12px 16px", borderBottom: `1px solid ${BRAND.borderLow}` }}
       >
         <Space>
           <Typography.Text strong>{t("agents.chat.title")}</Typography.Text>
@@ -129,8 +130,13 @@ export function ChatPanel({
 
       <div ref={scrollRef} style={{ flex: 1, overflow: "auto", padding: 16 }}>
         {messages.length === 0 ? (
-          <Flex vertical align="center" justify="center" style={{ height: "100%", color: "#999" }}>
-            <Bot size={48} color="#2287fc" />
+          <Flex
+            vertical
+            align="center"
+            justify="center"
+            style={{ height: "100%", color: BRAND.outline }}
+          >
+            <Bot size={48} color={BRAND.primary} />
             <Typography.Text type="secondary" style={{ marginTop: 12 }}>
               {t("agents.chat.empty")}
             </Typography.Text>
@@ -144,8 +150,8 @@ export function ChatPanel({
                     maxWidth: "80%",
                     padding: "8px 12px",
                     borderRadius: 12,
-                    background: m.role === "user" ? "#2287fc" : "#F2F4F7",
-                    color: m.role === "user" ? "#fff" : "#111",
+                    background: m.role === "user" ? BRAND.primaryFill : BRAND.subtleBg,
+                    color: m.role === "user" ? BRAND.onPrimaryFill : BRAND.onSurface,
                     whiteSpace: "pre-wrap",
                     wordBreak: "break-word",
                   }}
@@ -159,7 +165,7 @@ export function ChatPanel({
         )}
       </div>
 
-      <div style={{ padding: 12, borderTop: "1px solid #ECEEF2" }}>
+      <div style={{ padding: 12, borderTop: `1px solid ${BRAND.borderLow}` }}>
         <Space.Compact style={{ width: "100%" }}>
           <Input
             value={input}

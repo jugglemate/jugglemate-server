@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Clock, MessageSquare, User } from "lucide-react";
 import { agentApi } from "@/utils/agentHttp";
+import { BRAND } from "@/utils/brandColors";
 
 const { Text } = Typography;
 
@@ -113,7 +114,7 @@ export function LogsPanel({
                   marginBottom: 12,
                   borderRadius: 12,
                   cursor: "pointer",
-                  border: item.id === selectedId ? "1px solid #2287fc" : undefined,
+                  border: item.id === selectedId ? `1px solid ${BRAND.primary}` : undefined,
                 }}
                 hoverable
                 onClick={() => void openDetail(item)}
@@ -121,7 +122,7 @@ export function LogsPanel({
                 <Space direction="vertical" size={4} style={{ width: "100%" }}>
                   <Space style={{ width: "100%", justifyContent: "space-between" }}>
                     <Space>
-                      <User size={14} color="#8c8c8c" />
+                      <User size={14} color={BRAND.outline} />
                       <Text type="secondary">{item.user_id?.slice(0, 8)}...</Text>
                     </Space>
                     <Tag color={item.status === "active" ? "green" : "default"}>
@@ -130,12 +131,12 @@ export function LogsPanel({
                   </Space>
                   <Space style={{ width: "100%", justifyContent: "space-between" }}>
                     <Space>
-                      <MessageSquare size={14} color="#2287fc" />
+                      <MessageSquare size={14} color={BRAND.primary} />
                       <Text>{t("agents.logs.msgCount", { count: item.message_count })}</Text>
                     </Space>
                     <Text type="secondary">{item.total_tokens} tokens</Text>
                     <Space>
-                      <Clock size={14} color="#8c8c8c" />
+                      <Clock size={14} color={BRAND.outline} />
                       <Text type="secondary">
                         {item.last_active_at
                           ? new Date(item.last_active_at).toLocaleString()

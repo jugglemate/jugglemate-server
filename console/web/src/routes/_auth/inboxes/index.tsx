@@ -55,7 +55,7 @@ const CHANNEL_VISUAL: Record<Inbox["channel_type"], { icon: LucideIcon; bg: stri
   {
     widget: { icon: Globe, bg: BRAND.primarySoft, fg: BRAND.primary },
     telegram: { icon: Send, bg: BRAND.tertiarySoft, fg: BRAND.tertiary },
-    juggleim: { icon: MessageSquare, bg: "rgba(101, 80, 185, 0.1)", fg: BRAND.aiAccent },
+    juggleim: { icon: MessageSquare, bg: BRAND.aiAccentSoft, fg: BRAND.aiAccent },
   };
 
 /**

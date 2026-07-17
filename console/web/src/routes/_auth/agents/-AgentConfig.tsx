@@ -47,7 +47,7 @@ function idsOf(value: unknown): string[] {
 
 const cardStyle = {
   borderRadius: 16,
-  border: "1px solid #E5E7EB",
+  border: `1px solid ${BRAND.borderLow}`,
   boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
 } as const;
 
@@ -359,8 +359,8 @@ export function AgentConfigView({ mode, agentId }: { mode: "create" | "edit"; ag
                 rows={10}
                 placeholder={t("agents.promptPlaceholder")}
                 style={{
-                  background: BRAND.sidebarBg,
-                  color: "#e2e8f0",
+                  background: BRAND.codeBg,
+                  color: BRAND.codeText,
                   fontFamily:
                     "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
                   fontSize: 13,

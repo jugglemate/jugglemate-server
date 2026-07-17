@@ -32,7 +32,7 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BRAND } from "@/utils/brandColors";
-import { httpClient } from "@/utils/http";
+import { ApiError, httpClient } from "@/utils/http";
 import { agentApi } from "@/utils/agentHttp";
 import { USER_ENDPOINTS } from "@/api/user";
 import {
@@ -66,7 +66,7 @@ const CHANNEL_VISUAL: Record<Inbox["channel_type"], { icon: LucideIcon; bg: stri
   {
     widget: { icon: Globe, bg: BRAND.primarySoft, fg: BRAND.primary },
     telegram: { icon: Send, bg: BRAND.tertiarySoft, fg: BRAND.tertiary },
-    juggleim: { icon: MessageSquare, bg: "rgba(101, 80, 185, 0.1)", fg: BRAND.aiAccent },
+    juggleim: { icon: MessageSquare, bg: BRAND.aiAccentSoft, fg: BRAND.aiAccent },
   };
 
 function SettingsCard({ children }: { children: React.ReactNode }) {
@@ -492,9 +492,13 @@ function CollaboratorsTab({ inboxId }: { inboxId: string }) {
 }
 
 /* ---------- AI Agent ---------- */
+/** 系统内置 Agent 的 ownerId，与后端 agent/service 保持一致。 */
+const SYSTEM_OWNER_ID = "system";
+
 interface AgentListItem {
   agentId: string;
   agentName: string;
+  ownerId: string;
   primaryModel?: string;
   status: string;
 }
@@ -529,9 +533,16 @@ function AIAgentTab({ inboxId }: { inboxId: string }) {
       void queryClient.invalidateQueries({ queryKey: ["inbox-agent", inboxId] });
       message.success(t("common.updated"));
     },
-    onError: () => message.error(t("agentAdmin.saveFailed")),
+    // TIPS: 绑定失败的原因（如智能体不可关联、Ticket 群同步失败）只有后端知道，
+    // 有 msg 时直接透出，避免用户只看到一个笼统的“保存失败”。
+    onError: (error) =>
+      message.error(
+        error instanceof ApiError && error.message ? error.message : t("agentAdmin.saveFailed"),
+      ),
   });
-  const agents = agentsQuery.data?.items ?? [];
+  // TIPS: Agent 列表会在首页前置系统内置 Agent（ownerId=system），但它没有关联 Bot，
+  // 无法绑定到 Inbox（绑定后 Bot 需要加入 Ticket 群），因此不在此处作为可选项展示。
+  const agents = (agentsQuery.data?.items ?? []).filter((a) => a.ownerId !== SYSTEM_OWNER_ID);
 
   return (
     <Flex vertical gap={token.marginLG}>

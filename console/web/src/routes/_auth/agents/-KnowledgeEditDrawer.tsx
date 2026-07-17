@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { File as FileIcon } from "lucide-react";
 import { agentApi } from "@/utils/agentHttp";
+import { BRAND } from "@/utils/brandColors";
 
 export interface KnowledgeRecord {
   id: string;
@@ -140,18 +141,18 @@ export function KnowledgeEditDrawer({
             </Form.Item>
           )}
           {detail ? (
-            <div style={{ padding: 16, background: "#FAFAFA", borderRadius: 8 }}>
+            <div style={{ padding: 16, background: BRAND.subtleBg, borderRadius: 8 }}>
               <div style={{ marginBottom: 8 }}>
                 <b>{t("models.colStatus")}：</b>
                 {STATUS_LABELS[detail.status ?? ""] ?? detail.status}
               </div>
-              <div style={{ color: "#666" }}>
+              <div style={{ color: BRAND.onSurfaceVariant }}>
                 {t("agents.knowledge.docCount")}：{detail.stats?.documentCount ?? 0}
               </div>
-              <div style={{ color: "#666" }}>
+              <div style={{ color: BRAND.onSurfaceVariant }}>
                 {t("agents.knowledge.vectorCount")}：{detail.stats?.vectorCount ?? 0}
               </div>
-              <div style={{ color: "#666" }}>
+              <div style={{ color: BRAND.onSurfaceVariant }}>
                 {t("page.createdAt", { defaultValue: "创建时间" })}：
                 {detail.createdAt ? new Date(detail.createdAt).toLocaleString() : "--"}
               </div>

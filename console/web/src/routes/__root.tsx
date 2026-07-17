@@ -6,6 +6,7 @@ import enUS from "antd/locale/en_US";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useSettingsStore } from "@/stores/settings";
 import { useAppTheme } from "@/hooks/useAppTheme";
+import { applyBrandPalette } from "@/utils/brandColors";
 import { NotFound } from "@/components/NotFound";
 import { RouteError } from "@/components/RouteError";
 import type { AppLocale } from "@/i18n/types";
@@ -47,6 +48,7 @@ function RootComponent() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", darkMode ? "dark" : "light");
+    applyBrandPalette(darkMode);
   }, [darkMode]);
 
   return (

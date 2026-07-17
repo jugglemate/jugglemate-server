@@ -80,9 +80,9 @@ function Stepper({ current, labels }: { current: number; labels: string[] }) {
       {labels.map((label, index) => {
         const done = index < current;
         const active = index === current;
-        const circleBg = done || active ? BRAND.primary : BRAND.cardBg;
-        const circleColor = done || active ? "#ffffff" : BRAND.outline;
-        const circleBorder = done || active ? BRAND.primary : BRAND.borderLow;
+        const circleBg = done || active ? BRAND.primaryFill : BRAND.cardBg;
+        const circleColor = done || active ? BRAND.onPrimaryFill : BRAND.outline;
+        const circleBorder = done || active ? BRAND.primaryFill : BRAND.borderLow;
         return (
           <Flex
             key={label}
@@ -123,7 +123,7 @@ function Stepper({ current, labels }: { current: number; labels: string[] }) {
                   height: 2,
                   margin: "0 8px",
                   marginBottom: 22,
-                  background: index < current ? BRAND.primary : BRAND.borderLow,
+                  background: index < current ? BRAND.primaryFill : BRAND.borderLow,
                 }}
               />
             ) : null}
@@ -189,7 +189,7 @@ const CHANNEL_CARDS: Array<{
   {
     key: "juggleim",
     icon: MessageSquare,
-    bg: "rgba(101, 80, 185, 0.1)",
+    bg: BRAND.aiAccentSoft,
     fg: BRAND.aiAccent,
     titleKey: "inboxes.juggleIMTitle",
     descKey: "inboxes.juggleIMDesc",
@@ -469,7 +469,7 @@ function ConfigureStep({
       ? { icon: Globe, bg: BRAND.primarySoft, fg: BRAND.primary }
       : channel === "telegram"
         ? { icon: Send, bg: BRAND.tertiarySoft, fg: BRAND.tertiary }
-        : { icon: MessageSquare, bg: "rgba(101, 80, 185, 0.1)", fg: BRAND.aiAccent };
+        : { icon: MessageSquare, bg: BRAND.aiAccentSoft, fg: BRAND.aiAccent };
   const Icon = visual.icon;
 
   return (

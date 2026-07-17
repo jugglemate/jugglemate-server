@@ -170,6 +170,7 @@ export function Sidebar() {
   const { t } = useTranslation();
   const menus = useAuthStore((s) => s.menus);
   const collapsed = useSettingsStore((s) => s.sidebarCollapsed);
+  const darkMode = useSettingsStore((s) => s.darkMode);
   const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
   const toggleSidebar = useSettingsStore((s) => s.toggleSidebar);
   const navigate = useNavigate();
@@ -204,8 +205,13 @@ export function Sidebar() {
     });
   }, [location.pathname, routeOpenKeysSig]);
 
-  /* TIPS: 侧边栏采用固定深色导航（对齐设计稿），与主内容区的浅/深主题解耦。
-     Menu 的深色文字对比度通过嵌套 dark 算法的 ConfigProvider 保证，选中项渲染为品牌蓝胶囊。 */
+  /* TIPS: 侧边栏跟随全局主题（浅色为白底导航，深色为 #151c27 深色导航），配色全部走
+     BRAND 的 CSS 变量，切换主题时自动翻转。
+     这里刻意不覆写 algorithm：嵌套 ConfigProvider 会把父级 token 浅拷贝下来
+     （token: {...parent, ...child}），一旦强行改成 darkAlgorithm，父级显式播种的
+     colorBgContainer 等浅色值会盖过算法结果，让侧边栏里的弹层泛白。
+     同理不给 Menu 传 theme="dark"：antd 会用 darkItemBg(#001529) 等默认值覆盖下面这些
+     自定义 token，反而丢掉设计稿配色。 */
   const brandBlock = (isCollapsed: boolean) => (
     <Flex
       align="center"
@@ -225,8 +231,8 @@ export function Sidebar() {
           width: 36,
           height: 36,
           borderRadius: token.borderRadiusLG,
-          background: BRAND.primary,
-          color: "#ffffff",
+          background: BRAND.primaryFill,
+          color: BRAND.onPrimaryFill,
           flexShrink: 0,
         }}
       >
@@ -253,22 +259,17 @@ export function Sidebar() {
   const sidebarContent = (isCollapsed: boolean, showToggle = true) => (
     <ConfigProvider
       theme={{
-        algorithm: theme.darkAlgorithm,
-        token: {
-          colorPrimary: BRAND.primary,
-          borderRadius: 8,
-          borderRadiusSM: 8,
-        },
         components: {
           Menu: {
             itemBg: "transparent",
             itemColor: BRAND.sidebarItemText,
             itemHoverBg: BRAND.sidebarItemHoverBg,
             itemHoverColor: BRAND.sidebarText,
-            itemSelectedBg: BRAND.primary,
-            itemSelectedColor: "#ffffff",
-            itemActiveBg: BRAND.primary,
-            subMenuItemSelectedColor: "#ffffff",
+            itemSelectedBg: BRAND.primaryFill,
+            itemSelectedColor: BRAND.onPrimaryFill,
+            itemActiveBg: BRAND.primaryFill,
+            subMenuItemSelectedColor: BRAND.onPrimaryFill,
+            groupTitleColor: BRAND.sidebarTextMuted,
             itemBorderRadius: 8,
             itemMarginInline: 0,
             itemHeight: 42,
@@ -373,7 +374,9 @@ export function Sidebar() {
   return (
     <Sider
       key={collapsed ? "collapsed" : "expanded"}
-      theme="dark"
+      // TIPS: 底色由下面的 BRAND.sidebarBg 直接控制，这里跟随全局主题即可，
+      // 固定 theme="dark" 会在浅色主题下把 Sider 自身的触发器等部件染成深色。
+      theme={darkMode ? "dark" : "light"}
       collapsible
       collapsed={collapsed}
       trigger={null}
