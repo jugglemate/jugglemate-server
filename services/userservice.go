@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 	"regexp"
 
 	apiModels "github.com/juggleim/jugglemate-server/apis/models"
@@ -61,6 +62,8 @@ func Register(ctx context.Context, account, password string) (errs.IMErrorCode, 
 		Status:       1,
 	}
 	if err := userStorage.Create(user); err != nil {
+		// TIPS: 这里原来静默返回 17006，注册失败时日志里没有任何线索。
+		log.Printf("[Register] 创建用户失败 appkey=%s account=%s user_id=%s: %v", appkey, account, userId, err)
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
 

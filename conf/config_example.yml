@@ -4,11 +4,10 @@ log:
   logPath: ./logs
   logName: jugglemate-server
 
+# IM HTTP API 根地址：Bot 注册、建群、群成员变更共用。
+# 注意：Bot 的 token 由这里签发，必须与下面 agent.im.wsAddress 属于同一套 IM，否则连接会被拒。
 imApiDomain: http://127.0.0.1:9001
 jmateBaseUrl: http://127.0.0.1:8050
-
-botConnector:
-  domain: <bot-connector url>
 
 # Go 版 Agent 平台。完整部署必须启用并配置 PostgreSQL、Redis 与模型 Provider。
 agent:
@@ -27,10 +26,7 @@ agent:
     dialTimeoutSeconds: 5
   auth:
     enabled: true
-    adminUsername: admin
-    adminPassword: change-me
-    tokenSecret: change-me-agent-token-secret
-    tokenExpireMinutes: 720
+    # 上游 JMate 校验身份后转发时携带的共享密钥；Agent 原生入口只信任它。
     internalSecret: change-me-shared-internal-secret
   security:
     secretKey: "jmate-agent-secret-key"
@@ -59,6 +55,7 @@ agent:
     activationPointsCheckEnabled: true
   im:
     enabled: true
+    # Bot 常驻连接的 WebSocket 地址，必须与顶层 imApiDomain 属于同一套 IM。
     wsAddress: wss://127.0.0.1
     # 仅可信测试环境允许跳过 Server API TLS 校验。
     serverAPIInsecure: false

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -490,6 +491,10 @@ func writeError(ctx *gin.Context, err error) {
 		httpresponse.Failure(ctx, business.Status, business.Code, business.Message)
 		return
 	}
+	// TIPS: 非业务错误（DB、IM 注册、外部依赖等）对外统一收敛成 500，细节不能透给调用方；
+	// 但必须落日志 —— 否则线上只剩一个「服务器内部错误」，完全无从定位。
+	slog.ErrorContext(ctx.Request.Context(), "Agent 接口内部错误",
+		"method", ctx.Request.Method, "path", ctx.FullPath(), "error", err)
 	httpresponse.Failure(ctx, http.StatusInternalServerError, 500, "服务器内部错误")
 }
 func validation(ctx *gin.Context, err error) {

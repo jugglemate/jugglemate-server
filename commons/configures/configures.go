@@ -17,10 +17,11 @@ type AppConfig struct {
 	} `yaml:"log"`
 
 	// ImApiDomain 是 Bot 注册、群组创建和群成员变更共用的 IM HTTP API 根地址。
+	//
+	// TIPS: Bot 的 token 由这里签发，必须与 Agent.IM.WSAddress 属于同一套 IM，否则 Bot
+	// 建立长连接时会被拒。IM 的 AppKey 来自请求登录态、AppSecret 取自 apps 表，均不在配置里。
 	ImApiDomain  string `yaml:"imApiDomain"`
 	JmateBaseUrl string `yaml:"jmateBaseUrl"`
-
-	AiBotCallbackUrl string `yaml:"aiBotCallbackUrl"`
 
 	// OSS 统一上传配置
 	Oss OssConfig `yaml:"oss"`
@@ -66,15 +67,11 @@ type AgentRedisConfig struct {
 
 // AgentAuthConfig Agent 原生 API 与可信内部调用鉴权配置。
 //
-// AdminUsername、AdminPassword、TokenSecret 仅保留旧配置兼容；当前生产入口与源服务
-// 一致，仅接受 JMate 上游校验后转发的可信内部密钥和身份。
+// 当前生产入口与源服务一致，仅接受 JMate 上游校验后转发的可信内部密钥和身份；
+// 旧的账号密码登录与 Bearer JWT 均已下线，对应配置项已移除。
 type AgentAuthConfig struct {
-	Enabled            bool   `yaml:"enabled"`
-	AdminUsername      string `yaml:"adminUsername"`
-	AdminPassword      string `yaml:"adminPassword"`
-	TokenSecret        string `yaml:"tokenSecret"`
-	TokenExpireMinutes int    `yaml:"tokenExpireMinutes"`
-	InternalSecret     string `yaml:"internalSecret"`
+	Enabled        bool   `yaml:"enabled"`
+	InternalSecret string `yaml:"internalSecret"`
 }
 
 // AgentSecurityConfig Agent 密钥加密配置。
@@ -172,9 +169,6 @@ func applyDefaults(conf *AppConfig) {
 	}
 	if conf.Agent.Redis.DialTimeoutSeconds <= 0 {
 		conf.Agent.Redis.DialTimeoutSeconds = 5
-	}
-	if conf.Agent.Auth.TokenExpireMinutes <= 0 {
-		conf.Agent.Auth.TokenExpireMinutes = 720
 	}
 	if conf.Agent.Knowledge.VectorDimension <= 0 {
 		conf.Agent.Knowledge.VectorDimension = 1536

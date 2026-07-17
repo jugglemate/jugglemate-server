@@ -31,11 +31,14 @@ func (UserDao) TableName() string {
 	return "users"
 }
 
+// emailPtrForDB 把业务层的 email 转换成入库值。
+//
+// TIPS: 空 email 必须写空字符串而不是 NULL。users.email 是 NOT NULL DEFAULT ''，写 NULL 会
+// 直接违反约束（表现为注册接口报 17006）；唯一索引 uq_users_app_email_nonempty 的条件是
+// `WHERE email <> ''`，也说明这张表就是用空串表示“没有邮箱”，多个空串不会互相冲突。
+// 返回指针类型是为了兼容历史遗留的 NULL 数据（读取见 emailStringFromDB）。
 func emailPtrForDB(email string) *string {
 	trimmed := strings.TrimSpace(email)
-	if trimmed == "" {
-		return nil
-	}
 	return &trimmed
 }
 
