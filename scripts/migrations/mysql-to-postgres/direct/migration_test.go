@@ -15,6 +15,16 @@ func TestStripLeadingNUL(t *testing.T) {
 	}
 }
 
+// TestSanitizePostgresText 校验 PostgreSQL 无法存储的 NUL 字节会被清理，其他内容保持不变。
+func TestSanitizePostgresText(t *testing.T) {
+	if got := sanitizePostgresText("before\x00middle\x00after"); got != "beforemiddleafter" {
+		t.Fatalf("sanitizePostgresText() = %q", got)
+	}
+	if got := sanitizePostgresText("普通文本"); got != "普通文本" {
+		t.Fatalf("普通文本不应被修改: %q", got)
+	}
+}
+
 // TestResolveRecordApp 校验显式 AppKey、唯一候选和冲突候选三种分支。
 func TestResolveRecordApp(t *testing.T) {
 	if got, ok := resolveRecordApp("app-explicit", map[string]struct{}{"app-other": {}}); !ok || got != "app-explicit" {

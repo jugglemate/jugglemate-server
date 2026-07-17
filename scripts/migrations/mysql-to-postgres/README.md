@@ -48,6 +48,8 @@ export JMATE_MIGRATION_CONFIRM=MIGRATE_JMATE_BUSINESS_DATA
 ./direct-migrate verify
 ```
 
+`precheck` 会统计源数据中 PostgreSQL `text/varchar` 无法存储的 NUL 字节字段值；迁移快照保留 MySQL 原值，写入 PostgreSQL 时移除这些 NUL 字节。
+
 直接模式会生成两份 `0600` 备份：MySQL 一致性只读快照 `mysql-business-*.jsonl.gz`，以及 PostgreSQL custom-format 备份 `postgres-before-*.dump`。源 MySQL 不执行任何写入或删除。
 
 ## CLI 兼容模式

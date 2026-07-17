@@ -71,6 +71,19 @@ func precheck(ctx context.Context, cfg config, mysqlDB, postgresDB *sql.DB) erro
 		return fmt.Errorf("检查 Inbox NUL 失败: %w", err)
 	}
 	fmt.Println("需删除首字节 NUL 的 Inbox:", nulCount)
+	nulValues, err := countNULValues(ctx, sourceTx, cfg.mysqlDatabase, definitions)
+	if err != nil {
+		return err
+	}
+	var totalNUL int64
+	for _, definition := range definitions {
+		count := nulValues[definition.name]
+		totalNUL += count
+		if count > 0 {
+			fmt.Printf("  %s 含 NUL 字节的字段值=%d\n", definition.name, count)
+		}
+	}
+	fmt.Println("迁移时需清理 NUL 字节的字段值:", totalNUL)
 	if version != requiredSchemaVersion {
 		fmt.Printf("PostgreSQL 尚未到 %s；应用 Schema 后再执行 migrate\n", requiredSchemaVersion)
 		return nil
@@ -267,7 +280,7 @@ func copyTable(ctx context.Context, source *sql.Tx, target *sql.Tx, database str
 			if definition.columns[index].transform != nil {
 				text = definition.columns[index].transform(text)
 			}
-			arguments[index] = text
+			arguments[index] = sanitizePostgresText(text)
 		}
 		if _, err := statement.ExecContext(ctx, arguments...); err != nil {
 			return count, fmt.Errorf("写入 PostgreSQL %s 第 %d 行失败: %w", definition.name, count+1, err)
@@ -623,6 +636,34 @@ func sourceCount(ctx context.Context, source queryer, database, tableName string
 	return queryInt(ctx, source, fmt.Sprintf("SELECT COUNT(*) FROM `%s`.`%s`", database, tableName))
 }
 
+func countNULValues(ctx context.Context, source queryer, database string, definitions []tableDef) (map[string]int64, error) {
+	result := make(map[string]int64, len(definitions))
+	for _, definition := range definitions {
+		rows, err := source.QueryContext(ctx, sourceSelect(database, definition))
+		if err != nil {
+			return nil, fmt.Errorf("检查 MySQL %s NUL 字节失败: %w", definition.name, err)
+		}
+		for rows.Next() {
+			values, scanErr := scanTextRow(rows, len(definition.columns))
+			if scanErr != nil {
+				rows.Close()
+				return nil, fmt.Errorf("检查 MySQL %s NUL 字节失败: %w", definition.name, scanErr)
+			}
+			for _, value := range values {
+				if value != nil && strings.Contains(*value, "\x00") {
+					result[definition.name]++
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("检查 MySQL %s NUL 字节失败: %w", definition.name, err)
+		}
+		rows.Close()
+	}
+	return result, nil
+}
+
 type queryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
@@ -685,4 +726,9 @@ func stripLeadingNUL(value string) string {
 		return strings.TrimPrefix(value, "\x00")
 	}
 	return value
+}
+
+func sanitizePostgresText(value string) string {
+	// TIPS: PostgreSQL text/varchar 禁止 0x00；源快照保留原值，写入目标库时仅移除无法表达的 NUL 字节。
+	return strings.ReplaceAll(value, "\x00", "")
 }
