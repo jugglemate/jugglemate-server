@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log"
 	"strings"
 
 	"github.com/juggleim/jugglemate-server/commons/configures"
@@ -414,6 +416,15 @@ func BindInboxAgent(ctx context.Context, inboxId string, req *consoleModels.Bind
 	}
 	detail, err := appServices.BindInboxAgent(ctx, appkey, inboxId, req.AgentID)
 	if err != nil {
+		// TIPS: 绑定失败原因很多（Agent 不可绑定、Inbox 不存在、Ticket 群同步失败），
+		// 必须落日志，否则前端只能看到一个无法定位的错误码。
+		log.Printf("[ConsoleInbox] 绑定 Inbox Agent 失败 appkey=%s inbox=%s agent=%s: %v", appkey, inboxId, req.AgentID, err)
+		if errors.Is(err, appServices.ErrAgentNotBindable) {
+			return errs.IMErrorCode_APP_AGENT_NOT_BINDABLE, nil
+		}
+		if errors.Is(err, appServices.ErrInboxNotFound) {
+			return errs.IMErrorCode_APP_ParamError, nil
+		}
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
 	return errs.IMErrorCode_SUCCESS, &consoleModels.InboxAgentItem{AgentID: detail.AgentID, AgentName: detail.AgentName, BotID: detail.BotID, BotUserID: detail.BotUserID, BotName: detail.BotName, SyncError: detail.SyncError}
@@ -426,6 +437,7 @@ func UnbindInboxAgent(ctx context.Context, inboxId string) errs.IMErrorCode {
 		return errs.IMErrorCode_APP_NOT_EXISTED
 	}
 	if err := appServices.UnbindInboxAgent(ctx, appkey, strings.TrimSpace(inboxId)); err != nil {
+		log.Printf("[ConsoleInbox] 解绑 Inbox Agent 失败 appkey=%s inbox=%s: %v", appkey, inboxId, err)
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
 	}
 	return errs.IMErrorCode_SUCCESS

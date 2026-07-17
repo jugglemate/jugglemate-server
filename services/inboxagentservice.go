@@ -18,6 +18,16 @@ import (
 )
 
 var (
+	// ErrInboxNotFound Inbox 不存在或不属于当前 AppKey。
+	ErrInboxNotFound = errors.New("Inbox 不存在")
+	// ErrAgentNotBindable 目标 Agent 不可绑定：不存在、未激活、AppKey 不匹配，或没有 active Bot。
+	//
+	// TIPS: 绑定成功后 Bot 需要加入未关闭 Ticket 群，因此没有 Bot 的 Agent（如系统内置
+	// Juggle_Agent）无法绑定到 Inbox。
+	ErrAgentNotBindable = errors.New("Agent 不存在、未激活、AppKey 不匹配或没有 active Bot")
+)
+
+var (
 	getImSdkForInboxAgent = imsdk.GetImSdk
 	addInboxAgentToGroup  = func(sdk *juggleimsdk.JuggleIMSdk, request juggleimsdk.GroupMembersReq) (juggleimsdk.ApiCode, string, error) {
 		return sdk.GroupAddMembers(request)
@@ -70,7 +80,7 @@ func getInboxAgentWithDB(ctx context.Context, db *gorm.DB, appKey, inboxID strin
 		Joins("JOIN agents a ON a.id=iab.agent_id AND a.app_key=iab.app_key").
 		Joins("JOIN bots b ON b.id=iab.bot_id AND b.app_key=iab.app_key").
 		Where("iab.app_key=? AND iab.inbox_id=? AND iab.status='active'", strings.TrimSpace(appKey), strings.TrimSpace(inboxID)).
-		First(&detail).Error
+		Take(&detail).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -100,8 +110,11 @@ func BindInboxAgent(ctx context.Context, appKey, inboxID, agentID string) (*Inbo
 			return err
 		}
 		if inboxCount == 0 {
-			return fmt.Errorf("Inbox 不存在")
+			return ErrInboxNotFound
 		}
+		// TIPS: 这里必须用 Take 而非 First。First 会按主键追加 ORDER BY，而目标结构体没有
+		// 主键，GORM 会退化成按第一个字段排序，生成 `ORDER BY a.agent_id` —— agents 表只有
+		// id 没有 agent_id，直接报 42703。绑定唯一（uq_bab_agent_active）本就至多一行，无需排序。
 		var target struct {
 			AgentID   string
 			BotID     string
@@ -112,9 +125,9 @@ func BindInboxAgent(ctx context.Context, appKey, inboxID, agentID string) (*Inbo
 			Joins("JOIN bot_agent_bindings bab ON bab.agent_id=a.id AND bab.status='active'").
 			Joins("JOIN bots b ON b.id=bab.bot_id AND b.app_key=a.app_key AND b.status='active'").
 			Where("a.id=? AND a.app_key=? AND a.status='active'", agentID, appKey).
-			First(&target).Error
+			Take(&target).Error
 		if errors.Is(findErr, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("Agent 不存在、未激活、AppKey 不匹配或没有 active Bot")
+			return fmt.Errorf("%w: agent=%s", ErrAgentNotBindable, agentID)
 		}
 		if findErr != nil {
 			return findErr

@@ -20,6 +20,9 @@ const (
 	IMErrorCode_APP_USER_NOT_EXIST    IMErrorCode = 17012
 	IMErrorCode_APP_LOGIN_ERR_PASS    IMErrorCode = 17013
 	IMErrorCode_APP_CHANNEL_NOT_EXIST IMErrorCode = 17014
+	// IMErrorCode_APP_AGENT_NOT_BINDABLE 目标 Agent 不可绑定到 Inbox：不存在、未激活、
+	// 不属于当前 AppKey，或没有可用的 active Bot（绑定后 Bot 需要加入 Ticket 群）。
+	IMErrorCode_APP_AGENT_NOT_BINDABLE IMErrorCode = 17015
 )
 
 // AIBOT errors.
@@ -35,8 +38,9 @@ const (
 )
 
 var imCode2ApiErrorMap = map[IMErrorCode]*ApiErrorMsg{
-	IMErrorCode_SUCCESS:               newApiErrorMsg(200, IMErrorCode_SUCCESS, "success"),
-	IMErrorCode_APP_CHANNEL_NOT_EXIST: newApiErrorMsg(200, IMErrorCode_APP_CHANNEL_NOT_EXIST, "渠道不存在"),
+	IMErrorCode_SUCCESS:                newApiErrorMsg(200, IMErrorCode_SUCCESS, "success"),
+	IMErrorCode_APP_CHANNEL_NOT_EXIST:  newApiErrorMsg(200, IMErrorCode_APP_CHANNEL_NOT_EXIST, "渠道不存在"),
+	IMErrorCode_APP_AGENT_NOT_BINDABLE: newApiErrorMsg(200, IMErrorCode_APP_AGENT_NOT_BINDABLE, "该智能体不可关联到收件箱：不存在、未激活或没有可用的 Bot"),
 }
 
 func GetApiErrorByCode(code IMErrorCode) *ApiErrorMsg {

@@ -46,8 +46,11 @@ type CreateWidgetInboxReq struct {
 	WelcomeMessage string `json:"welcome_message"`
 }
 
+// InboxMemberItem 收件箱成员。
+//
+// TIPS: id 字段与控制台其它用户接口（如 UserItem）保持一致，前端按 id 关联角色和去重。
 type InboxMemberItem struct {
-	UserId   string `json:"user_id"`
+	UserId   string `json:"id"`
 	Username string `json:"username"`
 	Avatar   string `json:"avatar"`
 	Email    string `json:"email"`
