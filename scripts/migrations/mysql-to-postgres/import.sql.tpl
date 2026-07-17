@@ -61,7 +61,7 @@ LEFT JOIN (
 	SELECT binding.bot_id, a.app_key
 	FROM bot_agent_bindings binding
 	JOIN agents a ON a.id = binding.agent_id
-	WHERE a.app_key <> ''
+	WHERE binding.status = 'active' AND a.app_key <> ''
 	UNION
 	SELECT owned.id AS bot_id, u.app_key
 	FROM bots owned

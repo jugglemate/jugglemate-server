@@ -2,6 +2,8 @@
 
 该工具只迁移 `apps`、`appexts`、`users`、`customers`、`inboxes`、`customerinboxrels`、`inboxmembers`、`tickets`，明确跳过 `aibots` 和所有 `agent_*`/Twins 表。
 
+生产环境推荐使用 `direct/` 下的独立 Go 迁移程序：它通过数据库驱动直接执行 MySQL `SELECT` 和 PostgreSQL 参数化 `INSERT`，不依赖服务器的 `mysql`/`mysqldump` 客户端。根目录 `migrate.sh` 作为已有兼容路径保留。
+
 ## 上线顺序
 
 1. 进入维护窗口，停止旧服务写入 MySQL。
@@ -22,6 +24,33 @@ export JMATE_MYSQL_DATABASE=jmate_db
 export JMATE_POSTGRES_DSN='<postgres-dsn>'
 export JMATE_MIGRATION_BACKUP_DIR='/absolute/backup/path'
 ```
+
+## 直接迁移（推荐）
+
+构建独立静态二进制；该子模块的 MySQL 驱动不会进入主服务依赖：
+
+```bash
+cd scripts/migrations/mysql-to-postgres/direct
+CGO_ENABLED=0 go build -trimpath -o direct-migrate .
+```
+
+预检：
+
+```bash
+./direct-migrate precheck
+```
+
+执行前必须停止旧服务写入 MySQL，然后显式确认：
+
+```bash
+export JMATE_MIGRATION_CONFIRM=MIGRATE_JMATE_BUSINESS_DATA
+./direct-migrate migrate
+./direct-migrate verify
+```
+
+直接模式会生成两份 `0600` 备份：MySQL 一致性只读快照 `mysql-business-*.jsonl.gz`，以及 PostgreSQL custom-format 备份 `postgres-before-*.dump`。源 MySQL 不执行任何写入或删除。
+
+## CLI 兼容模式
 
 预检：
 
