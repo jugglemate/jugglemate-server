@@ -13,9 +13,13 @@ export const Route = createFileRoute("/_auth/agents/")({
   component: AgentsPage,
 });
 
+/** 系统内置 Agent 的 ownerId，与后端 agent/service 保持一致。 */
+const SYSTEM_OWNER_ID = "system";
+
 interface AgentListItem {
   agentId: string;
   agentName: string;
+  ownerId: string;
   primaryModel?: string;
   status: string;
   knowledgeCount?: number;
@@ -75,15 +79,22 @@ function AgentsPage() {
 
   const remove = (record: AgentListItem) => {
     modal.confirm({
-      title: t("crud.deleteConfirmTitle"),
-      content: record.agentName,
+      title: t("agents.deleteConfirmTitle", { name: record.agentName }),
+      content: t("agents.deleteConfirmDesc"),
       okText: t("common.delete"),
       okType: "danger",
       cancelText: t("common.cancel"),
+      // TIPS: 必须返回 Promise 并把错误抛回去，否则 antd 会直接关掉弹窗当作成功；
+      // 删除会解绑收件箱并把 Bot 移出 Ticket 群，失败时用户需要看到真实原因。
       onOk: async () => {
-        await agentApi.post("/agents/delete", { agentId: record.agentId });
-        message.success(t("common.deleted"));
-        await load();
+        try {
+          await agentApi.post("/agents/delete", { agentId: record.agentId });
+          message.success(t("common.deleted"));
+          await load();
+        } catch (err) {
+          message.error((err as Error).message || t("agentAdmin.actionFailed"));
+          throw err;
+        }
       },
     });
   };
@@ -190,14 +201,17 @@ function AgentsPage() {
               onClick={() => void lifecycle(r, "activate")}
             />
           )}
-          <Button
-            type="text"
-            size="small"
-            danger
-            icon={<Trash2 size={16} />}
-            aria-label={t("common.delete")}
-            onClick={() => remove(r)}
-          />
+          {/* 系统内置 Agent 后端不允许删除，这里直接不给入口，避免点了必然报错。 */}
+          {r.ownerId !== SYSTEM_OWNER_ID ? (
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<Trash2 size={16} />}
+              aria-label={t("common.delete")}
+              onClick={() => remove(r)}
+            />
+          ) : null}
         </Space>
       ),
     },

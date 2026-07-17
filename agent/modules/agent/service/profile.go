@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/juggleim/jugglemate-server/agent/modules/agent/dto"
 	"github.com/juggleim/jugglemate-server/agent/modules/agent/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type resolvedModel struct {
@@ -56,7 +58,8 @@ func (service *Service) CreateAgent(ctx context.Context, actor Actor, request dt
 			return err
 		}
 		var count int64
-		if err := tx.Model(&model.Agent{}).Where("app_key = ? AND owner_id = ?", actor.AppKey, actor.OwnerID).Count(&count).Error; err != nil {
+		// 已删除的 Agent 不占用数量上限。
+		if err := tx.Model(&model.Agent{}).Where("app_key = ? AND owner_id = ? AND status <> ?", actor.AppKey, actor.OwnerID, statusDeleted).Count(&count).Error; err != nil {
 			return err
 		}
 		if count >= 50 {
@@ -66,7 +69,14 @@ func (service *Service) CreateAgent(ctx context.Context, actor Actor, request dt
 			return err
 		}
 		if count == 0 {
-			return tx.Create(&firstAgentRechargeGrant{AppKey: actor.AppKey, OwnerID: actor.OwnerID, AgentID: entity.ID}).Error
+			// TIPS: 必须 DO NOTHING 而不是 Create。预留记录以 (app_key, owner_id) 为主键，且只有
+			// 物理删除 Agent 才会级联清掉；用户软删掉全部 Agent 后 count 会重新变成 0，直接 Create
+			// 会主键冲突并让创建接口报 500。冲突时保留原记录也正好保住“每个 Owner 只赠一次”——
+			// 旧记录的 granted_at 已经写上，grantFirstAgentRecharge 不会重复发放。
+			return tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "app_key"}, {Name: "owner_id"}},
+				DoNothing: true,
+			}).Create(&firstAgentRechargeGrant{AppKey: actor.AppKey, OwnerID: actor.OwnerID, AgentID: entity.ID}).Error
 		}
 		return nil
 	})
@@ -98,7 +108,9 @@ func (service *Service) GetAgent(ctx context.Context, actor Actor, agentID strin
 // ListAgents 分页查询当前 Owner Agent，并在首页前置系统兜底 Agent。
 func (service *Service) ListAgents(ctx context.Context, appKey, ownerID string, page, pageSize int) (dto.ListResponse, error) {
 	page, pageSize = normalizePage(page, pageSize)
-	query := service.db.WithContext(ctx).Model(&model.Agent{}).Where("app_key = ? AND owner_id = ?", appKey, ownerID)
+	// TIPS: 软删除的 Agent 对列表不可见（行仍在库里用于计费与会话历史追溯）。
+	query := service.db.WithContext(ctx).Model(&model.Agent{}).
+		Where("app_key = ? AND owner_id = ? AND status <> ?", appKey, ownerID, statusDeleted)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return dto.ListResponse{}, err
@@ -202,24 +214,117 @@ func (service *Service) UpdateAgent(ctx context.Context, actor Actor, request dt
 	return service.GetAgent(ctx, actor, entity.ID)
 }
 
-// DeleteAgent 物理删除仅处于 draft 状态的 Agent。
+// DeleteAgent 软删除 Agent，并清理它的全部关联关系。
+//
+// 简要描述：任意状态（除系统内置 Agent）均可删除。删除会依次解绑 Inbox（含把 Bot 移出未关闭
+// Ticket 群）、停用 Bot 与 Bot-Agent 绑定、卸载知识/技能/工具，最后把 Agent 置为 deleted。
+//
+// TIPS: 这里刻意不物理删除。conversations、consumption_records（计费）、llm_model_calls 等表
+// 带 agent_id 但没有外键，物理删除会留下孤儿数据并丢失账务追溯；置为 deleted 后由查询侧统一排除。
+//
+// TIPS: 先做外部副作用（移出 Ticket 群）再落库，顺序与 BindInboxAgent 一致 —— 群没清干净时
+// 保留原状态，用户可以重试；反过来先落库会让群里永远留下一个不再响应的僵尸 Bot。
 func (service *Service) DeleteAgent(ctx context.Context, actor Actor, agentID string) error {
 	entity, err := service.findAgent(ctx, agentID)
 	if err != nil {
 		return err
 	}
+	// allowBuiltin=false：系统内置 Juggle_Agent 不允许删除。
+	// 已删除的 Agent 在 findAgent 处就会返回 404，这里不需要再判断 deleted。
 	if err := assertPermission(actor, entity, false); err != nil {
 		return err
 	}
-	if entity.Status != "draft" {
-		return businessError(409, "409_INVALID_STATUS_TRANSITION", "仅 draft 状态 Agent 支持删除")
+
+	if err := service.unbindAgentInboxes(ctx, entity); err != nil {
+		return err
 	}
-	result := service.db.WithContext(ctx).Where("id = ? AND owner_id = ? AND status = 'draft'", entity.ID, entity.OwnerID).Delete(&model.Agent{})
-	if result.Error != nil {
-		return result.Error
+
+	var botUserIDs []string
+	if err := service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Bot 与 Bot 绑定一并停用：Bot 常驻连接是按 bots.status='active' 建立的，
+		// 只删绑定会让 Bot 继续连着 IM 收消息，却再也路由不到任何 Agent。
+		var bots []struct {
+			ID        string
+			BotUserID string
+		}
+		if err := tx.Table("bots b").Select("b.id,b.bot_user_id").
+			Joins("JOIN bot_agent_bindings bab ON bab.bot_id=b.id AND bab.status='active'").
+			Where("bab.agent_id = ? AND b.app_key = ?", entity.ID, entity.AppKey).
+			Find(&bots).Error; err != nil {
+			return err
+		}
+		botIDs := make([]string, 0, len(bots))
+		for _, bot := range bots {
+			botIDs = append(botIDs, bot.ID)
+			botUserIDs = append(botUserIDs, bot.BotUserID)
+		}
+		if err := tx.Table("bot_agent_bindings").Where("agent_id = ?", entity.ID).
+			Update("status", "inactive").Error; err != nil {
+			return err
+		}
+		if len(botIDs) > 0 {
+			if err := tx.Table("bots").Where("id IN ? AND app_key = ?", botIDs, entity.AppKey).
+				Update("status", "inactive").Error; err != nil {
+				return err
+			}
+		}
+		// 卸载能力挂载（这些表有 ON DELETE CASCADE，但软删不会触发级联，需要显式清理）。
+		for _, table := range []string{"agent_knowledge", "agent_skills", "agent_tools"} {
+			if err := tx.Table(table).Where("agent_id = ?", entity.ID).Delete(nil).Error; err != nil {
+				return err
+			}
+		}
+		result := tx.Model(&model.Agent{}).Where("id = ? AND status <> ?", entity.ID, statusDeleted).
+			Updates(map[string]any{"status": statusDeleted, "updated_at": time.Now().UTC()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			// 并发删除：另一个请求已经把它置为 deleted。
+			return businessError(404, "404_NOT_FOUND", "Agent 不存在")
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
-	if result.RowsAffected == 0 {
-		return businessError(409, "409_INVALID_STATUS_TRANSITION", "仅 draft 状态 Agent 支持删除")
+	// 落库成功后再断连：先断连若事务回滚，会白白干掉一个仍然有效的 Bot 连接。
+	for _, botUserID := range botUserIDs {
+		service.connections.DisconnectBot(entity.AppKey, botUserID)
+	}
+	return nil
+}
+
+// purgeDraftAgent 物理删除刚创建但未完成的 draft Agent，仅供创建流程的补偿路径使用。
+//
+// TIPS: 这里必须是物理删除，不能复用 DeleteAgent 的软删。agent_first_recharge_grants 以
+// (app_key, owner_id) 为主键、并靠外键跟随 Agent 级联删除；半成品若只置为 deleted，预留记录
+// 会残留且 agent_id 永远指向那个失败的 Agent，导致：下次创建插入预留记录时主键冲突（表现为
+// 创建接口 500），且 grantFirstAgentRecharge 再也匹配不到，用户永远拿不到首个 Agent 赠送。
+func (service *Service) purgeDraftAgent(ctx context.Context, appKey, agentID string) error {
+	return service.db.WithContext(ctx).
+		Where("id = ? AND app_key = ? AND status = 'draft'", agentID, appKey).
+		Delete(&model.Agent{}).Error
+}
+
+// unbindAgentInboxes 解除该 Agent 当前生效的全部 Inbox 绑定，并把 Bot 移出对应 Ticket 群。
+func (service *Service) unbindAgentInboxes(ctx context.Context, entity *model.Agent) error {
+	var inboxIDs []string
+	if err := service.db.WithContext(ctx).Table("inbox_agent_bindings").
+		Where("app_key = ? AND agent_id = ? AND status = 'active'", entity.AppKey, entity.ID).
+		Pluck("inbox_id", &inboxIDs).Error; err != nil {
+		return err
+	}
+	if len(inboxIDs) == 0 {
+		return nil
+	}
+	if service.unbindInboxAgent == nil {
+		return businessError(500, "500_UNBIND_INBOX_NOT_CONFIGURED", "Inbox 解绑能力未装配，无法删除已关联 Inbox 的 Agent")
+	}
+	for _, inboxID := range inboxIDs {
+		if err := service.unbindInboxAgent(ctx, entity.AppKey, inboxID); err != nil {
+			slog.ErrorContext(ctx, "删除 Agent 时解绑 Inbox 失败", "agent_id", entity.ID, "inbox_id", inboxID, "error", err)
+			return businessError(502, "502_INBOX_UNBIND_FAILED", fmt.Sprintf("解绑 Inbox %s 失败，请重试：%v", inboxID, err))
+		}
 	}
 	return nil
 }

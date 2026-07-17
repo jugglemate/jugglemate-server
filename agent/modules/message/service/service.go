@@ -106,7 +106,7 @@ func (service *Service) AppStream(ctx context.Context, ownerID, userID string, r
 // prepareAppRequest 校验应用直连消息、解析 Agent 并在调用外部模型前完成配额预检。
 func (service *Service) prepareAppRequest(ctx context.Context, ownerID, userID string, request dto.AppChatRequest) (reasoningservice.Request, error) {
 	var agent agentmodel.Agent
-	query := service.db.WithContext(ctx).Where("name = ? AND status <> 'archived'", strings.TrimSpace(request.AgentName))
+	query := service.db.WithContext(ctx).Where("name = ? AND status NOT IN ('archived','deleted')", strings.TrimSpace(request.AgentName))
 	if ownerID != "system" {
 		query = query.Where("owner_id = ?", ownerID)
 	}
@@ -221,7 +221,7 @@ func (service *Service) GetConversation(ctx context.Context, ownerID, conversati
 
 // ListOwnerAgents 查询 Owner 的 Agent 及会话统计。
 func (service *Service) ListOwnerAgents(ctx context.Context, ownerID string) ([]dto.OwnerAgentItem, error) {
-	query := service.db.WithContext(ctx).Model(&agentmodel.Agent{}).Where("status <> 'archived'")
+	query := service.db.WithContext(ctx).Model(&agentmodel.Agent{}).Where("status NOT IN ('archived','deleted')")
 	if ownerID != "system" {
 		query = query.Where("owner_id = ? OR owner_id = 'system'", ownerID)
 	}

@@ -59,9 +59,13 @@ async function fetchAssignableUsers() {
   return UsersListResponseSchema.shape.data.parse(raw).list;
 }
 
+/** 系统内置 Agent 的 ownerId，与后端 agent/service 保持一致。 */
+const SYSTEM_OWNER_ID = "system";
+
 interface AgentListItem {
   agentId: string;
   agentName: string;
+  ownerId: string;
   primaryModel?: string;
   status: string;
   knowledgeCount?: number;
@@ -375,7 +379,7 @@ function NewInboxWizard() {
 
       {step === 3 ? (
         <AgentStep
-          agents={agentsQuery.data?.items ?? []}
+          agents={(agentsQuery.data?.items ?? []).filter((a) => a.ownerId !== SYSTEM_OWNER_ID)}
           loading={agentsQuery.isLoading}
           selectedAgentId={selectedAgentId}
           onSelect={setSelectedAgentId}

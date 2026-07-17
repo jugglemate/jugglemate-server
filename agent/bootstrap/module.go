@@ -59,10 +59,23 @@ type Module struct {
 	tools           *toolsapis.Handler
 	billing         *billingapis.Handler
 	agent           *agentapis.Handler
+	agentService    *agentservice.Service
 	reasoning       *reasoningservice.Service
 	message         *messageapis.Handler
 	operations      *operationsapis.Handler
 	botConnections  *messageimbot.Manager
+}
+
+// SetUnbindInboxAgent 注入 Inbox 解绑实现，供删除 Agent 时清理 Inbox 关联与 Ticket 群 Bot。
+//
+// TIPS: 由 main.go 在 Start 之后装配。移出 Ticket 群属于客服域能力，Agent 平台模块不直接
+// 依赖它，避免两个域互相 import。
+func (module *Module) SetUnbindInboxAgent(fn agentservice.UnbindInboxAgentFunc) {
+	module.mu.RLock()
+	defer module.mu.RUnlock()
+	if module.agentService != nil {
+		module.agentService.SetUnbindInboxAgent(fn)
+	}
 }
 
 // New 创建尚未启动的 Agent 模块。
@@ -169,6 +182,7 @@ func (module *Module) Start(ctx context.Context) error {
 		return fmt.Errorf("启动 Knowledge 向量化 Worker 失败: %w", err)
 	}
 
+	module.agentService = agentService
 	module.db = db
 	module.redis = redisClient
 	module.auth = authmodule.NewService(module.cfg.Auth)

@@ -286,6 +286,25 @@ func (*messageListener) OnMessageReactionRemove(*sdkmodels.Conversation, *sdkmod
 // OnMessageSetTop 接收消息置顶事件；当前 Agent 入站链路无需二次处理。
 func (*messageListener) OnMessageSetTop(*sdkmodels.Message, string, bool) {}
 
+// DisconnectBot 断开单个 Bot 的常驻连接，未连接时安全返回。
+//
+// TIPS: 删除 Agent 时调用。Bot 连接是进程启动时按 bots.status='active' 建立的，只把库里
+// 状态置为 inactive 并不会让已建立的连接消失 —— 那个 Bot 会继续在群里收消息（虽然已经路由
+// 不到任何 Agent），直到下次重启才消失。
+func (manager *Manager) DisconnectBot(appKey, botUserID string) {
+	if manager == nil || !manager.enabled {
+		return
+	}
+	key := clientKey(appKey, botUserID)
+	manager.mu.Lock()
+	client := manager.clients[key]
+	delete(manager.clients, key)
+	manager.mu.Unlock()
+	if client != nil {
+		client.Disconnect()
+	}
+}
+
 // Stop 主动断开全部 Bot，SDK 不再自动重连。
 func (manager *Manager) Stop() {
 	manager.mu.Lock()

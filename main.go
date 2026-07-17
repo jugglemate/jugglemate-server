@@ -15,6 +15,7 @@ import (
 	"github.com/juggleim/jugglemate-server/commons/logs"
 	"github.com/juggleim/jugglemate-server/console"
 	"github.com/juggleim/jugglemate-server/routers"
+	"github.com/juggleim/jugglemate-server/services"
 )
 
 func main() {
@@ -40,6 +41,9 @@ func main() {
 		return
 	}
 	dbcommons.UsePostgres(postgres)
+	// TIPS: 把客服域的 Inbox 解绑能力注入 Agent 平台，供删除 Agent 时清理关联的 Inbox 与
+	// Ticket 群里的 Bot。必须放在 UsePostgres 之后 —— 解绑实现依赖共享的 PostgreSQL 连接。
+	agentModule.SetUnbindInboxAgent(services.UnbindInboxAgent)
 
 	httpServer := gin.Default()
 	agentModule.RegisterNativeRoutes(httpServer)

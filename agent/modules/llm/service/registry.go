@@ -501,7 +501,7 @@ func (service *RegistryService) DeleteModel(ctx context.Context, modelPK string)
 			}
 		}
 		var count int64
-		if err := tx.Table("agents").Where("llm_model = ? AND status <> ?", entity.ModelID, "archived").Count(&count).Error; err != nil {
+		if err := tx.Table("agents").Where("llm_model = ? AND status NOT IN (?)", entity.ModelID, []string{"archived", "deleted"}).Count(&count).Error; err != nil {
 			return err
 		}
 		if count > 0 {
@@ -749,7 +749,7 @@ func (service *RegistryService) modelRead(ctx context.Context, db *gorm.DB, enti
 		}
 	}
 	var count int64
-	if err := db.WithContext(ctx).Table("agents").Where("llm_model = ? AND status <> ?", entity.ModelID, "archived").Count(&count).Error; err != nil {
+	if err := db.WithContext(ctx).Table("agents").Where("llm_model = ? AND status NOT IN (?)", entity.ModelID, []string{"archived", "deleted"}).Count(&count).Error; err != nil {
 		return dto.ModelRead{}, err
 	}
 	costTier := "high"

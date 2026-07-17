@@ -349,6 +349,8 @@
     }
   },
   "agents": {
+    "deleteConfirmTitle": "确认删除智能体「{{name}}」？",
+    "deleteConfirmDesc": "删除后将解除它与收件箱的关联，并把对应的 Bot 移出所有未关闭的会话群；已产生的计费与对话记录仍会保留。此操作不可撤销。",
     "colName": "名称",
     "colModel": "模型",
     "colStatus": "状态",

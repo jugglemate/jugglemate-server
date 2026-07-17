@@ -34,7 +34,7 @@ func (service *Service) CreateAgentWithBot(ctx context.Context, actor Actor, req
 	}
 	registered, err := service.register.RegisterBot(ctx, actor.AppKey, "bot-"+strings.ReplaceAll(uuid.NewString(), "-", ""), botName)
 	if err != nil {
-		if cleanupErr := service.DeleteAgent(context.WithoutCancel(ctx), actor, created.ID); cleanupErr != nil {
+		if cleanupErr := service.purgeDraftAgent(context.WithoutCancel(ctx), actor.AppKey, created.ID); cleanupErr != nil {
 			slog.ErrorContext(ctx, "IM Bot 注册失败且补偿删除 Agent 失败", "agent_id", created.ID, "error", cleanupErr)
 		}
 		return dto.CreateWithBotResponse{}, mapIMError(err)
@@ -47,7 +47,7 @@ func (service *Service) CreateAgentWithBot(ctx context.Context, actor Actor, req
 		return tx.Create(&model.BotBinding{ID: uuid.NewString(), BotID: bot.ID, AgentID: created.ID, Status: "active"}).Error
 	})
 	if err != nil {
-		if cleanupErr := service.DeleteAgent(context.WithoutCancel(ctx), actor, created.ID); cleanupErr != nil {
+		if cleanupErr := service.purgeDraftAgent(context.WithoutCancel(ctx), actor.AppKey, created.ID); cleanupErr != nil {
 			slog.ErrorContext(ctx, "Agent Bot 绑定失败且补偿删除 Agent 失败", "agent_id", created.ID, "bot_user_id", registered.UserID, "error", cleanupErr)
 		}
 		return dto.CreateWithBotResponse{}, err

@@ -349,6 +349,8 @@
     }
   },
   "agents": {
+    "deleteConfirmTitle": "Delete agent \"{{name}}\"?",
+    "deleteConfirmDesc": "This unbinds the agent from its inboxes and removes its bot from every open ticket group. Existing billing and conversation records are kept. This cannot be undone.",
     "colName": "Name",
     "colModel": "Model",
     "colStatus": "Status",
