@@ -23,6 +23,7 @@ func TestQryCustomerInfo(t *testing.T) {
 	ticketStorage := &mockTicketStorage{findTicket: &storageModels.Ticket{
 		TicketId:   "ticket_1",
 		CustomerId: "customer_1",
+		SourceId:   "source_1",
 	}}
 	newTicketStorageForCustomer = func() storageModels.ITicketStorage { return ticketStorage }
 	newCustomerStorageForCustomer = func() storageModels.ICustomerStorage {
@@ -34,7 +35,7 @@ func TestQryCustomerInfo(t *testing.T) {
 	ctx = context.WithValue(ctx, ctxs.CtxKey_RequesterId, "agent_1")
 
 	code, info := QryCustomerInfo(ctx, "ticket_1")
-	if code != errs.IMErrorCode_SUCCESS || info == nil || info.Id != "customer_1" || info.Nickname != "Alice" || info.Avatar != "alice.png" {
+	if code != errs.IMErrorCode_SUCCESS || info == nil || info.CustomerId != "customer_1" || info.SourceId != "source_1" || info.Nickname != "Alice" || info.Avatar != "alice.png" {
 		t.Fatalf("code=%d info=%+v", code, info)
 	}
 	if ticketStorage.findAppkey != "app_1" || ticketStorage.findTicketId != "ticket_1" {

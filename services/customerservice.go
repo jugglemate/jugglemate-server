@@ -352,7 +352,7 @@ func StartWebCustom(ctx context.Context, req *apiModels.StartCustomReq) (errs.IM
 	}
 }
 
-func QryCustomerInfo(ctx context.Context, ticketId string) (errs.IMErrorCode, *apiModels.UserInfo) {
+func QryCustomerInfo(ctx context.Context, ticketId string) (errs.IMErrorCode, *apiModels.CustomerInfo) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	requesterId := ctxs.GetRequesterIdFromCtx(ctx)
 	ticketId = strings.TrimSpace(ticketId)
@@ -378,10 +378,11 @@ func QryCustomerInfo(ctx context.Context, ticketId string) (errs.IMErrorCode, *a
 	if customer == nil {
 		return errs.IMErrorCode_APP_USER_NOT_EXIST, nil
 	}
-	return errs.IMErrorCode_SUCCESS, &apiModels.UserInfo{
-		Id:       customer.CustomerId,
-		Nickname: customer.Nickname,
-		Avatar:   customer.Avator,
+	return errs.IMErrorCode_SUCCESS, &apiModels.CustomerInfo{
+		CustomerId: customer.CustomerId,
+		SourceId:   ticket.SourceId,
+		Nickname:   customer.Nickname,
+		Avatar:     customer.Avator,
 	}
 }
 
