@@ -6,6 +6,7 @@ import "time"
 // Agent 表示可配置、启停和挂载能力的智能体。
 type Agent struct {
 	ID               string         `gorm:"size:64;primaryKey"`
+	AppKey           string         `gorm:"column:app_key;size:64;not null"`
 	OwnerID          string         `gorm:"column:owner_id;size:64;not null"`
 	Name             string         `gorm:"size:128;not null"`
 	Type             string         `gorm:"size:32;not null"`
@@ -90,6 +91,7 @@ func (LongTermMemory) TableName() string { return "long_term_memories" }
 // Bot 表示已注册并可通过 SDK 连接的 IM Bot。
 type Bot struct {
 	ID         string    `gorm:"size:64;primaryKey"`
+	AppKey     string    `gorm:"column:app_key;size:64;not null"`
 	OwnerID    string    `gorm:"column:owner_id;size:64;not null"`
 	InviteCode string    `gorm:"column:invite_code;size:64;not null"`
 	BotUserID  string    `gorm:"column:bot_user_id;size:64;not null"`

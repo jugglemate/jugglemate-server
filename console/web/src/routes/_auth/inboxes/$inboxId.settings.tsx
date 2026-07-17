@@ -36,7 +36,9 @@ import { httpClient } from "@/utils/http";
 import { agentApi } from "@/utils/agentHttp";
 import { USER_ENDPOINTS } from "@/api/user";
 import {
+  bindInboxAgent,
   deleteInbox,
+  getInboxAgent,
   getInbox,
   listInboxMembers,
   replaceInboxMembers,
@@ -163,7 +165,7 @@ function InboxSettingsPage() {
               {
                 key: "agent",
                 label: t("inboxes.tabAIAgent"),
-                children: <AIAgentTab />,
+                children: <AIAgentTab inboxId={inbox.id} />,
               },
             ]}
           />
@@ -501,10 +503,12 @@ interface AgentPagedResponse {
   total: number;
 }
 
-function AIAgentTab() {
+function AIAgentTab({ inboxId }: { inboxId: string }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { message } = App.useApp();
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   const agentsQuery = useQuery({
@@ -512,11 +516,28 @@ function AIAgentTab() {
     queryFn: () =>
       agentApi.get<AgentPagedResponse>("/agents", { params: { page: 1, page_size: 100 } }),
   });
+  const bindingQuery = useQuery({
+    queryKey: ["inbox-agent", inboxId],
+    queryFn: () => getInboxAgent(inboxId),
+  });
+  useEffect(() => {
+    setSelectedAgentId(bindingQuery.data?.agent_id ?? null);
+  }, [bindingQuery.data]);
+  const bindingMutation = useMutation({
+    mutationFn: (agentId: string) => bindInboxAgent(inboxId, agentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["inbox-agent", inboxId] });
+      message.success(t("common.updated"));
+    },
+    onError: () => message.error(t("agentAdmin.saveFailed")),
+  });
   const agents = agentsQuery.data?.items ?? [];
 
   return (
     <Flex vertical gap={token.marginLG}>
-      <Alert type="info" showIcon message={t("inboxes.aiAgentBindingPending")} />
+      {bindingQuery.data?.sync_error ? (
+        <Alert type="error" showIcon message={bindingQuery.data.sync_error} />
+      ) : null}
       <Flex gap={token.margin} wrap="wrap">
         <Flex
           vertical
@@ -550,12 +571,13 @@ function AIAgentTab() {
               key={a.agentId}
               vertical
               gap={token.marginSM}
-              onClick={() => setSelectedAgentId(a.agentId)}
+              onClick={() => ready && setSelectedAgentId(a.agentId)}
               style={{
                 flex: "1 1 240px",
                 maxWidth: 320,
                 minHeight: 150,
-                cursor: "pointer",
+                cursor: ready ? "pointer" : "not-allowed",
+                opacity: ready ? 1 : 0.65,
                 borderRadius: token.borderRadiusLG,
                 border: `1.5px solid ${selected ? BRAND.primary : BRAND.borderLow}`,
                 background: BRAND.cardBg,
@@ -590,6 +612,16 @@ function AIAgentTab() {
             </Flex>
           );
         })}
+      </Flex>
+      <Flex justify="flex-end">
+        <Button
+          type="primary"
+          disabled={!selectedAgentId || selectedAgentId === bindingQuery.data?.agent_id}
+          loading={bindingMutation.isPending}
+          onClick={() => selectedAgentId && bindingMutation.mutate(selectedAgentId)}
+        >
+          {t("agents.save")}
+        </Button>
       </Flex>
     </Flex>
   );

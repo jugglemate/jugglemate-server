@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -135,6 +136,7 @@ func newJuggleIMWebhookTestEnv(t *testing.T) *juggleIMWebhookTestEnv {
 	oldRegister := registerIMUserForCustomer
 	oldRegisterCustomer := registerCustomerIMUserForCustomer
 	oldCreateGroup := createGroupForCustomer
+	oldResolveBot := resolveInboxAgentBotForCustomer
 	oldSyncGlobalTags := syncTicketGlobalConversationTagsForCustomer
 	oldSendGroup := sendJuggleIMGroupMsg
 
@@ -159,6 +161,7 @@ func newJuggleIMWebhookTestEnv(t *testing.T) *juggleIMWebhookTestEnv {
 		env.createdGroupId = req.GroupId
 		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
 	}
+	resolveInboxAgentBotForCustomer = func(context.Context, string, string) (string, error) { return "", nil }
 	syncTicketGlobalConversationTagsForCustomer = func(string, string) errs.IMErrorCode {
 		return errs.IMErrorCode_SUCCESS
 	}
@@ -179,6 +182,7 @@ func newJuggleIMWebhookTestEnv(t *testing.T) *juggleIMWebhookTestEnv {
 		registerIMUserForCustomer = oldRegister
 		registerCustomerIMUserForCustomer = oldRegisterCustomer
 		createGroupForCustomer = oldCreateGroup
+		resolveInboxAgentBotForCustomer = oldResolveBot
 		syncTicketGlobalConversationTagsForCustomer = oldSyncGlobalTags
 		sendJuggleIMGroupMsg = oldSendGroup
 	})

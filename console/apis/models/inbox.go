@@ -67,3 +67,18 @@ type UpdateInboxReq struct {
 	Name           string `json:"name"`
 	WelcomeMessage string `json:"welcome_message"`
 }
+
+// BindInboxAgentReq 更新 Inbox 当前关联的 Agent。
+type BindInboxAgentReq struct {
+	AgentID string `json:"agent_id"`
+}
+
+// InboxAgentItem 表示 Inbox 当前真实生效的 Agent 与 Bot。
+type InboxAgentItem struct {
+	AgentID   string `json:"agent_id"`
+	AgentName string `json:"agent_name"`
+	BotID     string `json:"bot_id"`
+	BotUserID string `json:"bot_user_id"`
+	BotName   string `json:"bot_name"`
+	SyncError string `json:"sync_error,omitempty"`
+}

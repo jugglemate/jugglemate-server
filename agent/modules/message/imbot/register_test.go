@@ -28,8 +28,8 @@ func TestRegisterBotSignsRequestAndParsesIdentity(t *testing.T) {
 		_ = json.NewEncoder(response).Encode(map[string]any{"code": 0, "msg": "success", "data": map[string]any{"user_id": "bot-user", "token": "connect-token"}})
 	}))
 	defer server.Close()
-	client := NewRegisterClient(configures.AgentIMConfig{ServerAPIURL: server.URL, AppKey: "app", AppSecret: secret})
-	result, err := client.RegisterBot(context.Background(), "bot-id", "测试 Bot")
+	client := NewRegisterClient(server.URL, false, func(context.Context, string) (string, error) { return secret, nil })
+	result, err := client.RegisterBot(context.Background(), "app", "bot-id", "测试 Bot")
 	if err != nil {
 		t.Fatalf("Bot 注册失败: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestRegisterBotSignsRequestAndParsesIdentity(t *testing.T) {
 func TestDisabledManagerSkipsConnection(t *testing.T) {
 	disabled := false
 	manager := NewManager(configures.AgentIMConfig{Enabled: &disabled})
-	userID, err := manager.EnsureBot(context.Background(), "", "expected-user")
+	userID, err := manager.EnsureBot(context.Background(), "app", "", "expected-user")
 	if err != nil || userID != "expected-user" {
 		t.Fatalf("关闭 IM 后应直接返回期望用户: userID=%q err=%v", userID, err)
 	}

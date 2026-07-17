@@ -28,6 +28,7 @@ type Manager struct {
 
 // InboundMessage 表示从 SDK 收到并完成基础归一化的消息。
 type InboundMessage struct {
+	AppKey      string
 	BotUserID   string
 	SenderID    string
 	MessageID   string
@@ -45,49 +46,45 @@ func NewManager(config configures.AgentIMConfig) *Manager {
 	return &Manager{config: config, enabled: enabled, clients: map[string]*imbotclients.ImBotClient{}}
 }
 
-// Start 连接默认 Bot 和数据库中全部 active Bot；单个连接失败不阻止服务启动。
+// Start 连接数据库中全部 active Bot；单个连接失败不阻止服务启动。
 func (manager *Manager) Start(ctx context.Context, db *gorm.DB) error {
 	if !manager.enabled {
 		return nil
 	}
-	if manager.config.DefaultBotToken != "" {
-		if _, err := manager.EnsureBot(ctx, manager.config.DefaultBotToken, manager.config.DefaultBotUserID); err != nil {
-			slog.ErrorContext(ctx, "默认 IM Bot 连接失败", "error", err)
-		}
-	}
 	var bots []struct {
+		AppKey    string `gorm:"column:app_key"`
 		BotUserID string `gorm:"column:bot_user_id"`
 		Token     string `gorm:"column:token"`
 	}
-	if err := db.WithContext(ctx).Table("bots").Select("bot_user_id, token").Where("status = 'active'").Find(&bots).Error; err != nil {
+	if err := db.WithContext(ctx).Table("bots").Select("app_key, bot_user_id, token").Where("status = 'active'").Find(&bots).Error; err != nil {
 		return err
 	}
 	for _, bot := range bots {
 		if bot.Token == "" {
 			continue
 		}
-		if _, err := manager.EnsureBot(ctx, bot.Token, bot.BotUserID); err != nil {
-			slog.ErrorContext(ctx, "业务 IM Bot 连接失败", "bot_user_id", bot.BotUserID, "error", err)
+		if _, err := manager.EnsureBot(ctx, bot.AppKey, bot.Token, bot.BotUserID); err != nil {
+			slog.ErrorContext(ctx, "业务 IM Bot 连接失败", "app_key", bot.AppKey, "bot_user_id", bot.BotUserID, "error", err)
 		}
 	}
 	return nil
 }
 
 // EnsureBot 确保指定 Bot 已连接，并返回握手确认的用户 ID。
-func (manager *Manager) EnsureBot(ctx context.Context, token, expectedUserID string) (string, error) {
+func (manager *Manager) EnsureBot(ctx context.Context, appKey, token, expectedUserID string) (string, error) {
 	if !manager.enabled {
 		return expectedUserID, nil
 	}
-	if token == "" || manager.config.AppKey == "" || manager.config.WSAddress == "" {
+	if token == "" || appKey == "" || manager.config.WSAddress == "" {
 		return "", &Error{Status: 500, Code: "500_IMBOT_CREDENTIALS_NOT_CONFIGURED", Message: "IM Bot WebSocket 配置或 token 缺失"}
 	}
 	manager.mu.RLock()
-	existing := manager.clients[expectedUserID]
+	existing := manager.clients[clientKey(appKey, expectedUserID)]
 	manager.mu.RUnlock()
 	if existing != nil && existing.GetState() == utils.State_connected {
 		return expectedUserID, nil
 	}
-	client := imbotclients.NewImBotClient(manager.config.WSAddress, manager.config.AppKey)
+	client := imbotclients.NewImBotClient(manager.config.WSAddress, appKey)
 	type connectResult struct {
 		userID string
 		err    error
@@ -109,16 +106,18 @@ func (manager *Manager) EnsureBot(ctx context.Context, token, expectedUserID str
 		if response.err != nil {
 			return "", response.err
 		}
+		if expectedUserID != "" && expectedUserID != response.userID {
+			client.Disconnect()
+			return "", fmt.Errorf("Bot 连接身份不匹配 expected=%s actual=%s", expectedUserID, response.userID)
+		}
 		manager.mu.Lock()
-		old := manager.clients[response.userID]
-		client.AddMessageListener(&messageListener{manager: manager, botUserID: response.userID})
-		manager.clients[response.userID] = client
+		key := clientKey(appKey, response.userID)
+		old := manager.clients[key]
+		client.AddMessageListener(&messageListener{manager: manager, appKey: appKey, botUserID: response.userID})
+		manager.clients[key] = client
 		manager.mu.Unlock()
 		if old != nil && old != client {
 			old.Disconnect()
-		}
-		if expectedUserID != "" && expectedUserID != response.userID {
-			slog.WarnContext(ctx, "Bot 连接返回用户与预期不一致", "expected", expectedUserID, "actual", response.userID)
 		}
 		return response.userID, nil
 	}
@@ -131,9 +130,9 @@ func (manager *Manager) SetInboundHandler(handler func(context.Context, InboundM
 	manager.mu.Unlock()
 }
 
-// SendText 使用指定 Bot 向私聊用户发送普通文本消息，并返回平台消息 ID。
-func (manager *Manager) SendText(ctx context.Context, botUserID, targetUserID, text string) (string, error) {
-	client, err := manager.client(botUserID)
+// SendText 使用指定应用的 Bot 向目标会话发送普通文本消息，并返回平台消息 ID。
+func (manager *Manager) SendText(ctx context.Context, appKey, botUserID, targetID string, channelType pbobjs.ChannelType, text string) (string, error) {
+	client, err := manager.client(appKey, botUserID)
 	if err != nil {
 		return "", err
 	}
@@ -149,7 +148,7 @@ func (manager *Manager) SendText(ctx context.Context, botUserID, targetUserID, t
 	}
 	done := make(chan result, 1)
 	go func() {
-		code, ack := client.SendMessage(&sdkmodels.Conversation{ConversationId: targetUserID, ConversationType: pbobjs.ChannelType_Private}, up)
+		code, ack := client.SendMessage(&sdkmodels.Conversation{ConversationId: targetID, ConversationType: channelType}, up)
 		done <- result{code: code, ack: ack}
 	}()
 	select {
@@ -164,8 +163,8 @@ func (manager *Manager) SendText(ctx context.Context, botUserID, targetUserID, t
 }
 
 // SendStreamText 首发一条可编辑的流式文本消息。
-func (manager *Manager) SendStreamText(ctx context.Context, botUserID, targetUserID, text string, sequence int, finished bool) (string, error) {
-	client, err := manager.client(botUserID)
+func (manager *Manager) SendStreamText(ctx context.Context, appKey, botUserID, targetID string, channelType pbobjs.ChannelType, text string, sequence int, finished bool) (string, error) {
+	client, err := manager.client(appKey, botUserID)
 	if err != nil {
 		return "", err
 	}
@@ -182,7 +181,7 @@ func (manager *Manager) SendStreamText(ctx context.Context, botUserID, targetUse
 	}
 	done := make(chan result, 1)
 	go func() {
-		code, ack := client.SendMessage(&sdkmodels.Conversation{ConversationId: targetUserID, ConversationType: pbobjs.ChannelType_Private}, up)
+		code, ack := client.SendMessage(&sdkmodels.Conversation{ConversationId: targetID, ConversationType: channelType}, up)
 		done <- result{code: code, ack: ack}
 	}()
 	select {
@@ -197,8 +196,8 @@ func (manager *Manager) SendStreamText(ctx context.Context, botUserID, targetUse
 }
 
 // ModifyStreamText 更新已发送的流式文本并可将其标记为完成。
-func (manager *Manager) ModifyStreamText(ctx context.Context, botUserID, targetUserID, messageID, text string, sequence int, finished bool) error {
-	client, err := manager.client(botUserID)
+func (manager *Manager) ModifyStreamText(ctx context.Context, appKey, botUserID, targetID string, channelType pbobjs.ChannelType, messageID, text string, sequence int, finished bool) error {
+	client, err := manager.client(appKey, botUserID)
 	if err != nil {
 		return err
 	}
@@ -208,7 +207,7 @@ func (manager *Manager) ModifyStreamText(ctx context.Context, botUserID, targetU
 	if err != nil {
 		return err
 	}
-	request := &pbobjs.ModifyMsgReq{TargetId: targetUserID, ChannelType: pbobjs.ChannelType_Private, MsgId: messageID, MsgType: content.GetContentType(), MsgContent: raw}
+	request := &pbobjs.ModifyMsgReq{TargetId: targetID, ChannelType: channelType, MsgId: messageID, MsgType: content.GetContentType(), MsgContent: raw}
 	done := make(chan utils.ClientErrorCode, 1)
 	go func() { code, _ := client.ModifyMsg(request); done <- code }()
 	select {
@@ -222,18 +221,9 @@ func (manager *Manager) ModifyStreamText(ctx context.Context, botUserID, targetU
 	}
 }
 
-func (manager *Manager) client(botUserID string) (*imbotclients.ImBotClient, error) {
+func (manager *Manager) client(appKey, botUserID string) (*imbotclients.ImBotClient, error) {
 	manager.mu.RLock()
-	client := manager.clients[botUserID]
-	if client == nil && manager.config.DefaultBotUserID != "" {
-		client = manager.clients[manager.config.DefaultBotUserID]
-	}
-	if client == nil {
-		for _, candidate := range manager.clients {
-			client = candidate
-			break
-		}
-	}
+	client := manager.clients[clientKey(appKey, botUserID)]
 	manager.mu.RUnlock()
 	if client == nil {
 		return nil, &Error{Status: 503, Code: "503_NO_BOT_CONNECTION", Message: "无可用 Bot 连接"}
@@ -243,6 +233,7 @@ func (manager *Manager) client(botUserID string) (*imbotclients.ImBotClient, err
 
 type messageListener struct {
 	manager   *Manager
+	appKey    string
 	botUserID string
 }
 
@@ -265,8 +256,12 @@ func (listener *messageListener) OnMessageReceive(message *sdkmodels.Message) {
 			targetID = message.Conversation.ConversationId
 			channel = message.Conversation.ConversationType
 		}
-		go handler(context.Background(), InboundMessage{BotUserID: listener.botUserID, SenderID: message.SenderId, MessageID: message.MsgId, Text: textContent.Content, TargetID: targetID, ChannelType: channel})
+		go handler(context.Background(), InboundMessage{AppKey: listener.appKey, BotUserID: listener.botUserID, SenderID: message.SenderId, MessageID: message.MsgId, Text: textContent.Content, TargetID: targetID, ChannelType: channel})
 	}
+}
+
+func clientKey(appKey, botUserID string) string {
+	return strings.TrimSpace(appKey) + ":" + strings.TrimSpace(botUserID)
 }
 
 // OnMessageRecall 接收消息撤回事件；当前 Agent 入站链路无需二次处理。

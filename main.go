@@ -25,33 +25,7 @@ func main() {
 	}
 	//init log
 	logs.InitLogs()
-	// // init IMSDK provider
-	// imsdk.RegisterAppInfoProvider(func(appkey string) (string, string, bool) {
-	// 	// For now, use configured default appkey/secret
-	// 	// In production, this could read from database
-	// 	if appkey == configures.Config.AppKey {
-	// 		return configures.Config.AppSecret, configures.Config.ImApiDomain, true
-	// 	}
-	// 	return "", "", false
-	// })
-
-	// // init Validate secure key provider
-	// apis.RegisterSecureKeyProvider(func(appkey string) string {
-	// 	if appkey == configures.Config.AppKey {
-	// 		return configures.Config.AppSecret
-	// 	}
-	// 	return ""
-	// })
-
-	// init mysql
-	if err := dbcommons.InitMysql(); err != nil {
-		logs.Error("Init Mysql failed.", err)
-		return
-	}
-	// upgrade db
-	dbcommons.Upgrade()
-
-	// 初始化 Go Agent 平台。默认关闭，启用后会连接独立 PostgreSQL 与 Redis。
+	// 初始化统一 PostgreSQL 与 Go Agent 平台。
 	agentModule := agentbootstrap.New(configures.Config.Agent)
 	startupCtx, startupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if err := agentModule.Start(startupCtx); err != nil {
@@ -60,6 +34,12 @@ func main() {
 		return
 	}
 	startupCancel()
+	postgres, err := agentModule.DB()
+	if err != nil {
+		logs.Error("Get shared PostgreSQL failed.", err)
+		return
+	}
+	dbcommons.UsePostgres(postgres)
 
 	httpServer := gin.Default()
 	agentModule.RegisterNativeRoutes(httpServer)
@@ -68,9 +48,6 @@ func main() {
 
 	// Serve uploaded static files (avatars, etc.) publicly
 	httpServer.Static("/static", "./data")
-
-	msgCallbackGrp := httpServer.Group("/botmsgs")
-	routers.RouteMsgCallback(msgCallbackGrp)
 
 	go httpServer.Run(fmt.Sprintf(":%d", configures.Config.Port))
 

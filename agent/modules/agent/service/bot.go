@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/juggleim/jugglemate-server/agent/modules/agent/dto"
@@ -16,9 +17,9 @@ import (
 
 // CreateAgentWithBot 创建 Agent、注册 IM Bot、持久化绑定并尝试建立长连接。
 //
-// 简要描述：编排顺序与源服务一致，先创建本地 Agent 和能力，再调用 IM Server；
-// 远端注册失败时保留已创建 Agent 便于修复重试，连接失败只返回 connected=false。
-func (service *Service) CreateAgentWithBot(ctx context.Context, request dto.CreateWithBotRequest) (dto.CreateWithBotResponse, error) {
+// TIPS: 外部 Bot 注册无法加入 PostgreSQL 事务，因此先创建可补偿删除的 draft Agent；
+// 远端注册或本地 Bot 绑定失败时都删除刚创建的 Agent，避免控制台出现不可用半成品。
+func (service *Service) CreateAgentWithBot(ctx context.Context, actor Actor, request dto.CreateWithBotRequest) (dto.CreateWithBotResponse, error) {
 	if service.register == nil {
 		return dto.CreateWithBotResponse{}, businessError(500, "500_IMBOT_SERVER_API_NOT_CONFIGURED", "IM Bot 注册服务未装配")
 	}
@@ -27,15 +28,18 @@ func (service *Service) CreateAgentWithBot(ctx context.Context, request dto.Crea
 		botName = strings.TrimSpace(*request.BotName)
 	}
 	name, agentType, prompt := request.Name, request.Type, request.Prompt
-	created, err := service.CreateAgent(ctx, Actor{OwnerID: request.InviteCode}, dto.CreateRequest{Name: &name, Type: &agentType, Prompt: &prompt, LLMModel: request.LLMModel, LLMProviderID: request.LLMProviderID, SkillIDs: request.SkillIDs, ToolIDs: request.ToolIDs, KnowledgeIDs: request.KnowledgeIDs})
+	created, err := service.CreateAgent(ctx, actor, dto.CreateRequest{Name: &name, Type: &agentType, Prompt: &prompt, LLMModel: request.LLMModel, LLMProviderID: request.LLMProviderID, SkillIDs: request.SkillIDs, ToolIDs: request.ToolIDs, KnowledgeIDs: request.KnowledgeIDs})
 	if err != nil {
 		return dto.CreateWithBotResponse{}, err
 	}
-	registered, err := service.register.RegisterBot(ctx, "bot-"+strings.ReplaceAll(uuid.NewString(), "-", ""), botName)
+	registered, err := service.register.RegisterBot(ctx, actor.AppKey, "bot-"+strings.ReplaceAll(uuid.NewString(), "-", ""), botName)
 	if err != nil {
+		if cleanupErr := service.DeleteAgent(context.WithoutCancel(ctx), actor, created.ID); cleanupErr != nil {
+			slog.ErrorContext(ctx, "IM Bot 注册失败且补偿删除 Agent 失败", "agent_id", created.ID, "error", cleanupErr)
+		}
 		return dto.CreateWithBotResponse{}, mapIMError(err)
 	}
-	bot := model.Bot{ID: uuid.NewString(), OwnerID: request.InviteCode, InviteCode: request.InviteCode, BotUserID: registered.UserID, BotName: botName, Token: registered.Token, Status: "active"}
+	bot := model.Bot{ID: uuid.NewString(), AppKey: actor.AppKey, OwnerID: actor.OwnerID, InviteCode: actor.OwnerID, BotUserID: registered.UserID, BotName: botName, Token: registered.Token, Status: "active"}
 	err = service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&bot).Error; err != nil {
 			return err
@@ -43,10 +47,49 @@ func (service *Service) CreateAgentWithBot(ctx context.Context, request dto.Crea
 		return tx.Create(&model.BotBinding{ID: uuid.NewString(), BotID: bot.ID, AgentID: created.ID, Status: "active"}).Error
 	})
 	if err != nil {
+		if cleanupErr := service.DeleteAgent(context.WithoutCancel(ctx), actor, created.ID); cleanupErr != nil {
+			slog.ErrorContext(ctx, "Agent Bot 绑定失败且补偿删除 Agent 失败", "agent_id", created.ID, "bot_user_id", registered.UserID, "error", cleanupErr)
+		}
 		return dto.CreateWithBotResponse{}, err
 	}
-	connected := service.ensureBotConnection(ctx, bot.Token, bot.BotUserID)
-	return dto.CreateWithBotResponse{Agent: created, OwnerID: request.InviteCode, BotUserID: bot.BotUserID, BotName: bot.BotName, Connected: connected}, nil
+	service.grantFirstAgentRecharge(ctx, actor, created.ID)
+	connected := service.ensureBotConnection(ctx, bot.AppKey, bot.Token, bot.BotUserID)
+	return dto.CreateWithBotResponse{Agent: created, OwnerID: actor.OwnerID, BotUserID: bot.BotUserID, BotName: bot.BotName, Connected: connected}, nil
+}
+
+type firstAgentRechargeGrant struct {
+	AppKey    string     `gorm:"column:app_key;primaryKey"`
+	OwnerID   string     `gorm:"column:owner_id;primaryKey"`
+	AgentID   string     `gorm:"column:agent_id;not null"`
+	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime"`
+	GrantedAt *time.Time `gorm:"column:granted_at"`
+}
+
+func (firstAgentRechargeGrant) TableName() string { return "agent_first_recharge_grants" }
+
+func (service *Service) grantFirstAgentRecharge(ctx context.Context, actor Actor, agentID string) {
+	if service.billing == nil || !service.config.FirstAgentRechargeAmount.IsPositive() {
+		return
+	}
+	var grant firstAgentRechargeGrant
+	result := service.db.WithContext(ctx).Where("app_key=? AND owner_id=? AND agent_id=? AND granted_at IS NULL", actor.AppKey, actor.OwnerID, agentID).First(&grant)
+	if result.Error != nil {
+		if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			slog.WarnContext(ctx, "查询首个 Agent 充值赠送资格失败", "agent_id", agentID, "error", result.Error)
+		}
+		return
+	}
+	if _, err := service.billing.CreateCompletedRecharge(ctx, actor.OwnerID, service.config.FirstAgentRechargeAmount); err != nil {
+		slog.WarnContext(ctx, "首个 Agent 自动充值赠送失败", "owner_id", actor.OwnerID, "error", err)
+		return
+	}
+	now := time.Now().UTC()
+	if err := service.db.WithContext(ctx).Model(&firstAgentRechargeGrant{}).
+		Where("app_key=? AND owner_id=? AND agent_id=? AND granted_at IS NULL", actor.AppKey, actor.OwnerID, agentID).
+		Update("granted_at", now).Error; err != nil {
+		// TIPS: 充值已经入账，此处不删除资格记录，避免在不确定状态下自动重复发放。
+		slog.ErrorContext(ctx, "标记首个 Agent 充值赠送已完成失败，需人工核对", "agent_id", agentID, "error", err)
+	}
 }
 
 // BindExistingBot 将已有或请求内创建的 Bot 幂等绑定到 Agent。
@@ -67,12 +110,12 @@ func (service *Service) BindExistingBot(ctx context.Context, actor Actor, agentI
 	}
 	var bot model.Bot
 	err = service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("bot_user_id = ?", botUserID).First(&bot).Error
+		findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("app_key = ? AND bot_user_id = ?", actor.AppKey, botUserID).First(&bot).Error
 		if errors.Is(findErr, gorm.ErrRecordNotFound) {
 			if !createBot {
 				return businessError(404, "404_BOT_NOT_FOUND", "Bot 不存在且 createBot=false")
 			}
-			bot = model.Bot{ID: uuid.NewString(), OwnerID: actor.OwnerID, InviteCode: actor.OwnerID, BotUserID: botUserID, BotName: resolvedName, Token: token, Status: "active"}
+			bot = model.Bot{ID: uuid.NewString(), AppKey: actor.AppKey, OwnerID: actor.OwnerID, InviteCode: actor.OwnerID, BotUserID: botUserID, BotName: resolvedName, Token: token, Status: "active"}
 			if err := tx.Create(&bot).Error; err != nil {
 				return err
 			}
@@ -95,6 +138,13 @@ func (service *Service) BindExistingBot(ctx context.Context, actor Actor, agentI
 			return bindErr
 		}
 		if errors.Is(bindErr, gorm.ErrRecordNotFound) {
+			var activeCount int64
+			if err := tx.Model(&model.BotBinding{}).Where("agent_id=? AND status='active'", agentID).Count(&activeCount).Error; err != nil {
+				return err
+			}
+			if activeCount > 0 {
+				return businessError(409, "409_AGENT_ALREADY_HAS_BOT", "Agent 已绑定 active Bot")
+			}
 			return tx.Create(&model.BotBinding{ID: uuid.NewString(), BotID: bot.ID, AgentID: agentID, Status: "active"}).Error
 		}
 		return tx.Model(&binding).Updates(map[string]any{"status": "active"}).Error
@@ -102,7 +152,7 @@ func (service *Service) BindExistingBot(ctx context.Context, actor Actor, agentI
 	if err != nil {
 		return dto.BindBotResponse{}, err
 	}
-	connected := service.ensureBotConnection(ctx, token, botUserID)
+	connected := service.ensureBotConnection(ctx, actor.AppKey, token, botUserID)
 	detail, err := service.GetAgent(ctx, actor, agentID)
 	if err != nil {
 		return dto.BindBotResponse{}, err
@@ -110,11 +160,11 @@ func (service *Service) BindExistingBot(ctx context.Context, actor Actor, agentI
 	return dto.BindBotResponse{Agent: detail, OwnerID: actor.OwnerID, BotID: bot.ID, BotUserID: bot.BotUserID, BotName: resolvedName, Connected: connected}, nil
 }
 
-func (service *Service) ensureBotConnection(ctx context.Context, token, userID string) bool {
+func (service *Service) ensureBotConnection(ctx context.Context, appKey, token, userID string) bool {
 	if service.connections == nil {
 		return false
 	}
-	if _, err := service.connections.EnsureBot(ctx, token, userID); err != nil {
+	if _, err := service.connections.EnsureBot(ctx, appKey, token, userID); err != nil {
 		slog.WarnContext(ctx, "建立 IM Bot 长连接失败，等待启动重连", "bot_user_id", userID, "error", err)
 		return false
 	}

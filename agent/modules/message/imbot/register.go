@@ -14,8 +14,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/juggleim/jugglemate-server/commons/configures"
 )
 
 // Error 表示 IM Server 注册或连接错误。
@@ -35,30 +33,37 @@ type RegisteredBot struct {
 	Token  string
 }
 
+// CredentialResolver 按 AppKey 返回 IM AppSecret。
+type CredentialResolver func(ctx context.Context, appKey string) (string, error)
+
 // RegisterClient 调用 IM Server API 创建 Bot。
 type RegisterClient struct {
-	config configures.AgentIMConfig
-	client *http.Client
+	apiBaseURL string
+	resolve    CredentialResolver
+	client     *http.Client
 }
 
-// NewRegisterClient 创建带 TLS 与超时约束的 IM Bot 注册客户端。
-func NewRegisterClient(config configures.AgentIMConfig) *RegisterClient {
+// NewRegisterClient 创建带 TLS、超时和动态应用凭证约束的 IM Bot 注册客户端。
+func NewRegisterClient(apiBaseURL string, insecure bool, resolve CredentialResolver) *RegisterClient {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: config.ServerAPIInsecure} //nolint:gosec // 仅由显式测试配置启用。
-	return &RegisterClient{config: config, client: &http.Client{Timeout: 15 * time.Second, Transport: transport}}
+	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: insecure} //nolint:gosec // 仅由显式测试配置启用。
+	return &RegisterClient{apiBaseURL: strings.TrimRight(strings.TrimSpace(apiBaseURL), "/"), resolve: resolve, client: &http.Client{Timeout: 15 * time.Second, Transport: transport}}
 }
 
-// RegisterBot 使用 SHA1 签名头调用 `/bots/register` 并校验完整响应。
-func (client *RegisterClient) RegisterBot(ctx context.Context, botID, nickname string) (RegisteredBot, error) {
-	baseURL := strings.TrimRight(strings.TrimSpace(client.config.ServerAPIURL), "/")
-	if baseURL == "" {
+// RegisterBot 使用 SHA1 签名头调用 `/apigateway/bots/register` 并校验完整响应。
+func (client *RegisterClient) RegisterBot(ctx context.Context, appKey, botID, nickname string) (RegisteredBot, error) {
+	if client.apiBaseURL == "" {
 		return RegisteredBot{}, &Error{Status: 500, Code: "500_IMBOT_SERVER_API_NOT_CONFIGURED", Message: "IM Server API 地址未配置"}
 	}
-	if strings.TrimSpace(client.config.AppKey) == "" || strings.TrimSpace(client.config.AppSecret) == "" {
+	if strings.TrimSpace(appKey) == "" || client.resolve == nil {
 		return RegisteredBot{}, &Error{Status: 500, Code: "500_IMBOT_CREDENTIALS_NOT_CONFIGURED", Message: "IM AppKey/AppSecret 未配置"}
 	}
+	appSecret, err := client.resolve(ctx, appKey)
+	if err != nil || strings.TrimSpace(appSecret) == "" {
+		return RegisteredBot{}, &Error{Status: 500, Code: "500_IMBOT_CREDENTIALS_NOT_CONFIGURED", Message: "无法解析当前应用的 IM 凭证"}
+	}
 	body, _ := json.Marshal(map[string]any{"bot_id": botID, "nickname": nickname, "ext_fields": map[string]any{}})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/bots/register", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.apiBaseURL+"/apigateway/bots/register", bytes.NewReader(body))
 	if err != nil {
 		return RegisteredBot{}, err
 	}
@@ -68,9 +73,9 @@ func (client *RegisterClient) RegisterBot(ctx context.Context, botID, nickname s
 	}
 	nonce := nonceValue.String()
 	timestamp := fmt.Sprint(time.Now().UnixMilli())
-	digest := sha1.Sum([]byte(client.config.AppSecret + nonce + timestamp)) //nolint:gosec // IM Server 固定签名协议。
+	digest := sha1.Sum([]byte(appSecret + nonce + timestamp)) //nolint:gosec // IM Server 固定签名协议。
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("appkey", client.config.AppKey)
+	request.Header.Set("appkey", appKey)
 	request.Header.Set("nonce", nonce)
 	request.Header.Set("timestamp", timestamp)
 	request.Header.Set("signature", hex.EncodeToString(digest[:]))

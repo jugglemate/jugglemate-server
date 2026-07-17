@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	twinscompat "github.com/juggleim/jugglemate-server/agent/compatibility/twins"
 	"github.com/juggleim/jugglemate-server/agent/migrations"
 	agentapis "github.com/juggleim/jugglemate-server/agent/modules/agent/apis"
 	agentservice "github.com/juggleim/jugglemate-server/agent/modules/agent/service"
@@ -37,14 +36,14 @@ import (
 	"github.com/juggleim/jugglemate-server/agent/shared/database"
 	"github.com/juggleim/jugglemate-server/agent/shared/redisclient"
 	sharedsecurity "github.com/juggleim/jugglemate-server/agent/shared/security"
-	"github.com/juggleim/jugglemate-server/commons/agentclient"
 	"github.com/juggleim/jugglemate-server/commons/configures"
+	"github.com/juggleim/jugglemate-server/storages"
 	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
-// Module 表示与当前客服/工单域隔离的 Go Agent 平台模块。
+// Module 表示与客服/工单域共享 PostgreSQL 的 Go Agent 平台模块。
 type Module struct {
 	cfg configures.AgentConfig
 
@@ -149,7 +148,17 @@ func (module *Module) Start(ctx context.Context) error {
 		_ = database.Close(db)
 		return fmt.Errorf("启动 IM Bot 连接管理器失败: %w", err)
 	}
-	agentService := agentservice.New(db, billingService, agentservice.Config{FirstAgentRechargeAmount: firstAgentRecharge, ActivationPointsCheckEnabled: activationPointsCheck}, messageimbot.NewRegisterClient(module.cfg.IM), botConnections)
+	registerClient := messageimbot.NewRegisterClient(configures.Config.ImApiDomain, module.cfg.IM.ServerAPIInsecure, func(_ context.Context, appKey string) (string, error) {
+		app, err := storages.NewAppInfoStorage().FindByAppkey(appKey)
+		if err != nil {
+			return "", err
+		}
+		if app == nil || app.AppSecret == "" {
+			return "", fmt.Errorf("IM 应用不存在或凭证为空: %s", appKey)
+		}
+		return app.AppSecret, nil
+	})
+	agentService := agentservice.New(db, billingService, agentservice.Config{FirstAgentRechargeAmount: firstAgentRecharge, ActivationPointsCheckEnabled: activationPointsCheck}, registerClient, botConnections)
 	knowledgeRepository := knowledgerepository.New(db)
 	knowledgeService := knowledgeservice.New(knowledgeRepository, redisClient, callService, module.cfg.Knowledge)
 	knowledgeWorker := knowledgeservice.NewWorker(knowledgeRepository, redisClient, callService, billingService, module.cfg.Knowledge)
@@ -172,7 +181,6 @@ func (module *Module) Start(ctx context.Context) error {
 	module.billing = billingapis.NewHandler(billingService)
 	module.agent = agentapis.NewHandler(agentService)
 	module.reasoning = reasoningservice.New(db, callService, knowledgeService, toolsService, billingService)
-	agentclient.SetBackend(twinscompat.New(db, agentService, knowledgeService, module.reasoning))
 	messageService := messageservice.New(db, redisClient, module.reasoning, billingService, botConnections)
 	botConnections.SetInboundHandler(messageService.HandleInbound)
 	module.message = messageapis.NewHandler(messageService)
@@ -193,7 +201,6 @@ func (module *Module) Stop(ctx context.Context) error {
 		return nil
 	}
 	module.botConnections.Stop()
-	agentclient.SetBackend(nil)
 	err := errors.Join(module.knowledgeWorker.Stop(ctx), redisclient.Close(module.redis), database.Close(module.db))
 	module.redis = nil
 	module.db = nil

@@ -141,3 +141,38 @@ func ReplaceInboxMembers(ctx *gin.Context) {
 	}
 	responses.SuccessHttpResp(ctx, nil)
 }
+
+// QryInboxAgent 查询 Inbox 当前生效的 Agent-Bot 绑定。
+func QryInboxAgent(ctx *gin.Context) {
+	code, resp := consoleServices.GetInboxAgent(ctxs.ToCtx(ctx), ctx.Param("inbox_id"))
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, resp)
+}
+
+// BindInboxAgent 创建或替换 Inbox 当前生效的 Agent-Bot 绑定。
+func BindInboxAgent(ctx *gin.Context) {
+	var req consoleModels.BindInboxAgentReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_REQ_BODY_ILLEGAL)
+		return
+	}
+	code, resp := consoleServices.BindInboxAgent(ctxs.ToCtx(ctx), ctx.Param("inbox_id"), &req)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, resp)
+}
+
+// UnbindInboxAgent 解除 Inbox 当前 Agent-Bot 绑定。
+func UnbindInboxAgent(ctx *gin.Context) {
+	code := consoleServices.UnbindInboxAgent(ctxs.ToCtx(ctx), ctx.Param("inbox_id"))
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, nil)
+}

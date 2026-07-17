@@ -21,9 +21,12 @@ type resolvedModel struct {
 
 // CreateAgent 创建 Agent、初始化默认配置并按请求挂载能力。
 //
-// 简要描述：Agent 主记录先持久化，能力按源服务顺序逐项挂载；首次创建完成后尝试
-// 发放赠送 Credit，赠送侧异常只记录告警，不回滚已经成功创建的 Agent。
+// 简要描述：Agent 主记录先持久化，能力按源服务顺序逐项挂载；
+// 首个 Agent 的赠送资格在同一事务内预留，等 Bot 绑定完成后才实际发放。
 func (service *Service) CreateAgent(ctx context.Context, actor Actor, request dto.CreateRequest) (dto.DetailResponse, error) {
+	if strings.TrimSpace(actor.AppKey) == "" {
+		return dto.DetailResponse{}, businessError(400, "400_APP_KEY_REQUIRED", "创建 Agent 必须提供应用 AppKey")
+	}
 	name, err := normalizeRequired(request.Name, "name", 128)
 	if err != nil {
 		return dto.DetailResponse{}, err
@@ -45,33 +48,36 @@ func (service *Service) CreateAgent(ctx context.Context, actor Actor, request dt
 		return dto.DetailResponse{}, err
 	}
 	providerID := resolved.ProviderID
-	entity := model.Agent{ID: uuid.NewString(), OwnerID: actor.OwnerID, Name: name, Type: agentType, Prompt: &prompt, LLMModel: &resolved.ModelID, LLMProviderID: &providerID, Status: "draft", ReactConfig: reactMap(defaultReactConfig()), MemoryConfig: memoryMap(defaultMemoryConfig(summaryModel))}
-	isFirstAgent := false
-	// 简要描述：以 Owner 哈希作为事务级 advisory lock，串行化计数与创建，避免并发突破
-	// 50 个上限或重复取得“首个 Agent”赠送资格；事务结束后 PostgreSQL 自动释放锁。
+	entity := model.Agent{ID: uuid.NewString(), AppKey: actor.AppKey, OwnerID: actor.OwnerID, Name: name, Type: agentType, Prompt: &prompt, LLMModel: &resolved.ModelID, LLMProviderID: &providerID, Status: "draft", ReactConfig: reactMap(defaultReactConfig()), MemoryConfig: memoryMap(defaultMemoryConfig(summaryModel))}
+	// TIPS: 以 AppKey+Owner 哈希作为事务级 advisory lock，串行化计数、创建和赠送资格预留；
+	// 预留记录外键跟随 draft Agent 级联删除，外部 Bot 创建失败后可由下一次创建重新取得资格。
 	err = service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", actor.OwnerID).Error; err != nil {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", actor.AppKey+":"+actor.OwnerID).Error; err != nil {
 			return err
 		}
 		var count int64
-		if err := tx.Model(&model.Agent{}).Where("owner_id = ?", actor.OwnerID).Count(&count).Error; err != nil {
+		if err := tx.Model(&model.Agent{}).Where("app_key = ? AND owner_id = ?", actor.AppKey, actor.OwnerID).Count(&count).Error; err != nil {
 			return err
 		}
 		if count >= 50 {
 			return businessError(400, "400_LIMIT_EXCEEDED", "单个 Owner 的 Agent 数量已达上限")
 		}
-		isFirstAgent = count == 0
-		return tx.Create(&entity).Error
+		if err := tx.Create(&entity).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return tx.Create(&firstAgentRechargeGrant{AppKey: actor.AppKey, OwnerID: actor.OwnerID, AgentID: entity.ID}).Error
+		}
+		return nil
 	})
 	if err != nil {
 		return dto.DetailResponse{}, err
 	}
-	if isFirstAgent && service.billing != nil && service.config.FirstAgentRechargeAmount.IsPositive() {
-		if _, err := service.billing.CreateCompletedRecharge(ctx, actor.OwnerID, service.config.FirstAgentRechargeAmount); err != nil {
-			slog.WarnContext(ctx, "首个 Agent 自动充值赠送失败", "owner_id", actor.OwnerID, "error", err)
-		}
-	}
 	if err := service.mountCapabilityBatch(ctx, actor, entity.ID, request.SkillIDs, request.ToolIDs, request.KnowledgeIDs); err != nil {
+		// TIPS: 能力挂载属于创建流程的一部分；失败时清理刚创建的 draft Agent，禁止留下半成品。
+		if cleanupErr := service.db.WithContext(context.WithoutCancel(ctx)).Where("id=? AND app_key=? AND status='draft'", entity.ID, actor.AppKey).Delete(&model.Agent{}).Error; cleanupErr != nil {
+			slog.ErrorContext(ctx, "Agent 能力挂载失败且补偿删除失败", "agent_id", entity.ID, "error", cleanupErr)
+		}
 		return dto.DetailResponse{}, err
 	}
 	return service.GetAgent(ctx, actor, entity.ID)
@@ -90,9 +96,9 @@ func (service *Service) GetAgent(ctx context.Context, actor Actor, agentID strin
 }
 
 // ListAgents 分页查询当前 Owner Agent，并在首页前置系统兜底 Agent。
-func (service *Service) ListAgents(ctx context.Context, ownerID string, page, pageSize int) (dto.ListResponse, error) {
+func (service *Service) ListAgents(ctx context.Context, appKey, ownerID string, page, pageSize int) (dto.ListResponse, error) {
 	page, pageSize = normalizePage(page, pageSize)
-	query := service.db.WithContext(ctx).Model(&model.Agent{}).Where("owner_id = ?", ownerID)
+	query := service.db.WithContext(ctx).Model(&model.Agent{}).Where("app_key = ? AND owner_id = ?", appKey, ownerID)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return dto.ListResponse{}, err

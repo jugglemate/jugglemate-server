@@ -179,7 +179,6 @@ type LongTermMemoryRead struct {
 
 // CreateWithBotRequest 表示创建 Agent 并注册 Bot 的编排请求。
 type CreateWithBotRequest struct {
-	InviteCode    string   `json:"invite_code"`
 	BotName       *string  `json:"bot_name"`
 	Name          string   `json:"name"`
 	Type          string   `json:"type"`

@@ -27,7 +27,7 @@ func TestApplyDefaultsForAgentModule(t *testing.T) {
 	if conf.Agent.Profile.FirstAgentRechargeAmount != "10000" || conf.Agent.Profile.ActivationPointsCheckEnabled == nil || !*conf.Agent.Profile.ActivationPointsCheckEnabled {
 		t.Fatalf("Agent Profile 默认值不符合预期: %+v", conf.Agent.Profile)
 	}
-	if conf.Agent.IM.Enabled == nil || !*conf.Agent.IM.Enabled || conf.Agent.IM.WSAddress != "wss://127.0.0.1" || conf.Agent.IM.DefaultBotName != "JG Agent Bot" {
+	if conf.Agent.IM.Enabled == nil || !*conf.Agent.IM.Enabled || conf.Agent.IM.WSAddress != "wss://127.0.0.1" {
 		t.Fatalf("Agent IM 默认值不符合预期: %+v", conf.Agent.IM)
 	}
 }

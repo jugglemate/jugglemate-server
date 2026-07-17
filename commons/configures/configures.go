@@ -16,17 +16,9 @@ type AppConfig struct {
 		LogName string `yaml:"logName"`
 	} `yaml:"log"`
 
-	Mysql struct {
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
-		Address  string `yaml:"address"`
-		JmateDb  string `yaml:"jmateDb"`
-		Debug    bool   `yaml:"debug"`
-	} `yaml:"mysql"`
-
-	ImApiDomain   string `yaml:"imApiDomain"`
-	ImAdminDomain string `yaml:"imAdminDomain"`
-	JmateBaseUrl  string `yaml:"jmateBaseUrl"`
+	// ImApiDomain 是 Bot 注册、群组创建和群成员变更共用的 IM HTTP API 根地址。
+	ImApiDomain  string `yaml:"imApiDomain"`
+	JmateBaseUrl string `yaml:"jmateBaseUrl"`
 
 	AiBotCallbackUrl string `yaml:"aiBotCallbackUrl"`
 
@@ -39,8 +31,7 @@ type AppConfig struct {
 
 // AgentConfig Go 版智能体平台模块配置。
 //
-// PostgreSQL 用于 Agent 业务数据和向量检索，Redis 用于队列、锁及临时状态；
-// 当前客服与工单数据仍使用上方 Mysql 配置，两者互不替代。
+// PostgreSQL 同时用于客服业务、Agent 业务数据和向量检索，Redis 用于队列、锁及临时状态。
 type AgentConfig struct {
 	Enabled bool `yaml:"enabled"`
 
@@ -128,14 +119,7 @@ type AgentProfileConfig struct {
 type AgentIMConfig struct {
 	Enabled           *bool  `yaml:"enabled"`
 	WSAddress         string `yaml:"wsAddress"`
-	AppKey            string `yaml:"appKey"`
-	AppSecret         string `yaml:"appSecret"`
-	ServerAPIURL      string `yaml:"serverAPIURL"`
 	ServerAPIInsecure bool   `yaml:"serverAPIInsecure"`
-	DefaultBotToken   string `yaml:"defaultBotToken"`
-	DefaultBotUserID  string `yaml:"defaultBotUserId"`
-	DefaultBotName    string `yaml:"defaultBotName"`
-	DefaultAgentID    string `yaml:"defaultAgentId"`
 }
 
 // OssConfig 定义阿里云 OSS 上传配置。
@@ -246,8 +230,5 @@ func applyDefaults(conf *AppConfig) {
 	}
 	if conf.Agent.IM.WSAddress == "" {
 		conf.Agent.IM.WSAddress = "wss://127.0.0.1"
-	}
-	if conf.Agent.IM.DefaultBotName == "" {
-		conf.Agent.IM.DefaultBotName = "JG Agent Bot"
 	}
 }

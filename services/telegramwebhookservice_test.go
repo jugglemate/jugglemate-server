@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
@@ -167,6 +168,7 @@ func newTelegramWebhookTestEnv(t *testing.T) *telegramWebhookTestEnv {
 	oldRegister := registerIMUserForCustomer
 	oldRegisterCustomer := registerCustomerIMUserForCustomer
 	oldCreateGroup := createGroupForCustomer
+	oldResolveBot := resolveInboxAgentBotForCustomer
 	oldSyncGlobalTags := syncTicketGlobalConversationTagsForCustomer
 	oldSendGroup := sendTelegramGroupMsg
 
@@ -192,6 +194,7 @@ func newTelegramWebhookTestEnv(t *testing.T) *telegramWebhookTestEnv {
 		env.createdGroupMembers = append([]string{}, req.MemberIds...)
 		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
 	}
+	resolveInboxAgentBotForCustomer = func(context.Context, string, string) (string, error) { return "", nil }
 	syncTicketGlobalConversationTagsForCustomer = func(appkey, ticketId string) errs.IMErrorCode {
 		env.globalTagAppKey = appkey
 		env.globalTagTicketId = ticketId
@@ -214,6 +217,7 @@ func newTelegramWebhookTestEnv(t *testing.T) *telegramWebhookTestEnv {
 		registerIMUserForCustomer = oldRegister
 		registerCustomerIMUserForCustomer = oldRegisterCustomer
 		createGroupForCustomer = oldCreateGroup
+		resolveInboxAgentBotForCustomer = oldResolveBot
 		syncTicketGlobalConversationTagsForCustomer = oldSyncGlobalTags
 		sendTelegramGroupMsg = oldSendGroup
 	})

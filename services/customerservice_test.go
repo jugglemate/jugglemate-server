@@ -165,12 +165,15 @@ func TestPrepareTicketGroupMemberIdsRegistersInboxMembers(t *testing.T) {
 	}
 	registered := map[string]struct{}{}
 	oldRegister := registerIMUserForCustomer
+	oldResolveBot := resolveInboxAgentBotForCustomer
 	registerIMUserForCustomer = func(sdk *juggleimsdk.JuggleIMSdk, userId, nickname, portrait string) errs.IMErrorCode {
 		registered[userId] = struct{}{}
 		return errs.IMErrorCode_SUCCESS
 	}
+	resolveInboxAgentBotForCustomer = func(context.Context, string, string) (string, error) { return "bot_1", nil }
 	t.Cleanup(func() {
 		registerIMUserForCustomer = oldRegister
+		resolveInboxAgentBotForCustomer = oldResolveBot
 	})
 
 	code, memberIds := prepareTicketGroupMemberIds(
@@ -184,7 +187,7 @@ func TestPrepareTicketGroupMemberIdsRegistersInboxMembers(t *testing.T) {
 	if code != errs.IMErrorCode_SUCCESS {
 		t.Fatalf("code = %d", code)
 	}
-	if len(memberIds) != 3 || memberIds[0] != "customer_1" {
+	if len(memberIds) != 4 || memberIds[0] != "customer_1" || memberIds[3] != "bot_1" {
 		t.Fatalf("member ids = %v", memberIds)
 	}
 	if len(registered) != 2 {

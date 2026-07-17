@@ -23,12 +23,23 @@ export const INBOX_ENDPOINTS = {
   update: (id: string) => `/jmate/console/inboxes/${id}`,
   remove: (id: string) => `/jmate/console/inboxes/${id}`,
   members: (id: string) => `/jmate/console/inboxes/${id}/members`,
+  agent: (id: string) => `/jmate/console/inboxes/${id}/agent`,
 } as const;
 
 /** 更新收件箱请求体（名称必填；欢迎语仅对网站挂件渠道生效）。 */
 export type UpdateInboxRequest = {
   name: string;
   welcome_message?: string;
+};
+
+/** Inbox 当前生效的 Agent 与 IM Bot。 */
+export type InboxAgentBinding = {
+  agent_id: string;
+  agent_name: string;
+  bot_id: string;
+  bot_user_id: string;
+  bot_name: string;
+  sync_error?: string;
 };
 
 const InboxListResponseSchema = PaginatedResponseSchema(InboxSchema);
@@ -77,6 +88,21 @@ export async function listInboxMembers(inboxId: string): Promise<InboxMember[]> 
 
 export async function replaceInboxMembers(inboxId: string, userIds: string[]): Promise<void> {
   await httpClient.put(INBOX_ENDPOINTS.members(inboxId), { user_ids: userIds });
+}
+
+/** 查询 Inbox 当前真实绑定；未绑定时返回 null。 */
+export async function getInboxAgent(inboxId: string): Promise<InboxAgentBinding | null> {
+  return httpClient.get<InboxAgentBinding | null>(INBOX_ENDPOINTS.agent(inboxId));
+}
+
+/** 创建或替换 Inbox-Agent 绑定，并等待未关闭 Ticket 群同步完成。 */
+export async function bindInboxAgent(inboxId: string, agentId: string): Promise<InboxAgentBinding> {
+  return httpClient.put<InboxAgentBinding>(INBOX_ENDPOINTS.agent(inboxId), { agent_id: agentId });
+}
+
+/** 解除 Inbox-Agent 绑定。 */
+export async function unbindInboxAgent(inboxId: string): Promise<void> {
+  await httpClient.delete(INBOX_ENDPOINTS.agent(inboxId));
 }
 
 export function inboxChannelLabel(channelType: Inbox["channel_type"]): string {

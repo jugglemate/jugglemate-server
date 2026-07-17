@@ -25,6 +25,7 @@ import { httpClient } from "@/utils/http";
 import { agentApi } from "@/utils/agentHttp";
 import { USER_ENDPOINTS } from "@/api/user";
 import {
+  bindInboxAgent,
   createJuggleIMInbox,
   createTelegramInbox,
   createWidgetInbox,
@@ -260,6 +261,12 @@ function NewInboxWizard() {
     onError: () => message.error(t("inboxes.representativesSaveFailed")),
   });
 
+  const agentMutation = useMutation({
+    mutationFn: () => bindInboxAgent(createdInbox?.id ?? "", selectedAgentId ?? ""),
+    onSuccess: () => finishSetup(),
+    onError: () => message.error(t("agentAdmin.saveFailed")),
+  });
+
   const pickChannel = (next: WizardChannel) => {
     setChannel(next);
     setCreatedInbox(null);
@@ -374,7 +381,8 @@ function NewInboxWizard() {
           onSelect={setSelectedAgentId}
           onCreateNew={() => void navigate({ to: "/agents/new" })}
           onSkip={finishSetup}
-          onComplete={finishSetup}
+          onComplete={() => agentMutation.mutate()}
+          submitting={agentMutation.isPending}
         />
       ) : null}
     </Flex>
@@ -785,6 +793,7 @@ function AgentStep({
   onCreateNew,
   onSkip,
   onComplete,
+  submitting,
 }: {
   agents: AgentListItem[];
   loading: boolean;
@@ -793,6 +802,7 @@ function AgentStep({
   onCreateNew: () => void;
   onSkip: () => void;
   onComplete: () => void;
+  submitting: boolean;
 }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -856,12 +866,13 @@ function AgentStep({
                 key={a.agentId}
                 vertical
                 gap={token.marginSM}
-                onClick={() => onSelect(a.agentId)}
+                onClick={() => ready && onSelect(a.agentId)}
                 style={{
                   flex: "1 1 260px",
                   maxWidth: 360,
                   minHeight: 180,
-                  cursor: "pointer",
+                  cursor: ready ? "pointer" : "not-allowed",
+                  opacity: ready ? 1 : 0.65,
                   borderRadius: token.borderRadiusLG,
                   border: `1.5px solid ${selected ? BRAND.primary : BRAND.borderLow}`,
                   background: BRAND.cardBg,
@@ -915,7 +926,14 @@ function AgentStep({
           <Button type="text" onClick={onSkip}>
             {t("inboxes.skip")}
           </Button>
-          <Button type="primary" size="large" onClick={onComplete} icon={<Sparkles size={18} />}>
+          <Button
+            type="primary"
+            size="large"
+            disabled={!selectedAgentId}
+            loading={submitting}
+            onClick={onComplete}
+            icon={<Sparkles size={18} />}
+          >
             {t("inboxes.completeSetup")}
           </Button>
         </Flex>

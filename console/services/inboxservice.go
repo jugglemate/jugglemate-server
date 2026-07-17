@@ -374,11 +374,58 @@ func DeleteInbox(ctx context.Context, inboxId string) errs.IMErrorCode {
 	if ok, code := inboxExists(appkey, inboxId); !ok {
 		return code
 	}
+	if err := appServices.UnbindInboxAgent(ctx, appkey, inboxId); err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
+	}
 	// 先清空成员关系，再删除收件箱本体。
 	if err := newInboxMemberStorageForConsole().ReplaceByInbox(appkey, inboxId, nil); err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
 	}
 	if err := newInboxStorageForConsole().Delete(appkey, inboxId); err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
+	}
+	return errs.IMErrorCode_SUCCESS
+}
+
+// GetInboxAgent 查询 Inbox 当前关联的 Agent 和对应 IM Bot。
+func GetInboxAgent(ctx context.Context, inboxId string) (errs.IMErrorCode, *consoleModels.InboxAgentItem) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	if appkey == "" {
+		return errs.IMErrorCode_APP_NOT_EXISTED, nil
+	}
+	detail, err := appServices.GetInboxAgent(ctx, appkey, strings.TrimSpace(inboxId))
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if detail == nil {
+		return errs.IMErrorCode_SUCCESS, nil
+	}
+	return errs.IMErrorCode_SUCCESS, &consoleModels.InboxAgentItem{AgentID: detail.AgentID, AgentName: detail.AgentName, BotID: detail.BotID, BotUserID: detail.BotUserID, BotName: detail.BotName, SyncError: detail.SyncError}
+}
+
+// BindInboxAgent 更新 Inbox-Agent 绑定，并同步所有未关闭 Ticket 群。
+func BindInboxAgent(ctx context.Context, inboxId string, req *consoleModels.BindInboxAgentReq) (errs.IMErrorCode, *consoleModels.InboxAgentItem) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	if appkey == "" {
+		return errs.IMErrorCode_APP_NOT_EXISTED, nil
+	}
+	if req == nil || strings.TrimSpace(inboxId) == "" || strings.TrimSpace(req.AgentID) == "" {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+	detail, err := appServices.BindInboxAgent(ctx, appkey, inboxId, req.AgentID)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	return errs.IMErrorCode_SUCCESS, &consoleModels.InboxAgentItem{AgentID: detail.AgentID, AgentName: detail.AgentName, BotID: detail.BotID, BotUserID: detail.BotUserID, BotName: detail.BotName, SyncError: detail.SyncError}
+}
+
+// UnbindInboxAgent 解除 Inbox-Agent 绑定并清理未关闭 Ticket 群中的旧 Bot。
+func UnbindInboxAgent(ctx context.Context, inboxId string) errs.IMErrorCode {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	if appkey == "" {
+		return errs.IMErrorCode_APP_NOT_EXISTED
+	}
+	if err := appServices.UnbindInboxAgent(ctx, appkey, strings.TrimSpace(inboxId)); err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
 	}
 	return errs.IMErrorCode_SUCCESS

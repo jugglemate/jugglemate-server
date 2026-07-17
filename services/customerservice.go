@@ -34,6 +34,7 @@ var (
 	createGroupForCustomer                = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.GroupMembersReq) (juggleimsdk.ApiCode, string, error) {
 		return sdk.CreateGroup(req)
 	}
+	resolveInboxAgentBotForCustomer             = ResolveInboxAgentBot
 	syncTicketGlobalConversationTagsForCustomer = SyncTicketGlobalConversationTags
 )
 
@@ -122,6 +123,14 @@ func prepareTicketGroupMemberIds(
 			return code, nil
 		}
 		inboxMemberIds = append(inboxMemberIds, userId)
+	}
+	// TIPS: Ticket 才是实际 IM 群；建群时直接加入 Inbox 当前 Agent Bot，避免创建后短暂漏接消息。
+	agentBotUserID, err := resolveInboxAgentBotForCustomer(context.Background(), appkey, inboxId)
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	if strings.TrimSpace(agentBotUserID) != "" {
+		inboxMemberIds = append(inboxMemberIds, agentBotUserID)
 	}
 	return errs.IMErrorCode_SUCCESS, buildTicketGroupMemberIds(sourceId, inboxMemberIds)
 }

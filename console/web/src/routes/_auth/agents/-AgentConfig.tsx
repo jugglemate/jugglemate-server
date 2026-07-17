@@ -163,7 +163,8 @@ export function AgentConfigView({ mode, agentId }: { mode: "create" | "edit"; ag
         });
         message.success(t("common.updated"));
       } else {
-        await agentApi.post("/agents/create", {
+        await agentApi.post("/agents/with-bot", {
+          bot_name: `${values.name} Bot`,
           name: values.name,
           type: "assistant",
           prompt: values.prompt,

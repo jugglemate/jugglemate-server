@@ -37,6 +37,7 @@ type Config struct {
 // Actor 表示 Agent 用例调用方身份。
 type Actor struct {
 	OwnerID string
+	AppKey  string
 	IsAdmin bool
 }
 
@@ -81,7 +82,13 @@ func (service *Service) findAgent(ctx context.Context, agentID string) (*model.A
 }
 
 func assertPermission(actor Actor, entity *model.Agent, allowBuiltin bool) error {
-	if actor.IsAdmin || actor.OwnerID == entity.OwnerID || (allowBuiltin && entity.ID == builtinAgentID && entity.OwnerID == systemOwnerID) {
+	if allowBuiltin && entity.ID == builtinAgentID && entity.OwnerID == systemOwnerID {
+		return nil
+	}
+	if strings.TrimSpace(actor.AppKey) == "" || actor.AppKey != entity.AppKey {
+		return businessError(403, "403_APP_KEY_MISMATCH", "Agent 不属于当前应用")
+	}
+	if actor.IsAdmin || actor.OwnerID == entity.OwnerID {
 		return nil
 	}
 	return businessError(403, "403_FORBIDDEN", "无权限访问该 Agent")

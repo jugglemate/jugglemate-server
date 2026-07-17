@@ -4,14 +4,7 @@ log:
   logPath: ./logs
   logName: jugglemate-server
 
-mysql:
-  user: root
-  password: 123456
-  address: 127.0.0.1:3306
-  jmateDb: jmate_db
-
 imApiDomain: http://127.0.0.1:9001
-imAdminDomain: http://127.0.0.1:8090
 jmateBaseUrl: http://127.0.0.1:8050
 
 botConnector:
@@ -67,12 +60,5 @@ agent:
   im:
     enabled: true
     wsAddress: wss://127.0.0.1
-    appKey: ""
-    appSecret: ""
-    serverAPIURL: ""
     # 仅可信测试环境允许跳过 Server API TLS 校验。
     serverAPIInsecure: false
-    defaultBotToken: ""
-    defaultBotUserId: ""
-    defaultBotName: JG Agent Bot
-    defaultAgentId: ""

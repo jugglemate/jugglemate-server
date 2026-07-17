@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/juggleim/imbot-sdk-go/imbotclients/pbdefines/pbobjs"
 	agentmodel "github.com/juggleim/jugglemate-server/agent/modules/agent/model"
 	"github.com/juggleim/jugglemate-server/agent/modules/message/dto"
 	reasoningmodel "github.com/juggleim/jugglemate-server/agent/modules/reasoning/model"
@@ -93,7 +94,7 @@ func (service *Service) SendHumanMessage(ctx context.Context, operatorID string,
 	if err != nil {
 		return dto.HumanSendResponse{}, err
 	}
-	messageID, err := service.connections.SendText(ctx, bot.BotUserID, request.UserID, request.Text)
+	messageID, err := service.connections.SendText(ctx, bot.AppKey, bot.BotUserID, request.UserID, pbobjs.ChannelType_Private, request.Text)
 	if err != nil {
 		return dto.HumanSendResponse{}, messageError(502, "502_HUMAN_MESSAGE_SEND_FAILED", err.Error())
 	}

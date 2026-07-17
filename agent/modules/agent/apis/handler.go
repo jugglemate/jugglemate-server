@@ -25,8 +25,8 @@ func NewHandler(service *agentservice.Service) *Handler { return &Handler{servic
 // RegisterRoutes 注册 Agent Profile、生命周期、能力挂载和长期记忆接口。
 func (handler *Handler) RegisterRoutes(group *gin.RouterGroup) {
 	routes := group.Group("/agents")
-	routes.POST("", handler.create)
-	routes.POST("/create", handler.create)
+	routes.POST("", handler.createWithBot)
+	routes.POST("/create", handler.createWithBot)
 	routes.POST("/with-bot", handler.createWithBot)
 	routes.POST("/bind-bot", handler.bindBotLegacy)
 	routes.GET("", handler.list)
@@ -68,16 +68,20 @@ func (handler *Handler) create(ctx *gin.Context) {
 
 // createWithBot 创建 Agent、注册 Bot 并建立绑定。
 func (handler *Handler) createWithBot(ctx *gin.Context) {
+	actor, ok := requestActor(ctx)
+	if !ok {
+		return
+	}
 	var request dto.CreateWithBotRequest
 	if err := bindStrict(ctx, &request); err != nil {
 		validation(ctx, err)
 		return
 	}
 	if request.BotName == nil {
-		value := "bot"
+		value := strings.TrimSpace(request.Name) + " Bot"
 		request.BotName = &value
 	}
-	if strings.TrimSpace(request.InviteCode) == "" || len(request.InviteCode) > 64 || strings.TrimSpace(*request.BotName) == "" || len([]rune(*request.BotName)) > 128 || strings.TrimSpace(request.Name) == "" || len([]rune(request.Name)) > 128 || strings.TrimSpace(request.Type) == "" || len([]rune(request.Type)) > 32 || strings.TrimSpace(request.Prompt) == "" || len([]rune(request.Prompt)) > 2000 {
+	if strings.TrimSpace(*request.BotName) == "" || len([]rune(*request.BotName)) > 128 || strings.TrimSpace(request.Name) == "" || len([]rune(request.Name)) > 128 || strings.TrimSpace(request.Type) == "" || len([]rune(request.Type)) > 32 || strings.TrimSpace(request.Prompt) == "" || len([]rune(request.Prompt)) > 2000 {
 		validation(ctx, errors.New("with-bot 请求参数非法"))
 		return
 	}
@@ -85,7 +89,7 @@ func (handler *Handler) createWithBot(ctx *gin.Context) {
 		validation(ctx, err)
 		return
 	}
-	result, err := handler.service.CreateAgentWithBot(ctx.Request.Context(), request)
+	result, err := handler.service.CreateAgentWithBot(ctx.Request.Context(), actor, request)
 	respond(ctx, result, err)
 }
 
@@ -155,7 +159,7 @@ func (handler *Handler) list(ctx *gin.Context) {
 		validation(ctx, errors.New("page 或 pageSize 超出范围"))
 		return
 	}
-	result, err := handler.service.ListAgents(ctx.Request.Context(), principal.ID, page, size)
+	result, err := handler.service.ListAgents(ctx.Request.Context(), principal.AppKey, principal.ID, page, size)
 	respond(ctx, result, err)
 }
 
@@ -366,7 +370,7 @@ func requestActor(ctx *gin.Context) (agentservice.Actor, bool) {
 		unauthorized(ctx)
 		return agentservice.Actor{}, false
 	}
-	return agentservice.Actor{OwnerID: principal.ID, IsAdmin: principal.Role == identity.RoleAdmin}, true
+	return agentservice.Actor{OwnerID: principal.ID, AppKey: principal.AppKey, IsAdmin: principal.Role == identity.RoleAdmin}, true
 }
 
 func bindStrict(ctx *gin.Context, target any) error {

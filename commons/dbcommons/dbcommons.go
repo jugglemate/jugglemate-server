@@ -1,44 +1,14 @@
 package dbcommons
 
-import (
-	"fmt"
-	"time"
-
-	"github.com/juggleim/jugglemate-server/commons/configures"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-	"gorm.io/gorm/schema"
-)
+import "gorm.io/gorm"
 
 var db *gorm.DB
 
-func InitMysql() error {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		configures.Config.Mysql.User,
-		configures.Config.Mysql.Password,
-		configures.Config.Mysql.Address,
-		configures.Config.Mysql.JmateDb)
-	logMode := logger.Silent
-	if configures.Config.Mysql.Debug {
-		logMode = logger.Info
-	}
-	var err error
-	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
-		NamingStrategy: schema.NamingStrategy{SingularTable: true},
-		Logger:         logger.Default.LogMode(logMode),
-	})
-	if err != nil {
-		return err
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		return err
-	}
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(100)
-	sqlDB.SetConnMaxLifetime(time.Hour)
-	return nil
+// UsePostgres 注入由 Agent 模块统一管理的 PostgreSQL 连接池。
+//
+// TIPS: 客服域 DAO 不拥有连接生命周期，关闭动作只由 Agent 模块执行，避免共享连接被重复关闭。
+func UsePostgres(postgres *gorm.DB) {
+	db = postgres
 }
 
 func GetDb() *gorm.DB {
@@ -46,6 +16,9 @@ func GetDb() *gorm.DB {
 }
 
 func CloseDB() {
+	if db == nil {
+		return
+	}
 	sqlDB, err := db.DB()
 	if err != nil {
 		return
