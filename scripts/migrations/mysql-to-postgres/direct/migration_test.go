@@ -28,6 +28,19 @@ func TestResolveRecordApp(t *testing.T) {
 	}
 }
 
+// TestSystemOwnerCandidates 校验 system Owner 只在单 App 时可被唯一解析。
+func TestSystemOwnerCandidates(t *testing.T) {
+	owners := map[string]map[string]struct{}{}
+	addCandidate(owners, "system", "app-1")
+	if got, ok := resolveRecordApp("", owners["system"]); !ok || got != "app-1" {
+		t.Fatalf("单 App system Owner 应成功: got=%q ok=%v", got, ok)
+	}
+	addCandidate(owners, "system", "app-2")
+	if _, ok := resolveRecordApp("", owners["system"]); ok {
+		t.Fatal("多 App system Owner 必须拒绝猜测")
+	}
+}
+
 // TestTargetInsertUsesParameters 校验生成的 PostgreSQL 写入始终使用参数占位符。
 func TestTargetInsertUsesParameters(t *testing.T) {
 	definition := tableDefinitions(false)[0]

@@ -371,6 +371,13 @@ func validateLegacyMappings(ctx context.Context, source queryer, target queryer,
 	if err != nil {
 		return 0, 0, err
 	}
+	systemApps, err := loadSourceAppKeys(ctx, source, database)
+	if err != nil {
+		return 0, 0, err
+	}
+	for appKey := range systemApps {
+		addCandidate(userApps, "system", appKey)
+	}
 	agents, err := loadLegacyRecords(ctx, target, "SELECT id,owner_id,app_key FROM agents")
 	if err != nil {
 		return 0, 0, fmt.Errorf("读取历史 Agent 失败: %w", err)
@@ -418,6 +425,25 @@ func validateLegacyMappings(ctx context.Context, source queryer, target queryer,
 		}
 	}
 	return invalidAgents, invalidBots, nil
+}
+
+func loadSourceAppKeys(ctx context.Context, source queryer, database string) (map[string]struct{}, error) {
+	rows, err := source.QueryContext(ctx, fmt.Sprintf("SELECT COALESCE(app_key,'') FROM `%s`.`apps`", database))
+	if err != nil {
+		return nil, fmt.Errorf("读取 MySQL AppKey 失败: %w", err)
+	}
+	defer rows.Close()
+	result := map[string]struct{}{}
+	for rows.Next() {
+		var appKey string
+		if err := rows.Scan(&appKey); err != nil {
+			return nil, err
+		}
+		if appKey != "" {
+			result[appKey] = struct{}{}
+		}
+	}
+	return result, rows.Err()
 }
 
 func loadSourceUserApps(ctx context.Context, source queryer, database string) (map[string]map[string]struct{}, error) {
@@ -489,9 +515,13 @@ func cloneCandidates(source map[string]struct{}) map[string]struct{} {
 
 func backfillLegacyAppKeys(ctx context.Context, target *sql.Tx) error {
 	const statement = `
+CREATE TEMP TABLE stage_owner_app_keys ON COMMIT DROP AS
+SELECT user_id AS owner_id,app_key FROM users
+UNION
+SELECT 'system' AS owner_id,app_key FROM apps;
 CREATE TEMP TABLE stage_agent_app_keys ON COMMIT DROP AS
 SELECT a.id, MIN(u.app_key) AS app_key, COUNT(DISTINCT u.app_key) AS candidate_count
-FROM agents a LEFT JOIN users u ON u.user_id=a.owner_id WHERE a.app_key='' GROUP BY a.id;
+FROM agents a LEFT JOIN stage_owner_app_keys u ON u.owner_id=a.owner_id WHERE a.app_key='' GROUP BY a.id;
 DO $$ DECLARE invalid_count BIGINT; BEGIN
   SELECT COUNT(*) INTO invalid_count FROM stage_agent_app_keys WHERE candidate_count<>1;
   IF invalid_count>0 THEN RAISE EXCEPTION '存在 % 个历史 Agent 无法唯一映射 AppKey，迁移已回滚',invalid_count; END IF;
@@ -502,7 +532,7 @@ SELECT b.id,MIN(candidate.app_key) AS app_key,COUNT(DISTINCT candidate.app_key) 
 FROM bots b LEFT JOIN (
   SELECT binding.bot_id,a.app_key FROM bot_agent_bindings binding JOIN agents a ON a.id=binding.agent_id WHERE binding.status='active' AND a.app_key<>''
   UNION
-  SELECT owned.id,u.app_key FROM bots owned JOIN users u ON u.user_id=owned.owner_id
+  SELECT owned.id,u.app_key FROM bots owned JOIN stage_owner_app_keys u ON u.owner_id=owned.owner_id
 ) candidate ON candidate.bot_id=b.id WHERE b.app_key='' GROUP BY b.id;
 DO $$ DECLARE invalid_count BIGINT; BEGIN
   SELECT COUNT(*) INTO invalid_count FROM stage_bot_app_keys WHERE candidate_count<>1;

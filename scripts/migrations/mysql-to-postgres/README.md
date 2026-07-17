@@ -77,5 +77,5 @@ export JMATE_MIGRATION_CONFIRM=MIGRATE_JMATE_BUSINESS_DATA
 - 每次执行都保留 MySQL 逻辑备份和 PostgreSQL custom-format 备份。
 - 字符串以 HEX 中间格式传输，避免制表符、换行、反斜杠及 JSON 导致 COPY 转义错误。
 - 已确认的历史异常数据会删除 `inbox_id` 开头的 `0x00`，并对三张 Inbox 关联表使用相同转换。
-- 历史 Agent/Bot 只有在能通过 Owner 或既有绑定唯一映射到一个 AppKey 时才回填；无映射或跨应用冲突会回滚整个导入事务。
+- 历史 Agent/Bot 只有在能通过 Owner 或既有绑定唯一映射到一个 AppKey 时才回填；`system` Owner 仅在源 AppKey 唯一时映射，无映射或跨应用冲突会回滚整个导入事务。
 - 临时导出会在进程退出时清理；备份不会自动删除。

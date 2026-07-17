@@ -33,10 +33,15 @@ INSERT INTO tickets (id,ticket_id,source_id,assignee_id,customer_id,inbox_id,cha
 -- TIPS: 000002 在 MySQL 用户导入前执行，历史 Agent/Bot 的 app_key 暂时为空。
 -- 必须先证明每条历史记录都只有一个候选 AppKey，再在本事务内回填；无法映射或跨应用
 -- 冲突时直接回滚全部业务数据，禁止让无租户归属的 Agent/Bot 进入新版本运行态。
+CREATE TEMP TABLE stage_owner_app_keys ON COMMIT DROP AS
+SELECT user_id AS owner_id, app_key FROM users
+UNION
+SELECT 'system' AS owner_id, app_key FROM apps;
+
 CREATE TEMP TABLE stage_agent_app_keys ON COMMIT DROP AS
 SELECT a.id, MIN(u.app_key) AS app_key, COUNT(DISTINCT u.app_key) AS candidate_count
 FROM agents a
-LEFT JOIN users u ON u.user_id = a.owner_id
+LEFT JOIN stage_owner_app_keys u ON u.owner_id = a.owner_id
 WHERE a.app_key = ''
 GROUP BY a.id;
 
@@ -65,7 +70,7 @@ LEFT JOIN (
 	UNION
 	SELECT owned.id AS bot_id, u.app_key
 	FROM bots owned
-	JOIN users u ON u.user_id = owned.owner_id
+	JOIN stage_owner_app_keys u ON u.owner_id = owned.owner_id
 ) candidate ON candidate.bot_id = b.id
 WHERE b.app_key = ''
 GROUP BY b.id;
