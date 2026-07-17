@@ -18,7 +18,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	mysqldriver "github.com/go-sql-driver/mysql"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 const (
@@ -139,6 +139,123 @@ func normalizePostgresDSN(value string) (string, error) {
 	}
 	// TIPS: 当前服务端 PostgreSQL 未启用 SSL；只有配置未声明策略时才与主服务现状对齐。
 	return value + " sslmode=disable", nil
+}
+
+func postgresCommandEnvironment(dsn string, base []string) ([]string, error) {
+	connectionInfo := dsn
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		parsed, err := pq.ParseURL(dsn)
+		if err != nil {
+			return nil, fmt.Errorf("解析 PostgreSQL 连接地址失败: %w", err)
+		}
+		connectionInfo = parsed
+	}
+	parameters, err := parsePostgresConnectionInfo(connectionInfo)
+	if err != nil {
+		return nil, err
+	}
+	parameterEnvironment := map[string]string{
+		"host": "PGHOST", "hostaddr": "PGHOSTADDR", "port": "PGPORT",
+		"dbname": "PGDATABASE", "user": "PGUSER", "password": "PGPASSWORD",
+		"passfile": "PGPASSFILE", "service": "PGSERVICE", "servicefile": "PGSERVICEFILE",
+		"options": "PGOPTIONS", "application_name": "PGAPPNAME",
+		"connect_timeout": "PGCONNECT_TIMEOUT", "client_encoding": "PGCLIENTENCODING",
+		"sslmode": "PGSSLMODE", "sslcert": "PGSSLCERT", "sslkey": "PGSSLKEY",
+		"sslrootcert": "PGSSLROOTCERT", "sslcrl": "PGSSLCRL", "sslcrldir": "PGSSLCRLDIR",
+		"sslsni": "PGSSLSNI", "sslpassword": "PGSSLPASSWORD",
+		"requirepeer": "PGREQUIREPEER", "target_session_attrs": "PGTARGETSESSIONATTRS",
+		"gssencmode": "PGGSSENCMODE", "krbsrvname": "PGKRBSRVNAME",
+		"gsslib": "PGGSSLIB", "channel_binding": "PGCHANNELBINDING",
+	}
+	managed := make(map[string]struct{}, len(parameterEnvironment))
+	for _, environmentName := range parameterEnvironment {
+		managed[environmentName] = struct{}{}
+	}
+	result := make([]string, 0, len(base)+len(parameters))
+	for _, item := range base {
+		name, _, found := strings.Cut(item, "=")
+		if _, shouldReplace := managed[name]; found && shouldReplace {
+			continue
+		}
+		result = append(result, item)
+	}
+	// TIPS: pg_dump 不保证把连接 URI 识别为 PGDATABASE，因此拆成 libpq 环境变量；同时清理继承值，避免误连本机数据库。
+	for parameterName, environmentName := range parameterEnvironment {
+		if value, exists := parameters[parameterName]; exists {
+			result = append(result, environmentName+"="+value)
+		}
+	}
+	return result, nil
+}
+
+func parsePostgresConnectionInfo(value string) (map[string]string, error) {
+	parameters := make(map[string]string)
+	for index := 0; index < len(value); {
+		for index < len(value) && isConnectionSpace(value[index]) {
+			index++
+		}
+		if index == len(value) {
+			break
+		}
+		keyStart := index
+		for index < len(value) && value[index] != '=' && !isConnectionSpace(value[index]) {
+			index++
+		}
+		key := strings.ToLower(value[keyStart:index])
+		for index < len(value) && isConnectionSpace(value[index]) {
+			index++
+		}
+		if key == "" || index == len(value) || value[index] != '=' {
+			return nil, errors.New("PostgreSQL 键值 DSN 格式非法")
+		}
+		index++
+		for index < len(value) && isConnectionSpace(value[index]) {
+			index++
+		}
+		var parsed strings.Builder
+		if index < len(value) && value[index] == '\'' {
+			index++
+			closed := false
+			for index < len(value) {
+				if value[index] == '\'' {
+					index++
+					closed = true
+					break
+				}
+				if value[index] == '\\' {
+					index++
+					if index == len(value) {
+						return nil, errors.New("PostgreSQL 键值 DSN 转义不完整")
+					}
+				}
+				parsed.WriteByte(value[index])
+				index++
+			}
+			if !closed {
+				return nil, errors.New("PostgreSQL 键值 DSN 引号未闭合")
+			}
+			if index < len(value) && !isConnectionSpace(value[index]) {
+				return nil, errors.New("PostgreSQL 键值 DSN 引号后存在非法字符")
+			}
+		} else {
+			for index < len(value) && !isConnectionSpace(value[index]) {
+				if value[index] == '\\' {
+					index++
+					if index == len(value) {
+						return nil, errors.New("PostgreSQL 键值 DSN 转义不完整")
+					}
+				}
+				parsed.WriteByte(value[index])
+				index++
+			}
+		}
+		parameters[key] = parsed.String()
+	}
+	return parameters, nil
+}
+
+func isConnectionSpace(value byte) bool {
+	return value == ' ' || value == '\t' || value == '\r' || value == '\n'
 }
 
 func openDatabases(ctx context.Context, cfg config) (*sql.DB, *sql.DB, error) {

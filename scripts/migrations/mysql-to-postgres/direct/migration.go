@@ -350,7 +350,11 @@ func backupPostgres(ctx context.Context, dsn, destination string) error {
 	}
 	// TIPS: DSN 通过环境传递，避免数据库密码出现在远端进程参数和进程审计中。
 	command := exec.CommandContext(ctx, "pg_dump", "--format=custom", "--file="+partial)
-	command.Env = append(os.Environ(), "PGDATABASE="+dsn)
+	commandEnvironment, err := postgresCommandEnvironment(dsn, os.Environ())
+	if err != nil {
+		return fmt.Errorf("准备 PostgreSQL 备份连接失败: %w", err)
+	}
+	command.Env = commandEnvironment
 	if output, err := command.CombinedOutput(); err != nil {
 		_ = os.Remove(partial)
 		return fmt.Errorf("备份 PostgreSQL 失败: %w: %s", err, strings.TrimSpace(string(output)))

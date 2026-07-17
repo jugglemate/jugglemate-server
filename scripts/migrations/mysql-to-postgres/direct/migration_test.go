@@ -73,3 +73,60 @@ func TestNormalizePostgresDSN(t *testing.T) {
 		})
 	}
 }
+
+// TestPostgresCommandEnvironment 校验 URL/键值 DSN 会安全转换为 pg_dump 可识别的独立环境变量。
+func TestPostgresCommandEnvironment(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+		want map[string]string
+	}{
+		{
+			name: "url",
+			dsn:  "postgresql://agent:p%40ss@db.example:5544/jmate?sslmode=require",
+			want: map[string]string{"PGHOST": "db.example", "PGPORT": "5544", "PGUSER": "agent", "PGPASSWORD": "p@ss", "PGDATABASE": "jmate", "PGSSLMODE": "require"},
+		},
+		{
+			name: "keyword quoted",
+			dsn:  `host=127.0.0.1 port=5432 user='agent user' password='p\ ass' dbname=jmate sslmode=disable`,
+			want: map[string]string{"PGHOST": "127.0.0.1", "PGPORT": "5432", "PGUSER": "agent user", "PGPASSWORD": "p ass", "PGDATABASE": "jmate", "PGSSLMODE": "disable"},
+		},
+	}
+	for _, item := range tests {
+		t.Run(item.name, func(t *testing.T) {
+			environment, err := postgresCommandEnvironment(item.dsn, []string{"PATH=/usr/bin", "PGUSER=stale", "PGDATABASE=stale"})
+			if err != nil {
+				t.Fatalf("postgresCommandEnvironment() error = %v", err)
+			}
+			actual := environmentMap(environment)
+			for name, want := range item.want {
+				if got := actual[name]; got != want {
+					t.Fatalf("%s = %q; want %q", name, got, want)
+				}
+			}
+			if actual["PATH"] != "/usr/bin" {
+				t.Fatalf("无关环境变量未保留: %q", actual["PATH"])
+			}
+		})
+	}
+}
+
+// TestPostgresCommandEnvironmentRejectsInvalidDSN 校验异常键值 DSN 不会降级为本机默认连接。
+func TestPostgresCommandEnvironmentRejectsInvalidDSN(t *testing.T) {
+	for _, value := range []string{"host", "host='not-closed", `password=broken\`} {
+		if _, err := postgresCommandEnvironment(value, nil); err == nil {
+			t.Fatalf("非法 DSN 应返回错误: %q", value)
+		}
+	}
+}
+
+func environmentMap(environment []string) map[string]string {
+	result := make(map[string]string, len(environment))
+	for _, item := range environment {
+		name, value, found := strings.Cut(item, "=")
+		if found {
+			result[name] = value
+		}
+	}
+	return result
+}
