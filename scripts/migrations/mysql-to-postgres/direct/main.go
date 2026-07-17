@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -107,6 +108,11 @@ func loadConfig(mode string) (config, error) {
 	if _, err := strconv.Atoi(value.mysqlPort); err != nil {
 		return config{}, errors.New("JMATE_MYSQL_PORT 必须是数字")
 	}
+	normalizedDSN, err := normalizePostgresDSN(value.postgresDSN)
+	if err != nil {
+		return config{}, err
+	}
+	value.postgresDSN = normalizedDSN
 	if mode == "migrate" {
 		cleaned := filepath.Clean(value.backupDir)
 		if value.backupDir == "" || !filepath.IsAbs(cleaned) || cleaned == string(filepath.Separator) {
@@ -115,6 +121,24 @@ func loadConfig(mode string) (config, error) {
 		value.backupDir = cleaned
 	}
 	return value, nil
+}
+
+func normalizePostgresDSN(value string) (string, error) {
+	if strings.Contains(strings.ToLower(value), "sslmode=") {
+		return value, nil
+	}
+	if strings.HasPrefix(value, "postgres://") || strings.HasPrefix(value, "postgresql://") {
+		parsed, err := url.Parse(value)
+		if err != nil {
+			return "", fmt.Errorf("JMATE_POSTGRES_DSN 格式非法: %w", err)
+		}
+		query := parsed.Query()
+		query.Set("sslmode", "disable")
+		parsed.RawQuery = query.Encode()
+		return parsed.String(), nil
+	}
+	// TIPS: 当前服务端 PostgreSQL 未启用 SSL；只有配置未声明策略时才与主服务现状对齐。
+	return value + " sslmode=disable", nil
 }
 
 func openDatabases(ctx context.Context, cfg config) (*sql.DB, *sql.DB, error) {

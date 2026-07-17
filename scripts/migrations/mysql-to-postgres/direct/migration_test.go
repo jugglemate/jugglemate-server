@@ -39,3 +39,24 @@ func TestTargetInsertUsesParameters(t *testing.T) {
 		t.Fatal("INSERT 模板不得拼接业务值")
 	}
 }
+
+// TestNormalizePostgresDSN 校验 URL、键值和显式 SSL 三种 DSN 处理。
+func TestNormalizePostgresDSN(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "keyword", input: "host=127.0.0.1 dbname=jmate", want: "host=127.0.0.1 dbname=jmate sslmode=disable"},
+		{name: "url", input: "postgresql://agent@127.0.0.1/jmate", want: "postgresql://agent@127.0.0.1/jmate?sslmode=disable"},
+		{name: "explicit", input: "host=db sslmode=require", want: "host=db sslmode=require"},
+	}
+	for _, item := range tests {
+		t.Run(item.name, func(t *testing.T) {
+			got, err := normalizePostgresDSN(item.input)
+			if err != nil || got != item.want {
+				t.Fatalf("normalizePostgresDSN() = %q, %v; want %q", got, err, item.want)
+			}
+		})
+	}
+}
