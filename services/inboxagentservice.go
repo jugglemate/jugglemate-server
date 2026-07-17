@@ -198,29 +198,36 @@ func ResolveInboxAgentBot(ctx context.Context, appKey, inboxID string) (string, 
 }
 
 func syncOpenTicketAgentBot(ctx context.Context, db *gorm.DB, appKey, inboxID string, previous *InboxAgentDetail, newBotUserID string) error {
-	var tickets []storageModels.Ticket
-	if err := db.WithContext(ctx).Table("tickets").Where("app_key=? AND inbox_id=? AND status<>?", appKey, inboxID, int(storageModels.TicketStatusClosed)).Find(&tickets).Error; err != nil {
+	// TIPS: 这里只取 ticket_id，不要 Find 进 storageModels.Ticket。该模型的 CreatedTime/
+	// UpdatedTime 是 MySQL 时代的 int64 毫秒，而 Postgres 的 tickets.created_time 是
+	// TIMESTAMPTZ，整表扫描会直接报 “converting driver.Value type time.Time to a int64”。
+	// 时间字段的转换只在 DAO 层（storages/dbs/ticketdao.go 的 TicketDao）做，服务层绕过 DAO
+	// 直接查表就会踩到这个模型与库结构的错配。
+	var ticketIDs []string
+	if err := db.WithContext(ctx).Table("tickets").
+		Where("app_key=? AND inbox_id=? AND status<>?", appKey, inboxID, int(storageModels.TicketStatusClosed)).
+		Pluck("ticket_id", &ticketIDs).Error; err != nil {
 		return err
 	}
-	if len(tickets) == 0 {
+	if len(ticketIDs) == 0 {
 		return nil
 	}
 	sdk := getImSdkForInboxAgent(appKey)
 	if sdk == nil {
 		return fmt.Errorf("无法使用 AppKey %s 初始化 IM SDK", appKey)
 	}
-	for _, ticket := range tickets {
+	for _, ticketID := range ticketIDs {
 		if newBotUserID != "" {
-			code, _, err := addInboxAgentToGroup(sdk, juggleimsdk.GroupMembersReq{GroupId: ticket.TicketId, MemberIds: []string{newBotUserID}})
+			code, _, err := addInboxAgentToGroup(sdk, juggleimsdk.GroupMembersReq{GroupId: ticketID, MemberIds: []string{newBotUserID}})
 			if err != nil || code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
-				return ticketGroupSyncError("向 Ticket 群添加 Agent Bot 失败", ticket.TicketId, code, err)
+				return ticketGroupSyncError("向 Ticket 群添加 Agent Bot 失败", ticketID, code, err)
 			}
 		}
 		// TIPS: 换绑时先加新 Bot 再移除旧 Bot，中途失败最多造成两者短暂共存，不会让群失去可用 Bot。
 		if previous != nil && previous.BotUserID != "" && previous.BotUserID != newBotUserID {
-			code, _, err := removeInboxAgentFromGroup(sdk, juggleimsdk.GroupMembersReq{GroupId: ticket.TicketId, MemberIds: []string{previous.BotUserID}})
+			code, _, err := removeInboxAgentFromGroup(sdk, juggleimsdk.GroupMembersReq{GroupId: ticketID, MemberIds: []string{previous.BotUserID}})
 			if err != nil || code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
-				return ticketGroupSyncError("从 Ticket 群移除旧 Agent Bot 失败", ticket.TicketId, code, err)
+				return ticketGroupSyncError("从 Ticket 群移除旧 Agent Bot 失败", ticketID, code, err)
 			}
 		}
 	}
