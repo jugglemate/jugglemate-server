@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"strings"
@@ -65,6 +66,9 @@ func ProcessWebhookMessage(appkey string, payload WebhookMessagePayload) errs.IM
 	}
 	if strings.TrimSpace(ticket.SourceId) == payload.Sender {
 		log.Printf("[WebhookMsgs] skip: sender is ticket source appkey=%s ticket_id=%s source_id=%s msg_id=%s", appkey, ticket.TicketId, ticket.SourceId, payload.MsgID)
+		// TIPS: 这条分支就是"客户说话了"。客户消息由 IM 直连投递给群内 Bot，不走 webhook 出站，
+		// 所以 Bot 不回复时这里是唯一能同时拿到 ticket 和时间点的位置，顺手把链路状态打出来。
+		LogTicketAgentBotDiagnostics(context.Background(), appkey, ticket.InboxId, ticket.TicketId, payload.MsgID)
 		return errs.IMErrorCode_SUCCESS
 	}
 

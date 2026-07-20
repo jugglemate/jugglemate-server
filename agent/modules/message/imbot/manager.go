@@ -24,6 +24,9 @@ type Manager struct {
 	mu      sync.RWMutex
 	clients map[string]*imbotclients.ImBotClient
 	handler func(context.Context, InboundMessage)
+	stop    chan struct{}
+	// stopOnce 保证 Stop 可重入：模块关闭与测试清理都可能调用它。
+	stopOnce sync.Once
 }
 
 // InboundMessage 表示从 SDK 收到并完成基础归一化的消息。
@@ -43,7 +46,7 @@ func NewManager(config configures.AgentIMConfig) *Manager {
 	if config.Enabled != nil {
 		enabled = *config.Enabled
 	}
-	return &Manager{config: config, enabled: enabled, clients: map[string]*imbotclients.ImBotClient{}}
+	return &Manager{config: config, enabled: enabled, clients: map[string]*imbotclients.ImBotClient{}, stop: make(chan struct{})}
 }
 
 // Start 连接数据库中全部 active Bot；单个连接失败不阻止服务启动。
@@ -85,7 +88,70 @@ func (manager *Manager) Start(ctx context.Context, db *gorm.DB) error {
 		slog.InfoContext(ctx, "[IMBot] Bot 连接成功", "app_key", bot.AppKey, "bot_user_id", bot.BotUserID)
 	}
 	slog.InfoContext(ctx, "[IMBot] Bot 连接建立完毕", "connected", connected, "skipped_no_token", skipped, "failed", failed)
+	go manager.watchConnections()
 	return nil
+}
+
+// ConnectionState 返回指定 Bot 长连接的当前状态，用于入站链路诊断。
+//
+// TIPS: SDK 内部有自动重连，连接掉线后 GetState() 会在 disconnected/connecting 之间跳变，
+// 但 Manager 的 clients 里仍然留着这个客户端对象。因此"有 client"不等于"能收消息"，
+// 排查 Bot 不回消息时必须看状态而不是看有没有注册。
+func (manager *Manager) ConnectionState(appKey, botUserID string) string {
+	if manager == nil {
+		return "no_manager"
+	}
+	if !manager.enabled {
+		return "disabled"
+	}
+	manager.mu.RLock()
+	client := manager.clients[clientKey(appKey, botUserID)]
+	manager.mu.RUnlock()
+	if client == nil {
+		return "no_client"
+	}
+	return describeState(client.GetState())
+}
+
+func describeState(state utils.ConnectState) string {
+	switch state {
+	case utils.State_connected:
+		return "connected"
+	case utils.State_Connecting:
+		return "connecting"
+	case utils.State_Disconnect:
+		return "disconnected"
+	default:
+		return fmt.Sprintf("unknown(%d)", state)
+	}
+}
+
+// watchConnections 周期性输出全部 Bot 长连接状态，便于事后对照消息时间点排查掉线。
+func (manager *Manager) watchConnections() {
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-manager.stop:
+			return
+		case <-ticker.C:
+			manager.mu.RLock()
+			states := make(map[string]string, len(manager.clients))
+			for key, client := range manager.clients {
+				states[key] = describeState(client.GetState())
+			}
+			manager.mu.RUnlock()
+			connected := 0
+			details := make([]string, 0, len(states))
+			for key, state := range states {
+				if state == "connected" {
+					connected++
+				}
+				details = append(details, key+"="+state)
+			}
+			slog.Info("[IMBot] 长连接巡检", "total", len(states), "connected", connected, "details", strings.Join(details, ","))
+		}
+	}
 }
 
 // EnsureBot 确保指定 Bot 已连接，并返回握手确认的用户 ID。
@@ -103,6 +169,7 @@ func (manager *Manager) EnsureBot(ctx context.Context, appKey, token, expectedUs
 	existing := manager.clients[clientKey(appKey, expectedUserID)]
 	manager.mu.RUnlock()
 	if existing != nil && existing.GetState() == utils.State_connected {
+		slog.InfoContext(ctx, "[IMBot] EnsureBot 复用已有连接", "app_key", appKey, "bot_user_id", expectedUserID)
 		return expectedUserID, nil
 	}
 	slog.InfoContext(ctx, "[IMBot] 正在连接 Bot", "app_key", appKey, "bot_user_id", expectedUserID, "ws_address", manager.config.WSAddress)
@@ -141,6 +208,8 @@ func (manager *Manager) EnsureBot(ctx context.Context, appKey, token, expectedUs
 		if old != nil && old != client {
 			old.Disconnect()
 		}
+		slog.InfoContext(ctx, "[IMBot] EnsureBot 连接完成", "app_key", appKey, "bot_user_id", response.userID,
+			"state", describeState(client.GetState()), "replaced_old_client", old != nil && old != client)
 		return response.userID, nil
 	}
 }
@@ -378,6 +447,7 @@ func (manager *Manager) DisconnectBot(appKey, botUserID string) {
 
 // Stop 主动断开全部 Bot，SDK 不再自动重连。
 func (manager *Manager) Stop() {
+	manager.stopOnce.Do(func() { close(manager.stop) })
 	manager.mu.Lock()
 	clients := make([]*imbotclients.ImBotClient, 0, len(manager.clients))
 	for _, client := range manager.clients {

@@ -37,6 +37,7 @@ import (
 	"github.com/juggleim/jugglemate-server/agent/shared/redisclient"
 	sharedsecurity "github.com/juggleim/jugglemate-server/agent/shared/security"
 	"github.com/juggleim/jugglemate-server/commons/configures"
+	"github.com/juggleim/jugglemate-server/services"
 	"github.com/juggleim/jugglemate-server/storages"
 	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
@@ -197,6 +198,8 @@ func (module *Module) Start(ctx context.Context) error {
 	module.reasoning = reasoningservice.New(db, callService, knowledgeService, toolsService, billingService)
 	messageService := messageservice.New(db, redisClient, module.reasoning, billingService, botConnections)
 	botConnections.SetInboundHandler(messageService.HandleInbound)
+	// TIPS: 让主工程的 webhook 诊断日志能查到 Bot 长连接状态，避免 services 反向依赖 Agent 模块。
+	services.SetBotConnectionStateProbe(botConnections.ConnectionState)
 	module.message = messageapis.NewHandler(messageService)
 	module.operations = operationsapis.NewHandler(operationsservice.New(db, agentService))
 	module.botConnections = botConnections

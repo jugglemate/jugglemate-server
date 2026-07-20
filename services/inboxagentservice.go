@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -197,6 +198,65 @@ func ResolveInboxAgentBot(ctx context.Context, appKey, inboxID string) (string, 
 	return detail.BotUserID, nil
 }
 
+// botConnectionStateProbe 由 Agent 模块启动时注入，返回指定 Bot 长连接的当前状态。
+//
+// TIPS: services 包不持有 imbot.Manager 实例，用函数变量注入避免反向依赖 Agent 模块，
+// 与本文件里 getImSdkForInboxAgent 的做法一致。未注入时诊断日志退化为 unknown，不报错。
+var botConnectionStateProbe func(appKey, botUserID string) string
+
+// SetBotConnectionStateProbe 注入 Bot 长连接状态探针，由 Agent 模块启动时调用一次。
+//
+// @param probe 入参为 appKey 与 botUserID，返回 connected/connecting/disconnected/no_client 等状态描述
+func SetBotConnectionStateProbe(probe func(appKey, botUserID string) string) {
+	botConnectionStateProbe = probe
+}
+
+// LogTicketAgentBotDiagnostics 在客户消息进入 Ticket 群时输出 Agent 回复链路的诊断信息。
+//
+// 客户消息由 IM 直接投递给群内 Bot 的长连接，不经过本进程的 webhook 分支，因此 Bot 不回复时
+// webhook 日志里看不到任何线索。这里把三个独立的必要条件一次性打出来，定位断点：
+//   - 绑定：该 Ticket 所属 Inbox 有没有 active 的 Agent-Bot 绑定，上次同步有没有报错
+//   - 连接：该 Bot 在本进程里长连接是否处于 connected
+//   - 成员：该 Bot 在 IM 侧是否真的是这个 Ticket 群的成员
+//
+// 三者缺一，Bot 都收不到消息。任何一步查询失败都只记日志，绝不影响 webhook 主流程。
+//
+// @param ctx 请求上下文
+// @param appKey 应用 AppKey
+// @param inboxID Ticket 所属 Inbox ID
+// @param ticketID Ticket 群 ID
+// @param msgID 触发诊断的消息 ID，用于和 webhook 日志对齐
+func LogTicketAgentBotDiagnostics(ctx context.Context, appKey, inboxID, ticketID, msgID string) {
+	detail, err := GetInboxAgent(ctx, appKey, inboxID)
+	if err != nil {
+		log.Printf("[AgentDiag] 绑定查询失败 appkey=%s inbox_id=%s ticket_id=%s msg_id=%s err=%v", appKey, inboxID, ticketID, msgID, err)
+		return
+	}
+	if detail == nil {
+		log.Printf("[AgentDiag] Inbox 未绑定 Agent，不会有 Bot 回复 appkey=%s inbox_id=%s ticket_id=%s msg_id=%s", appKey, inboxID, ticketID, msgID)
+		return
+	}
+	state := "unknown(probe_not_set)"
+	if botConnectionStateProbe != nil {
+		state = botConnectionStateProbe(appKey, detail.BotUserID)
+	}
+	log.Printf("[AgentDiag] 绑定与连接 appkey=%s inbox_id=%s ticket_id=%s msg_id=%s agent_id=%s bot_user_id=%s conn_state=%s sync_error=%q",
+		appKey, inboxID, ticketID, msgID, detail.AgentID, detail.BotUserID, state, detail.SyncError)
+
+	sdk := getImSdkForInboxAgent(appKey)
+	if sdk == nil {
+		log.Printf("[AgentDiag] 群成员核对跳过：IM SDK 初始化失败 appkey=%s ticket_id=%s", appKey, ticketID)
+		return
+	}
+	members, code, _, err := sdk.GroupMembersByIds(juggleimsdk.GroupMembersReq{GroupId: ticketID, MemberIds: []string{detail.BotUserID}})
+	if err != nil || code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
+		log.Printf("[AgentDiag] 群成员核对失败 ticket_id=%s bot_user_id=%s code=%d err=%v", ticketID, detail.BotUserID, code, err)
+		return
+	}
+	inGroup := members != nil && len(members.Items) > 0
+	log.Printf("[AgentDiag] 群成员核对 ticket_id=%s bot_user_id=%s in_group=%t", ticketID, detail.BotUserID, inGroup)
+}
+
 func syncOpenTicketAgentBot(ctx context.Context, db *gorm.DB, appKey, inboxID string, previous *InboxAgentDetail, newBotUserID string) error {
 	// TIPS: 这里只取 ticket_id，不要 Find 进 storageModels.Ticket。该模型的 CreatedTime/
 	// UpdatedTime 是 MySQL 时代的 int64 毫秒，而 Postgres 的 tickets.created_time 是
@@ -210,8 +270,15 @@ func syncOpenTicketAgentBot(ctx context.Context, db *gorm.DB, appKey, inboxID st
 		return err
 	}
 	if len(ticketIDs) == 0 {
+		log.Printf("[AgentSync] 无未关闭 Ticket，跳过群成员同步 appkey=%s inbox_id=%s new_bot=%s", appKey, inboxID, newBotUserID)
 		return nil
 	}
+	previousBot := ""
+	if previous != nil {
+		previousBot = previous.BotUserID
+	}
+	log.Printf("[AgentSync] 开始同步 Ticket 群 Bot 成员 appkey=%s inbox_id=%s open_tickets=%d new_bot=%s previous_bot=%s",
+		appKey, inboxID, len(ticketIDs), newBotUserID, previousBot)
 	sdk := getImSdkForInboxAgent(appKey)
 	if sdk == nil {
 		return fmt.Errorf("无法使用 AppKey %s 初始化 IM SDK", appKey)
@@ -231,6 +298,7 @@ func syncOpenTicketAgentBot(ctx context.Context, db *gorm.DB, appKey, inboxID st
 			}
 		}
 	}
+	log.Printf("[AgentSync] Ticket 群 Bot 成员同步完成 appkey=%s inbox_id=%s open_tickets=%d new_bot=%s", appKey, inboxID, len(ticketIDs), newBotUserID)
 	return nil
 }
 
