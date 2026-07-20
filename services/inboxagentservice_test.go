@@ -64,6 +64,97 @@ func TestBindInboxAgentAgainstPostgres(t *testing.T) {
 	}
 }
 
+// TestRebindInboxAgentAgainstPostgres 验收换绑：新 Bot 必须先进群，旧 Bot 再被移出。
+func TestRebindInboxAgentAgainstPostgres(t *testing.T) {
+	dsn := os.Getenv("AGENT_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("未设置 AGENT_TEST_POSTGRES_DSN")
+	}
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("连接 PostgreSQL 失败: %v", err)
+	}
+	dbcommons.UsePostgres(db)
+	t.Cleanup(func() { dbcommons.UsePostgres(nil) })
+
+	const appKey = "test_bind_appkey"
+	seedInboxAgentFixture(t, db, appKey)
+	seedSecondAgentFixture(t, db, appKey)
+	calls := stubInboxAgentIMSdk(t)
+	ctx := context.Background()
+
+	if _, err := BindInboxAgent(ctx, appKey, "inbox_bind_1", "agent_bind_1"); err != nil {
+		t.Fatalf("首次绑定失败: %v", err)
+	}
+	*calls = (*calls)[:0]
+
+	// 换绑到另一个 Agent。
+	detail, err := BindInboxAgent(ctx, appKey, "inbox_bind_1", "agent_bind_2")
+	if err != nil {
+		t.Fatalf("换绑失败: %v", err)
+	}
+	if detail == nil || detail.BotUserID != "bot_user_bind_2" {
+		t.Fatalf("换绑结果不符: %+v", detail)
+	}
+
+	// 关键：必须先加新 Bot 再移除旧 Bot —— 反过来会让群在中途完全没有可用 Bot。
+	want := []string{"add:ticket_open_1:bot_user_bind_2", "del:ticket_open_1:bot_user_bind_1"}
+	if len(*calls) != 2 || (*calls)[0] != want[0] || (*calls)[1] != want[1] {
+		t.Fatalf("换绑的群成员操作不符合预期:\n实际 %v\n期望 %v", *calls, want)
+	}
+
+	// 绑定记录必须指向新 Agent 与新 Bot。
+	var row struct {
+		AgentID string
+		BotID   string
+	}
+	if err := db.Table("inbox_agent_bindings").Select("agent_id,bot_id").
+		Where("app_key=? AND inbox_id=?", appKey, "inbox_bind_1").Take(&row).Error; err != nil {
+		t.Fatalf("查询绑定失败: %v", err)
+	}
+	if row.AgentID != "agent_bind_2" || row.BotID != "bot_bind_2" {
+		t.Fatalf("绑定未切换: %+v", row)
+	}
+
+	// 重复绑定同一个 Agent 时，旧 Bot 与新 Bot 是同一个，不能把它误删出群。
+	*calls = (*calls)[:0]
+	if _, err := BindInboxAgent(ctx, appKey, "inbox_bind_1", "agent_bind_2"); err != nil {
+		t.Fatalf("重复绑定失败: %v", err)
+	}
+	for _, call := range *calls {
+		if strings.HasPrefix(call, "del:") {
+			t.Fatalf("重复绑定同一 Agent 不应移除其 Bot: %v", *calls)
+		}
+	}
+}
+
+// seedSecondAgentFixture 追加第二个带 active Bot 的 Agent，用于换绑。
+func seedSecondAgentFixture(t *testing.T, db *gorm.DB, appKey string) {
+	t.Helper()
+	cleanup := func() {
+		db.Exec("DELETE FROM bot_agent_bindings WHERE agent_id='agent_bind_2'")
+		db.Exec("DELETE FROM bots WHERE id='bot_bind_2'")
+		db.Exec("DELETE FROM agents WHERE id='agent_bind_2'")
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{agentInsertSQL, []any{"agent_bind_2", "owner_1", "second agent", appKey}},
+		{"INSERT INTO bots (id, owner_id, invite_code, bot_user_id, bot_name, token, status, app_key, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,now(),now())",
+			[]any{"bot_bind_2", "owner_1", "invite_bind_2", "bot_user_bind_2", "second bot", "token_bind_2", "active", appKey}},
+		{"INSERT INTO bot_agent_bindings (id, bot_id, agent_id, status, created_at, updated_at) VALUES (?,?,?,?,now(),now())",
+			[]any{"bab_bind_2", "bot_bind_2", "agent_bind_2", "active"}},
+	}
+	for _, statement := range statements {
+		if err := db.Exec(statement.sql, statement.args...).Error; err != nil {
+			t.Fatalf("准备第二个 Agent 失败: %v", err)
+		}
+	}
+}
+
 // stubInboxAgentIMSdk 挡掉真实 IM 调用，并记录建群同步动作。
 func stubInboxAgentIMSdk(t *testing.T) *[]string {
 	t.Helper()
