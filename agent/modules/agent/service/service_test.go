@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/juggleim/jugglemate-server/agent/modules/agent/dto"
@@ -61,5 +62,28 @@ func TestAgentConfigValidation(t *testing.T) {
 	memory.LongTermInjectTopK = 11
 	if err := validateMemory(memory); err == nil {
 		t.Fatal("长期记忆注入条数超过上限时应拒绝")
+	}
+}
+
+// TestNewBotUserIDFormat 校验 Bot 身份复用统一 ID 生成规则且互不重复。
+func TestNewBotUserIDFormat(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 100; i++ {
+		id := newBotUserID()
+		if !strings.HasPrefix(id, BotUserIDPrefix) {
+			t.Fatalf("缺少前缀: %s", id)
+		}
+		// tools.GenerateUUIDShort22 固定产出 22 个字符。
+		if got := len(id) - len(BotUserIDPrefix); got != 22 {
+			t.Fatalf("随机段长度应为 22，实际 %d: %s", got, id)
+		}
+		// bots.bot_user_id 是 VARCHAR(64)。
+		if len(id) > 64 {
+			t.Fatalf("超出 bot_user_id 列长度: %s", id)
+		}
+		if seen[id] {
+			t.Fatalf("生成了重复 ID: %s", id)
+		}
+		seen[id] = true
 	}
 }

@@ -11,9 +11,25 @@ import (
 	"github.com/juggleim/jugglemate-server/agent/modules/agent/dto"
 	"github.com/juggleim/jugglemate-server/agent/modules/agent/model"
 	"github.com/juggleim/jugglemate-server/agent/modules/message/imbot"
+	"github.com/juggleim/jugglemate-server/commons/tools"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// BotUserIDPrefix 是 Bot IM 身份的统一前缀。
+const BotUserIDPrefix = "bot-"
+
+// newBotUserID 生成注册 IM Bot 时使用的身份标识。
+//
+// TIPS: 复用 tools.GenerateUUIDShort22，与 ticket_/customer_ 等业务 ID 保持同一套
+// 生成规则；它把 UUID 的 128 位压成 22 个字符，比 UUID 去连字符的 32 位十六进制更短，
+// 且同样来自 uuid.New()，碰撞概率不变。
+//
+// 注意：该函数只影响新注册的 Bot。已入库的 bot_user_id 是 IM 侧身份，不会也不应被回溯
+// 改写，因此库里长期会同时存在新旧两种长度的值，任何地方都不要按长度或格式解析它。
+func newBotUserID() string {
+	return BotUserIDPrefix + tools.GenerateUUIDShort22()
+}
 
 // CreateAgentWithBot 创建 Agent、注册 IM Bot、持久化绑定并尝试建立长连接。
 //
@@ -32,7 +48,7 @@ func (service *Service) CreateAgentWithBot(ctx context.Context, actor Actor, req
 	if err != nil {
 		return dto.CreateWithBotResponse{}, err
 	}
-	registered, err := service.register.RegisterBot(ctx, actor.AppKey, "bot-"+strings.ReplaceAll(uuid.NewString(), "-", ""), botName)
+	registered, err := service.register.RegisterBot(ctx, actor.AppKey, newBotUserID(), botName)
 	if err != nil {
 		if cleanupErr := service.purgeDraftAgent(context.WithoutCancel(ctx), actor.AppKey, created.ID); cleanupErr != nil {
 			slog.ErrorContext(ctx, "IM Bot 注册失败且补偿删除 Agent 失败", "agent_id", created.ID, "error", cleanupErr)
