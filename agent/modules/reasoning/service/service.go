@@ -243,9 +243,9 @@ func (service *Service) loadAgent(ctx context.Context, request Request) (*agentm
 		}
 		return nil, err
 	}
-	if request.OwnerID != "" && request.OwnerID != agent.OwnerID && request.OwnerID != "system" {
-		return nil, businessError(403, "403_FORBIDDEN", "无权限访问该 Agent")
-	}
+	// TIPS: 对话入口不再做 owner 归属校验 —— `/agents/active` 本就按 app_key 返回同应用下
+	// 所有 Owner 的 active Agent（含系统内置 Agent），这里再按 owner_id 严格比对会让「列表里
+	// 能选、点进去必 403」。可用性口径统一由 status 判断，多租户隔离仍由列表侧的 app_key 保证。
 	if agent.Status == "archived" {
 		return nil, businessError(403, "403_AGENT_ARCHIVED", "Agent 已归档")
 	}

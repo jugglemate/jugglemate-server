@@ -264,9 +264,8 @@ func (service *Service) assertAgentReadable(ctx context.Context, ownerID, agentI
 		}
 		return err
 	}
-	if ownerID != "system" && agent.OwnerID != ownerID && agent.OwnerID != "system" {
-		return messageError(403, "403_FORBIDDEN", "无权访问该 Agent")
-	}
+	// TIPS: 与 reasoning.loadAgent 保持同一口径 —— 会话查询不再做 owner 归属校验，
+	// 只保证 Agent 存在；否则同应用下换个账号查同一个 Agent 的会话就会 403。
 	return nil
 }
 
