@@ -55,12 +55,6 @@ func Route(eng *gin.Engine, prefix string, agentRouters ...AgentRouter) {
 	}
 }
 
-// RouteMsgCallback 注册 IM 消息回调与节点转发入口。
-func RouteMsgCallback(group *gin.RouterGroup) {
-	group.POST("/msgcallback", apis.MsgCallback)
-	group.POST("/forward", apis.MsgCallbackForward)
-}
-
 func corsHandler() gin.HandlerFunc {
 	return func(context *gin.Context) {
 		method := context.Request.Method

@@ -143,6 +143,50 @@ func (service *Service) ListAgents(ctx context.Context, appKey, ownerID string, 
 	return dto.ListResponse{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
+// ListActiveAgents 分页查询当前 Owner 处于 active 状态的 Agent。
+//
+// TIPS: 与 ListAgents 的差别只有状态口径 —— ListAgents 排除 deleted（draft/paused/
+// archived 都会返回），这里只保留 active。前端做「选一个可用 Agent 去对话」时用这个，
+// 免得把还没激活或已暂停的 Agent 也摆出来。系统兜底 Agent 同样只在其自身 active 时前置。
+func (service *Service) ListActiveAgents(ctx context.Context, appKey, ownerID string, page, pageSize int) (dto.ListResponse, error) {
+	page, pageSize = normalizePage(page, pageSize)
+	query := service.db.WithContext(ctx).Model(&model.Agent{}).
+		Where("app_key = ? AND owner_id = ? AND status = ?", appKey, ownerID, statusActive)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return dto.ListResponse{}, err
+	}
+	var entities []model.Agent
+	if err := query.Order("updated_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {
+		return dto.ListResponse{}, err
+	}
+	if ownerID != systemOwnerID && page == 1 {
+		var builtin model.Agent
+		err := service.db.WithContext(ctx).
+			Where("id = ? AND owner_id = ? AND status = ?", builtinAgentID, systemOwnerID, statusActive).
+			First(&builtin).Error
+		if err == nil {
+			entities = append([]model.Agent{builtin}, entities...)
+			total++
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return dto.ListResponse{}, err
+		}
+	}
+	knowledgeCounts, err := service.bindingCounts(ctx, "agent_knowledge", entities)
+	if err != nil {
+		return dto.ListResponse{}, err
+	}
+	toolCounts, err := service.bindingCounts(ctx, "agent_tools", entities)
+	if err != nil {
+		return dto.ListResponse{}, err
+	}
+	items := make([]dto.ConsoleListItem, 0, len(entities))
+	for index := range entities {
+		items = append(items, service.toListItem(&entities[index], knowledgeCounts[entities[index].ID], toolCounts[entities[index].ID]))
+	}
+	return dto.ListResponse{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
 // UpdateAgent 按补丁更新 Agent Profile、记忆配置和目标能力集合。
 func (service *Service) UpdateAgent(ctx context.Context, actor Actor, request dto.UpdateRequest) (dto.DetailResponse, error) {
 	entity, err := service.findAgent(ctx, request.AgentID)

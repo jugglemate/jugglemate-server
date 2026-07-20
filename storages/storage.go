@@ -40,7 +40,3 @@ func NewInboxStorage() models.IInboxStorage {
 func NewInboxMemberStorage() models.IInboxMemberStorage {
 	return &dbs.InboxMemberDao{}
 }
-
-func NewAgentStorage() models.AgentStorage {
-	return &dbs.AgentDao{}
-}

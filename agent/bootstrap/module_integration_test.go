@@ -49,8 +49,8 @@ func TestModuleStartAndStopAgainstInfrastructure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	module.RegisterNativeRoutes(engine)
-	if count := len(engine.Routes()); count != 144 {
-		t.Fatalf("源兼容路由应为 144 条，实际为 %d", count)
+	if count := len(engine.Routes()); count != 145 {
+		t.Fatalf("源兼容路由应为 145 条，实际为 %d", count)
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("关闭 Agent 模块失败: %v", err)

@@ -20,6 +20,8 @@ const (
 	builtinAgentID = "Juggle_Agent"
 	// statusDeleted 软删除状态：Agent 行保留（计费与会话历史仍可追溯），但对所有查询不可见。
 	statusDeleted = "deleted"
+	// statusActive 已激活状态：只有该状态的 Agent 能被绑定到 Inbox 并对外提供服务。
+	statusActive = "active"
 )
 
 var allowedTransitions = map[string]map[string]bool{

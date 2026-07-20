@@ -7,14 +7,24 @@ import (
 	"github.com/juggleim/jugglemate-server/agent/modules/agent/dto"
 )
 
-// TestRegisterRoutesIncludesAllAgentEndpoints 校验 Agent 20 个接口没有遗漏。
+// TestRegisterRoutesIncludesAllAgentEndpoints 校验 Agent 21 个接口没有遗漏。
 func TestRegisterRoutesIncludesAllAgentEndpoints(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	NewHandler(nil).RegisterRoutes(engine.Group("/api/v1"))
 	routes := engine.Routes()
-	if len(routes) != 20 {
-		t.Fatalf("Agent 路由数量应为 20，实际为 %d: %+v", len(routes), routes)
+	if len(routes) != 21 {
+		t.Fatalf("Agent 路由数量应为 21，实际为 %d: %+v", len(routes), routes)
+	}
+	// TIPS: /agents/active 是静态段，必须能与 /agents/:agent_id 共存而不被参数路由吞掉。
+	found := false
+	for _, route := range routes {
+		if route.Method == "GET" && route.Path == "/api/v1/agents/active" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("缺少 GET /api/v1/agents/active 路由")
 	}
 }
 
