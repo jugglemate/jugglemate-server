@@ -85,6 +85,11 @@ func ProcessWebhookMessage(appkey string, payload WebhookMessagePayload) errs.IM
 	switch inbox.ChannelType {
 	case string(ChannelType_Telegram):
 		return forwardTicketGroupMessageToTelegram(ticketAppKey, ticket, inbox, payload)
+	case string(ChannelType_Widget), string(ChannelType_JuggleIM):
+		// TIPS: 客户本身就是 Ticket 群成员，IM 会直接投递群消息，无需二次出站转发。
+		// 这两类渠道走到这里属于正常路径，不打日志——否则 Agent 和坐席的每一条回复
+		// 都会刷一条 "unsupported channel_type"，既是噪音，也会掩盖真正未实现的渠道。
+		return errs.IMErrorCode_SUCCESS
 	default:
 		log.Printf("[WebhookMsgs] skip: unsupported channel_type=%s appkey=%s inbox_id=%s ticket_id=%s msg_id=%s",
 			inbox.ChannelType, ticketAppKey, inbox.InboxId, ticket.TicketId, payload.MsgID)

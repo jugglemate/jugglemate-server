@@ -174,13 +174,18 @@ func (service *Service) resolveInboundAgent(ctx context.Context, inbound imbot.I
 	}
 	// TIPS: 同时校验 App、当前 Inbox 绑定、Bot-Agent 绑定、未关闭 Ticket 和客户来源，
 	// 防止群内坐席消息或历史 Bot 在换绑后继续触发推理。
+	//
+	// TIPS: 这里必须用 Take 而非 First。First 会自动追加 ORDER BY 主键，而目标是匿名结构体、
+	// 没有主键，GORM 会退化成按第一个字段排序并拼上主表别名，生成 `ORDER BY t.agent_id` ——
+	// 主表是 tickets，没有 agent_id 列，直接报 42703。条件已唯一定位一行，本就不需要排序。
+	// 同样的坑见 services/inboxagentservice.go 的 BindInboxAgent。
 	err := service.db.WithContext(ctx).Table("tickets t").
 		Select("iab.agent_id,b.invite_code").
 		Joins("JOIN inbox_agent_bindings iab ON iab.app_key=t.app_key AND iab.inbox_id=t.inbox_id AND iab.status='active'").
 		Joins("JOIN bots b ON b.id=iab.bot_id AND b.app_key=t.app_key AND b.status='active'").
 		Joins("JOIN bot_agent_bindings bab ON bab.bot_id=b.id AND bab.agent_id=iab.agent_id AND bab.status='active'").
 		Where("t.app_key=? AND t.ticket_id=? AND t.source_id=? AND t.status<>? AND b.bot_user_id=?", inbound.AppKey, inbound.TargetID, inbound.SenderID, 2, inbound.BotUserID).
-		First(&row).Error
+		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		service.logInboundRouteMiss(ctx, inbound)
 		return agentmodel.Agent{}, "", messageError(404, "404_TICKET_AGENT_BINDING_NOT_FOUND", "当前 Ticket 没有可用 Agent 绑定")
