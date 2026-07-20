@@ -15,6 +15,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// fallbackReply 是推理失败或结果为空时回给客户的兜底文案。
+const fallbackReply = "系统繁忙，请稍后重试"
+
 // HandleInbound 处理 IM Bot 入站文本并完成人工分流或 Agent 自动回复。
 //
 // 简要描述：数据库 message_id 是跨重连幂等依据；仅当前 Inbox 绑定 Bot 收到的 Ticket
@@ -62,50 +65,30 @@ func (service *Service) HandleInbound(ctx context.Context, inbound imbot.Inbound
 		return
 	}
 	request := reasoningservice.Request{AgentID: agent.ID, OwnerID: agent.OwnerID, UserID: inbound.SenderID, Input: inbound.Text, EnableHistoryContext: true, Metadata: map[string]any{"source": "ticket_group", "invite_code": inviteCode, "app_key": inbound.AppKey, "bot_user_id": inbound.BotUserID, "message_id": inbound.MessageID, "ticket_id": inbound.TargetID}}
-	buffer, platformMessageID, sequence := "", "", 0
-	_, err = service.reasoning.Stream(ctx, request, func(event reasoningservice.Event) error {
-		if event.Event != "token" {
-			return nil
-		}
-		token, _ := event.Payload["token"].(string)
-		if token == "" {
-			return nil
-		}
-		buffer += token
-		if len([]rune(buffer))%30 != 0 {
-			return nil
-		}
-		if platformMessageID == "" {
-			messageID, sendErr := service.connections.SendStreamText(ctx, inbound.AppKey, inbound.BotUserID, inbound.TargetID, inbound.ChannelType, buffer, sequence, false)
-			if sendErr != nil {
-				return sendErr
-			}
-			platformMessageID = messageID
-		} else if modifyErr := service.connections.ModifyStreamText(ctx, inbound.AppKey, inbound.BotUserID, inbound.TargetID, inbound.ChannelType, platformMessageID, buffer, sequence, false); modifyErr != nil {
-			return modifyErr
-		}
-		sequence++
-		return nil
-	})
+	// TIPS: Ticket 群回复走非流式 Run + jg:text 整条发送，不用 jg:streamtext。
+	// 流式方案需要「先发一条 is_finished=false 的消息，再用 ModifyMsg 反复原地改写」，
+	// 而 ModifyMsg 不产生新消息事件，客户端必须额外监听消息更新才能拿到后续内容；
+	// 中途出错还会留下一条永远标记不了完成的半截消息。整条发送对客户端只有一条普通
+	// 文本消息，语义简单且无残留态。Run 与 Stream 共用同一条推理链，结果完全一致。
+	result, err := service.reasoning.Run(ctx, request)
 	if err != nil {
-		slog.ErrorContext(ctx, "IM 入站推理或流式回发失败", "agent_id", agent.ID, "error", err)
-		if platformMessageID == "" {
-			_, _ = service.connections.SendText(context.WithoutCancel(ctx), inbound.AppKey, inbound.BotUserID, inbound.TargetID, inbound.ChannelType, "系统繁忙，请稍后重试")
+		slog.ErrorContext(ctx, "[Inbound] IM 入站推理失败", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "msg_id", inbound.MessageID, "error", err)
+		if _, sendErr := service.connections.SendText(context.WithoutCancel(ctx), inbound.AppKey, inbound.BotUserID, inbound.TargetID, inbound.ChannelType, fallbackReply); sendErr != nil {
+			slog.ErrorContext(ctx, "[Inbound] 兜底文案发送失败", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "error", sendErr)
 		}
 		return
 	}
-	buffer = strings.TrimSpace(buffer)
-	if buffer == "" {
-		buffer = "系统繁忙，请稍后重试"
+	answer := strings.TrimSpace(result.Answer)
+	if answer == "" {
+		slog.WarnContext(ctx, "[Inbound] 推理返回空回答，改发兜底文案", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "msg_id", inbound.MessageID)
+		answer = fallbackReply
 	}
-	if platformMessageID == "" {
-		platformMessageID, err = service.connections.SendStreamText(context.WithoutCancel(ctx), inbound.AppKey, inbound.BotUserID, inbound.TargetID, inbound.ChannelType, buffer, sequence, true)
-	} else {
-		err = service.connections.ModifyStreamText(context.WithoutCancel(ctx), inbound.AppKey, inbound.BotUserID, inbound.TargetID, inbound.ChannelType, platformMessageID, buffer, sequence, true)
-	}
+	messageID, err := service.connections.SendText(context.WithoutCancel(ctx), inbound.AppKey, inbound.BotUserID, inbound.TargetID, inbound.ChannelType, answer)
 	if err != nil {
-		slog.ErrorContext(ctx, "IM 最终流式回发失败", "agent_id", agent.ID, "error", err)
+		slog.ErrorContext(ctx, "[Inbound] IM 回复发送失败", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "msg_id", inbound.MessageID, "error", err)
+		return
 	}
+	slog.InfoContext(ctx, "[Inbound] 回复已发送", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "in_msg_id", inbound.MessageID, "out_msg_id", messageID, "answer_len", len([]rune(answer)))
 }
 
 // logInboundRouteMiss 在入站路由 JOIN 未命中时逐条定位断点，避免只看到一个笼统的 404。
