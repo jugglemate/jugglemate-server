@@ -38,8 +38,10 @@ func TestProcessTelegramWebhookSupportedTextCreatesTicketAndSendsGroupMessage(t 
 	if !strings.HasPrefix(env.tickets.created.TicketId, TicketIDPrefix) || env.createdGroupId != env.tickets.created.TicketId {
 		t.Fatalf("ticket id = %q group id = %q, want matching ticket-prefixed ids", env.tickets.created.TicketId, env.createdGroupId)
 	}
-	if !reflect.DeepEqual(env.createdGroupMembers, []string{env.rels.created.SourceId, "agent_1"}) {
-		t.Fatalf("group members = %+v", env.createdGroupMembers)
+	// TIPS: 建群成员只有客户本人 —— 坐席（桩数据里的 agent_1）改为转人工时才入群，
+	// 该 Inbox 也没有绑定 Agent Bot。
+	if !reflect.DeepEqual(env.createdGroupMembers, []string{env.rels.created.SourceId}) {
+		t.Fatalf("group members = %+v，期望仅有客户", env.createdGroupMembers)
 	}
 	if env.sentMsg.SenderId != env.rels.created.SourceId || env.sentMsg.TargetId != env.tickets.created.TicketId {
 		t.Fatalf("sent msg = %+v", env.sentMsg)

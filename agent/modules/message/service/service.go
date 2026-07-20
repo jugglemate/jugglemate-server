@@ -1,14 +1,12 @@
-// Package service 实现对话、会话查询、应用直连与人工介入业务。
+// Package service 实现对话、会话查询与应用直连业务。
 package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"math"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	agentmodel "github.com/juggleim/jugglemate-server/agent/modules/agent/model"
 	billingservice "github.com/juggleim/jugglemate-server/agent/modules/billing/service"
@@ -17,11 +15,8 @@ import (
 	"github.com/juggleim/jugglemate-server/agent/modules/message/imbot"
 	reasoningmodel "github.com/juggleim/jugglemate-server/agent/modules/reasoning/model"
 	reasoningservice "github.com/juggleim/jugglemate-server/agent/modules/reasoning/service"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
-
-const humanSessionTTL = 30 * time.Minute
 
 // Error 表示可映射到 HTTP 契约的 Message 业务错误。
 type Error struct {
@@ -33,25 +28,31 @@ type Error struct {
 // Error 返回 Message 业务错误文本。
 func (err *Error) Error() string { return err.Code + ": " + err.Message }
 
-type humanSession struct {
-	OperatorID string     `json:"operator_id"`
-	StartedAt  time.Time  `json:"started_at"`
-	LastSendAt *time.Time `json:"last_send_at"`
-	Reason     *string    `json:"reason"`
+// HumanHandoffFunc 把 Ticket 群从 Agent 接待切换为人工接待：拉入 Inbox 坐席、广播
+// 「人工接入」通知并移出 Agent Bot。
+//
+// TIPS: 用函数字段注入而不是直接 import 客服域的 services 包 —— 工单群成员管理属于客服域
+// 能力，Agent 平台模块不应该反向依赖它；装配在 main.go 完成。与 agentservice 的
+// UnbindInboxAgentFunc 是同一套做法。
+type HumanHandoffFunc func(ctx context.Context, appKey, ticketID, botUserID string) error
+
+// Service 聚合 Message 域的真实 PostgreSQL、Reasoning、Billing 与 IM 依赖。
+type Service struct {
+	db           *gorm.DB
+	reasoning    *reasoningservice.Service
+	billing      *billingservice.Service
+	connections  *imbot.Manager
+	humanHandoff HumanHandoffFunc
 }
 
-// Service 聚合 Message 域的真实 PostgreSQL、Redis、Reasoning、Billing 与 IM 依赖。
-type Service struct {
-	db          *gorm.DB
-	redis       *redis.Client
-	reasoning   *reasoningservice.Service
-	billing     *billingservice.Service
-	connections *imbot.Manager
+// SetHumanHandoff 注入转人工的群成员切换实现。
+func (service *Service) SetHumanHandoff(fn HumanHandoffFunc) {
+	service.humanHandoff = fn
 }
 
 // New 创建 Message 业务服务。
-func New(db *gorm.DB, redisClient *redis.Client, reasoning *reasoningservice.Service, billing *billingservice.Service, connections *imbot.Manager) *Service {
-	return &Service{db: db, redis: redisClient, reasoning: reasoning, billing: billing, connections: connections}
+func New(db *gorm.DB, reasoning *reasoningservice.Service, billing *billingservice.Service, connections *imbot.Manager) *Service {
+	return &Service{db: db, reasoning: reasoning, billing: billing, connections: connections}
 }
 
 // Chat 执行标准推理对话。
@@ -299,29 +300,6 @@ func pages(page, size int) (int, int) {
 	}
 	return page, size
 }
-func estimate(value string) int {
-	result := utf8.RuneCountInString(value) / 4
-	if result < 1 {
-		return 1
-	}
-	return result
-}
-func humanSessionKey(agentID, userID string) string {
-	return "human:session:" + strings.TrimSpace(agentID) + ":" + strings.TrimSpace(userID)
-}
-func humanPollKey(agentID, userID string) string {
-	return "human:poll:new-message:" + strings.TrimSpace(agentID) + ":" + strings.TrimSpace(userID)
-}
-func marshalSession(value humanSession) (string, error) {
-	raw, err := json.Marshal(value)
-	return string(raw), err
-}
-func parseSession(value string) (humanSession, error) {
-	var result humanSession
-	err := json.Unmarshal([]byte(value), &result)
-	return result, err
-}
-func pointerInt(value int) *int             { return &value }
 func nowPointer(value time.Time) *time.Time { return &value }
 
 // ErrorCode 返回 Message 或 Reasoning 错误的稳定业务码。

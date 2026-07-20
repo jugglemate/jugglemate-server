@@ -13,6 +13,7 @@ import (
 	"github.com/juggleim/jugglemate-server/commons/dbcommons"
 	"github.com/juggleim/jugglemate-server/commons/errs"
 	"github.com/juggleim/jugglemate-server/commons/imsdk"
+	"github.com/juggleim/jugglemate-server/storages"
 	storageModels "github.com/juggleim/jugglemate-server/storages/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -36,6 +37,8 @@ var (
 	removeInboxAgentFromGroup = func(sdk *juggleimsdk.JuggleIMSdk, request juggleimsdk.GroupMembersReq) (juggleimsdk.ApiCode, string, error) {
 		return sdk.GroupDelMembers(request)
 	}
+	newInboxMemberStorageForInboxAgent = storages.NewInboxMemberStorage
+	newUserStorageForInboxAgent        = storages.NewUserStorage
 )
 
 // InboxAgentBinding 表示 Inbox 当前生效的 Agent 与 Bot 绑定。
@@ -245,6 +248,91 @@ func LogTicketAgentBotDiagnostics(ctx context.Context, appKey, inboxID, ticketID
 	}
 	log.Printf("[AgentDiag] Bot 回复链路异常 appkey=%s inbox_id=%s ticket_id=%s msg_id=%s agent_id=%s bot_user_id=%s conn_state=%s sync_error=%q",
 		appKey, inboxID, ticketID, msgID, detail.AgentID, detail.BotUserID, state, detail.SyncError)
+}
+
+// SwitchTicketToHuman 把 Ticket 群从 Agent 接待切换为人工接待。
+//
+// 动作顺序固定为「先加坐席 → 再发通知 → 最后移出 Bot」：
+//   - 先加后删与 syncOpenTicketAgentBot 的既有约定一致，中途失败最多造成两者短暂共存，
+//     不会出现群里既没有 Bot 也没有坐席的空窗；
+//   - 通知在移出 Bot 之前发送，因此可以用 Bot 身份作为发送者，且此时坐席已在群内能收到。
+//
+// 坐席入群前会逐个补一次 IM 注册：建群时已不再注册坐席（见 prepareTicketGroupMemberIds），
+// 而 IM 要求群成员必须是已存在的用户。
+//
+// @param ctx 请求上下文
+// @param appKey 应用 AppKey
+// @param ticketID 目标 Ticket 群 ID
+// @param botUserID 待移出的 Agent Bot IM 身份，为空时只加坐席不做移除
+// @return 任一 IM 操作失败都返回错误；调用方据此决定是否回滚人工状态
+func SwitchTicketToHuman(ctx context.Context, appKey, ticketID, botUserID string) error {
+	appKey, ticketID, botUserID = strings.TrimSpace(appKey), strings.TrimSpace(ticketID), strings.TrimSpace(botUserID)
+	if appKey == "" || ticketID == "" {
+		return fmt.Errorf("appKey、ticketID 不能为空")
+	}
+	db := dbcommons.GetDb()
+	if db == nil {
+		return fmt.Errorf("PostgreSQL 尚未初始化")
+	}
+	var inboxID string
+	if err := db.WithContext(ctx).Table("tickets").Select("inbox_id").
+		Where("app_key=? AND ticket_id=?", appKey, ticketID).Take(&inboxID).Error; err != nil {
+		return fmt.Errorf("查询 Ticket 所属 Inbox 失败 ticket=%s: %w", ticketID, err)
+	}
+	sdk := getImSdkForInboxAgent(appKey)
+	if sdk == nil {
+		return fmt.Errorf("无法使用 AppKey %s 初始化 IM SDK", appKey)
+	}
+	seatIDs, err := resolveInboxSeatIDs(appKey, inboxID, sdk)
+	if err != nil {
+		return err
+	}
+	log.Printf("[AgentHandoff] 开始转人工 appkey=%s inbox_id=%s ticket_id=%s seats=%d bot=%s",
+		appKey, inboxID, ticketID, len(seatIDs), botUserID)
+	if len(seatIDs) > 0 {
+		code, _, addErr := addInboxAgentToGroup(sdk, juggleimsdk.GroupMembersReq{GroupId: ticketID, MemberIds: seatIDs})
+		if addErr != nil || code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
+			return ticketGroupSyncError("转人工时向 Ticket 群添加坐席失败", ticketID, code, addErr)
+		}
+	}
+	SendTicketHumanTakeoverNtfMsg(appKey, ticketID, botUserID)
+	if botUserID != "" {
+		code, _, delErr := removeInboxAgentFromGroup(sdk, juggleimsdk.GroupMembersReq{GroupId: ticketID, MemberIds: []string{botUserID}})
+		if delErr != nil || code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
+			return ticketGroupSyncError("转人工时从 Ticket 群移除 Agent Bot 失败", ticketID, code, delErr)
+		}
+	}
+	log.Printf("[AgentHandoff] 转人工完成 appkey=%s ticket_id=%s seats=%d bot_removed=%t",
+		appKey, ticketID, len(seatIDs), botUserID != "")
+	return nil
+}
+
+// resolveInboxSeatIDs 返回 Inbox 下全部坐席的 IM 身份，并确保它们在 IM 侧已注册。
+func resolveInboxSeatIDs(appKey, inboxID string, sdk *juggleimsdk.JuggleIMSdk) ([]string, error) {
+	members, err := newInboxMemberStorageForInboxAgent().QryByInbox(appKey, inboxID, 0, 1000)
+	if err != nil {
+		return nil, fmt.Errorf("查询 Inbox 坐席失败 inbox=%s: %w", inboxID, err)
+	}
+	userStorage := newUserStorageForInboxAgent()
+	seatIDs := make([]string, 0, len(members))
+	for _, member := range members {
+		userID := strings.TrimSpace(member.MemberId)
+		if userID == "" {
+			continue
+		}
+		user, findErr := userStorage.FindByUserId(appKey, userID)
+		if findErr != nil {
+			return nil, fmt.Errorf("查询坐席资料失败 user=%s: %w", userID, findErr)
+		}
+		if user == nil {
+			continue
+		}
+		if code := registerIMUser(sdk, user.UserId, user.Nickname, user.Avator); code != errs.IMErrorCode_SUCCESS {
+			return nil, fmt.Errorf("坐席 IM 注册失败 user=%s code=%d", userID, code)
+		}
+		seatIDs = append(seatIDs, userID)
+	}
+	return seatIDs, nil
 }
 
 func syncOpenTicketAgentBot(ctx context.Context, db *gorm.DB, appKey, inboxID string, previous *InboxAgentDetail, newBotUserID string) error {

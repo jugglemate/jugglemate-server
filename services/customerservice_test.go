@@ -184,19 +184,11 @@ func TestGenerateTicketIdUsesTicketPrefix(t *testing.T) {
 	}
 }
 
-func TestPrepareTicketGroupMemberIdsRegistersInboxMembers(t *testing.T) {
-	memberStorage := &customerInboxMemberStorage{
-		members: []*storageModels.InboxMember{
-			{MemberId: "u_1"},
-			{MemberId: "u_2"},
-		},
-	}
-	userStorage := &customerUserStorage{
-		users: map[string]*storageModels.User{
-			"u_1": {UserId: "u_1", Nickname: "Agent 1"},
-			"u_2": {UserId: "u_2", Nickname: "Agent 2"},
-		},
-	}
+// TestPrepareTicketGroupMemberIdsExcludesSeats 校验建群成员只有客户与 Agent Bot。
+//
+// TIPS: 坐席改为转人工时才入群（SwitchTicketToHuman）。这里显式断言"不注册任何坐席"，
+// 防止有人为了修别的问题把注册循环加回来 —— 那会让客户与 Agent 的对话默认暴露给全部坐席。
+func TestPrepareTicketGroupMemberIdsExcludesSeats(t *testing.T) {
 	registered := map[string]struct{}{}
 	oldRegister := registerIMUserForCustomer
 	oldResolveBot := resolveInboxAgentBotForCustomer
@@ -210,22 +202,30 @@ func TestPrepareTicketGroupMemberIdsRegistersInboxMembers(t *testing.T) {
 		resolveInboxAgentBotForCustomer = oldResolveBot
 	})
 
-	code, memberIds := prepareTicketGroupMemberIds(
-		"app_1",
-		"inbox_1",
-		"customer_1",
-		&juggleimsdk.JuggleIMSdk{},
-		memberStorage,
-		userStorage,
-	)
+	code, memberIds := prepareTicketGroupMemberIds("app_1", "inbox_1", "customer_1")
 	if code != errs.IMErrorCode_SUCCESS {
 		t.Fatalf("code = %d", code)
 	}
-	if len(memberIds) != 4 || memberIds[0] != "customer_1" || memberIds[3] != "bot_1" {
-		t.Fatalf("member ids = %v", memberIds)
+	if len(memberIds) != 2 || memberIds[0] != "customer_1" || memberIds[1] != "bot_1" {
+		t.Fatalf("member ids = %v，期望仅有客户与 Bot", memberIds)
 	}
-	if len(registered) != 2 {
-		t.Fatalf("registered users = %v", registered)
+	if len(registered) != 0 {
+		t.Fatalf("建群不应注册任何坐席，实际注册了 %v", registered)
+	}
+}
+
+// TestPrepareTicketGroupMemberIdsWithoutAgentBot 校验 Inbox 未绑定 Agent 时只有客户自己。
+func TestPrepareTicketGroupMemberIdsWithoutAgentBot(t *testing.T) {
+	oldResolveBot := resolveInboxAgentBotForCustomer
+	resolveInboxAgentBotForCustomer = func(context.Context, string, string) (string, error) { return "", nil }
+	t.Cleanup(func() { resolveInboxAgentBotForCustomer = oldResolveBot })
+
+	code, memberIds := prepareTicketGroupMemberIds("app_1", "inbox_1", "customer_1")
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code = %d", code)
+	}
+	if len(memberIds) != 1 || memberIds[0] != "customer_1" {
+		t.Fatalf("member ids = %v，期望仅有客户", memberIds)
 	}
 }
 

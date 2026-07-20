@@ -95,44 +95,30 @@ func generateTicketId() string {
 	return TicketIDPrefix + tools.GenerateUUIDShort22()
 }
 
-func prepareTicketGroupMemberIds(
-	appkey, inboxId, sourceId string,
-	sdk *juggleimsdk.JuggleIMSdk,
-	memberStorage storageModels.IInboxMemberStorage,
-	userStorage storageModels.IUserStorage,
-) (errs.IMErrorCode, []string) {
-	members, err := memberStorage.QryByInbox(appkey, inboxId, 0, 1000)
-	if err != nil {
-		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
-	}
-
-	inboxMemberIds := make([]string, 0, len(members))
-	for _, member := range members {
-		userId := strings.TrimSpace(member.MemberId)
-		if userId == "" || userId == sourceId {
-			continue
-		}
-		user, err := userStorage.FindByUserId(appkey, userId)
-		if err != nil {
-			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
-		}
-		if user == nil {
-			continue
-		}
-		if code := registerIMUserForCustomer(sdk, user.UserId, user.Nickname, user.Avator); code != errs.IMErrorCode_SUCCESS {
-			return code, nil
-		}
-		inboxMemberIds = append(inboxMemberIds, userId)
-	}
+// prepareTicketGroupMemberIds 计算新建 Ticket 群的初始成员：客户本人 + Inbox 当前 Agent Bot。
+//
+// TIPS: 建群时**不再拉入 Inbox 坐席**。工单默认由 Agent 接待，坐席只有在转人工时才入群
+// （见 SwitchTicketToHuman）。这样做有三个好处：
+//  1. 客户与 Agent 的对话不会默认暴露给全部坐席；
+//  2. 建群不再对每个坐席逐个调 IM 注册接口，坐席多时建群耗时从 O(坐席数) 降到 O(1)；
+//  3. 坐席入群时机改为动态，顺带修掉了"建群后新加入 Inbox 的坐席永远进不了老工单群"
+//     —— ReplaceInboxMembers 从不同步已存在的 IM 群。
+//
+// @param appkey 应用 AppKey
+// @param inboxId 工单所属 Inbox ID
+// @param sourceId 客户在 IM 中的身份 ID
+// @return 错误码与去重后的群成员 ID 列表，客户恒为第一个
+func prepareTicketGroupMemberIds(appkey, inboxId, sourceId string) (errs.IMErrorCode, []string) {
 	// TIPS: Ticket 才是实际 IM 群；建群时直接加入 Inbox 当前 Agent Bot，避免创建后短暂漏接消息。
 	agentBotUserID, err := resolveInboxAgentBotForCustomer(context.Background(), appkey, inboxId)
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
+	initialMemberIds := make([]string, 0, 1)
 	if strings.TrimSpace(agentBotUserID) != "" {
-		inboxMemberIds = append(inboxMemberIds, agentBotUserID)
+		initialMemberIds = append(initialMemberIds, agentBotUserID)
 	}
-	return errs.IMErrorCode_SUCCESS, buildTicketGroupMemberIds(sourceId, inboxMemberIds)
+	return errs.IMErrorCode_SUCCESS, buildTicketGroupMemberIds(sourceId, initialMemberIds)
 }
 
 func validateWidgetInbox(inbox *storageModels.Inbox) errs.IMErrorCode {
@@ -274,14 +260,7 @@ func startCustomerTicket(req customerTicketStartReq) (errs.IMErrorCode, *custome
 		if groupName == "" {
 			groupName = customer.Nickname
 		}
-		memberCode, memberIds := prepareTicketGroupMemberIds(
-			appkey,
-			inbox.InboxId,
-			rel.SourceId,
-			sdk,
-			newInboxMemberStorageForCustomer(),
-			newUserStorageForCustomer(),
-		)
+		memberCode, memberIds := prepareTicketGroupMemberIds(appkey, inbox.InboxId, rel.SourceId)
 		if memberCode != errs.IMErrorCode_SUCCESS {
 			return memberCode, nil
 		}

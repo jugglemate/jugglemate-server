@@ -44,6 +44,9 @@ func main() {
 	// TIPS: 把客服域的 Inbox 解绑能力注入 Agent 平台，供删除 Agent 时清理关联的 Inbox 与
 	// Ticket 群里的 Bot。必须放在 UsePostgres 之后 —— 解绑实现依赖共享的 PostgreSQL 连接。
 	agentModule.SetUnbindInboxAgent(services.UnbindInboxAgent)
+	// TIPS: 转人工时需要把 Inbox 坐席拉进 Ticket 群并移出 Agent Bot，同样属于客服域能力，
+	// 与上面一样用注入方式装配，同样依赖已就绪的 PostgreSQL。
+	agentModule.SetHumanHandoff(services.SwitchTicketToHuman)
 
 	httpServer := gin.Default()
 	agentModule.RegisterNativeRoutes(httpServer)

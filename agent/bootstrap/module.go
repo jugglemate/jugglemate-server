@@ -63,6 +63,7 @@ type Module struct {
 	agentService    *agentservice.Service
 	reasoning       *reasoningservice.Service
 	message         *messageapis.Handler
+	messageService  *messageservice.Service
 	operations      *operationsapis.Handler
 	botConnections  *messageimbot.Manager
 }
@@ -76,6 +77,18 @@ func (module *Module) SetUnbindInboxAgent(fn agentservice.UnbindInboxAgentFunc) 
 	defer module.mu.RUnlock()
 	if module.agentService != nil {
 		module.agentService.SetUnbindInboxAgent(fn)
+	}
+}
+
+// SetHumanHandoff 注入转人工的 Ticket 群成员切换实现。
+//
+// TIPS: 由 main.go 在 Start 之后装配，原因同 SetUnbindInboxAgent —— 拉坐席进群、移出 Bot
+// 都是客服域能力，Agent 平台模块不直接依赖 services 包。
+func (module *Module) SetHumanHandoff(fn messageservice.HumanHandoffFunc) {
+	module.mu.RLock()
+	defer module.mu.RUnlock()
+	if module.messageService != nil {
+		module.messageService.SetHumanHandoff(fn)
 	}
 }
 
@@ -196,11 +209,12 @@ func (module *Module) Start(ctx context.Context) error {
 	module.billing = billingapis.NewHandler(billingService)
 	module.agent = agentapis.NewHandler(agentService)
 	module.reasoning = reasoningservice.New(db, callService, knowledgeService, toolsService, billingService)
-	messageService := messageservice.New(db, redisClient, module.reasoning, billingService, botConnections)
+	messageService := messageservice.New(db, module.reasoning, billingService, botConnections)
 	botConnections.SetInboundHandler(messageService.HandleInbound)
 	// TIPS: 让主工程的 webhook 诊断日志能查到 Bot 长连接状态，避免 services 反向依赖 Agent 模块。
 	services.SetBotConnectionStateProbe(botConnections.ConnectionState)
 	module.message = messageapis.NewHandler(messageService)
+	module.messageService = messageService
 	module.operations = operationsapis.NewHandler(operationsservice.New(db, agentService))
 	module.botConnections = botConnections
 	module.started = true

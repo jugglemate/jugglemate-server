@@ -22,9 +22,3 @@ func TestMessageErrorMapping(t *testing.T) {
 	}
 }
 
-// TestHumanSessionKeyUsesBothDimensions 校验人工会话 Redis 键按 Agent 与用户隔离。
-func TestHumanSessionKeyUsesBothDimensions(t *testing.T) {
-	if humanSessionKey("a", "u") == humanSessionKey("a", "u2") || humanSessionKey("a", "u") == humanSessionKey("a2", "u") {
-		t.Fatal("人工会话键发生跨 Agent/用户冲突")
-	}
-}

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/juggleim/imbot-sdk-go/imbotclients/pbdefines/pbobjs"
 	agentmodel "github.com/juggleim/jugglemate-server/agent/modules/agent/model"
 	"github.com/juggleim/jugglemate-server/agent/modules/message/imbot"
@@ -43,26 +42,20 @@ func (service *Service) HandleInbound(ctx context.Context, inbound imbot.Inbound
 		return
 	}
 	slog.InfoContext(ctx, "[Inbound] 路由命中 Agent", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "msg_id", inbound.MessageID)
-	manual, _, err := service.activeHumanSession(ctx, agent.ID, inbound.SenderID)
-	if err != nil {
-		slog.ErrorContext(ctx, "IM 人工状态查询失败", "agent_id", agent.ID, "error", err)
-	}
-	if manual != nil {
-		conversation, createErr := service.latestOrCreateConversation(ctx, agent.ID, inbound.SenderID, map[string]any{"invite_code": inviteCode})
-		if createErr != nil {
-			slog.ErrorContext(ctx, "IM 人工消息会话创建失败", "error", createErr)
+	// TIPS: 转人工是终态 —— 切换成功后 Bot 已被移出群，IM 不会再向本服务投递该群的任何
+	// 消息，因此不需要维护"人工态"标志来静默 Agent，直接返回即可。
+	if MatchHandoffKeyword(inbound.Text) {
+		slog.InfoContext(ctx, "[Inbound] 客户触发转人工", "agent_id", agent.ID, "ticket_id", inbound.TargetID,
+			"sender_id", inbound.SenderID, "msg_id", inbound.MessageID)
+		if handoffErr := service.handoffToHuman(ctx, inbound.AppKey, inbound.TargetID, inbound.BotUserID); handoffErr != nil {
+			slog.ErrorContext(ctx, "[Inbound] 转人工失败", "agent_id", agent.ID, "ticket_id", inbound.TargetID,
+				"bot_user_id", inbound.BotUserID, "msg_id", inbound.MessageID, "error", handoffErr)
+			// TIPS: 切换失败时 Bot 仍在群里，继续走下面的 Agent 回复兜底，
+			// 至少保证客户有人应答，而不是石沉大海。
+		} else {
+			slog.InfoContext(ctx, "[Inbound] 转人工完成，坐席已入群、Bot 已退群", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "msg_id", inbound.MessageID)
 			return
 		}
-		messageID := inbound.MessageID
-		message := reasoningmodel.Message{ID: uuid.NewString(), ConversationID: conversation.ID, UserID: &inbound.SenderID, MessageID: &messageID, Role: "user", Content: inbound.Text, Source: "webhook", SelfTokenCount: estimate(inbound.Text)}
-		if createErr = service.db.WithContext(ctx).Create(&message).Error; createErr != nil {
-			slog.ErrorContext(ctx, "IM 人工消息落库失败", "error", createErr)
-			return
-		}
-		if createErr = service.redis.Set(ctx, humanPollKey(agent.ID, inbound.SenderID), "1", humanSessionTTL).Err(); createErr != nil {
-			slog.ErrorContext(ctx, "IM 人工轮询通知失败", "error", createErr)
-		}
-		return
 	}
 	request := reasoningservice.Request{AgentID: agent.ID, OwnerID: agent.OwnerID, UserID: inbound.SenderID, Input: inbound.Text, EnableHistoryContext: true, Metadata: map[string]any{"source": "ticket_group", "invite_code": inviteCode, "app_key": inbound.AppKey, "bot_user_id": inbound.BotUserID, "message_id": inbound.MessageID, "ticket_id": inbound.TargetID}}
 	// TIPS: Ticket 群回复走非流式 Run + jg:text 整条发送，不用 jg:streamtext。

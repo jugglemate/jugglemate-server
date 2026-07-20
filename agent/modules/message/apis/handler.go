@@ -1,9 +1,8 @@
-// Package apis 提供 Chat、Conversation、人工介入与 Owner 查询接口。
+// Package apis 提供 Chat、Conversation 与 Owner 查询接口。
 package apis
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,7 +26,11 @@ type Handler struct{ service *messageservice.Service }
 // NewHandler 创建 Message HTTP Handler。
 func NewHandler(service *messageservice.Service) *Handler { return &Handler{service: service} }
 
-// RegisterRoutes 注册 Chat、会话、Owner 查询和人工介入路由。
+// RegisterRoutes 注册 Chat、会话和 Owner 查询路由。
+//
+// TIPS: 原 `/bot/human-interventions/*` 一整组接口已移除。转人工改为把坐席拉进 Ticket 群、
+// 把 Agent Bot 移出群，此后该工单与 Agent 再无关系，人工接待完全由坐席在 IM 群内完成，
+// 不再需要服务端维护人工态、代发消息或轮询增量。
 func (handler *Handler) RegisterRoutes(group *gin.RouterGroup) {
 	chat := group.Group("/chat")
 	chat.GET("/healthz", handler.health)
@@ -35,12 +38,6 @@ func (handler *Handler) RegisterRoutes(group *gin.RouterGroup) {
 	chat.POST("/stream", handler.stream)
 	chat.POST("/app/stream", handler.appStream)
 	chat.POST("/app/completion", handler.appCompletion)
-	human := group.Group("/bot/human-interventions")
-	human.POST("/enter", handler.enterHuman)
-	human.POST("/send-message", handler.sendHuman)
-	human.POST("/exit", handler.exitHuman)
-	human.GET("/status", handler.humanStatus)
-	human.GET("/poll-messages", handler.pollHuman)
 	group.GET("/conversations/:conversation_id/summary", handler.summary)
 	group.GET("/owner/agents/:agent_id/conversations", handler.listConversations)
 	group.GET("/owner/conversations/:conversation_id", handler.conversation)
@@ -224,69 +221,6 @@ func (handler *Handler) summary(ctx *gin.Context) {
 	respond(ctx, result, err)
 }
 
-// enterHuman 开启人工介入。
-func (handler *Handler) enterHuman(ctx *gin.Context) {
-	operator, ok := operatorID(ctx)
-	if !ok {
-		return
-	}
-	var request dto.HumanEnterRequest
-	if err := ctx.ShouldBindJSON(&request); err != nil {
-		validation(ctx, err)
-		return
-	}
-	result, err := handler.service.EnterHuman(ctx.Request.Context(), operator, request)
-	respond(ctx, result, err)
-}
-
-// sendHuman 在人工态发送消息。
-func (handler *Handler) sendHuman(ctx *gin.Context) {
-	operator, ok := operatorID(ctx)
-	if !ok {
-		return
-	}
-	var request dto.HumanSendRequest
-	if err := ctx.ShouldBindJSON(&request); err != nil {
-		validation(ctx, err)
-		return
-	}
-	result, err := handler.service.SendHumanMessage(ctx.Request.Context(), operator, request)
-	respond(ctx, result, err)
-}
-
-// exitHuman 退出人工介入。
-func (handler *Handler) exitHuman(ctx *gin.Context) {
-	operator, ok := operatorID(ctx)
-	if !ok {
-		return
-	}
-	var request dto.HumanExitRequest
-	if err := ctx.ShouldBindJSON(&request); err != nil {
-		validation(ctx, err)
-		return
-	}
-	result, err := handler.service.ExitHuman(ctx.Request.Context(), operator, request)
-	respond(ctx, result, err)
-}
-
-// humanStatus 查询人工介入状态。
-func (handler *Handler) humanStatus(ctx *gin.Context) {
-	result, err := handler.service.HumanStatus(ctx.Request.Context(), ctx.Query("agent_id"), ctx.Query("user_id"))
-	respond(ctx, result, err)
-}
-
-// pollHuman 轮询人工态增量用户消息。
-func (handler *Handler) pollHuman(ctx *gin.Context) {
-	since, err := time.Parse(time.RFC3339, ctx.Query("since_ts"))
-	if err != nil {
-		validation(ctx, errors.New("since_ts 格式错误，请使用 ISO8601 UTC"))
-		return
-	}
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "20"))
-	result, err := handler.service.PollHumanMessages(ctx.Request.Context(), ctx.Query("agent_id"), ctx.Query("user_id"), since, limit)
-	respond(ctx, result, err)
-}
-
 func (handler *Handler) principal(ctx *gin.Context) (identity.Principal, bool) {
 	principal, err := identity.FromGin(ctx)
 	if err != nil {
@@ -294,15 +228,6 @@ func (handler *Handler) principal(ctx *gin.Context) (identity.Principal, bool) {
 		return identity.Principal{}, false
 	}
 	return principal, true
-}
-func operatorID(ctx *gin.Context) (string, bool) {
-	for _, header := range []string{"X-Admin-Id", "X-User-Id", "X-Invite-Code"} {
-		if value := strings.TrimSpace(ctx.GetHeader(header)); value != "" {
-			return value, true
-		}
-	}
-	httpresponse.Failure(ctx, 400, "400_INVALID_REQUEST", "缺少操作人身份，请提供 X-Admin-Id / X-User-Id / X-Invite-Code")
-	return "", false
 }
 func respond(ctx *gin.Context, result any, err error) {
 	if err != nil {
