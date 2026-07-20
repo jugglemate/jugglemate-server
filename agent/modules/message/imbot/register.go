@@ -62,14 +62,51 @@ func (client *RegisterClient) RegisterBot(ctx context.Context, appKey, botID, ni
 	if err != nil || strings.TrimSpace(appSecret) == "" {
 		return RegisteredBot{}, &Error{Status: 500, Code: "500_IMBOT_CREDENTIALS_NOT_CONFIGURED", Message: "无法解析当前应用的 IM 凭证"}
 	}
-	body, _ := json.Marshal(map[string]any{"bot_id": botID, "nickname": nickname, "ext_fields": map[string]any{}})
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.apiBaseURL+"/apigateway/bots/register", bytes.NewReader(body))
-	if err != nil {
+	var payload struct {
+		UserID string `json:"user_id"`
+		Token  string `json:"token"`
+	}
+	body := map[string]any{"bot_id": botID, "nickname": nickname, "ext_fields": map[string]any{}, "bot_settings": defaultBotSettings()}
+	if err := client.callSigned(ctx, appKey, appSecret, "/apigateway/bots/register", body, &payload, "REGISTER"); err != nil {
 		return RegisteredBot{}, err
+	}
+	if strings.TrimSpace(payload.UserID) == "" || strings.TrimSpace(payload.Token) == "" {
+		return RegisteredBot{}, &Error{Status: 502, Code: "502_IMBOT_REGISTER_INCOMPLETE", Message: "Bot 注册响应缺少 user_id 或 token"}
+	}
+	// TIPS: 注册接口是否读取 bot_settings 未在 IM 侧文档化，这里再显式 update 一次兜底。
+	// 该设置必须为 false，否则 Bot 只在被 @ 时才收到群消息 —— 客户在 Ticket 群里正常发言
+	// 不会 @ 任何人，Bot 就会静默不回，且 IM 侧不产生任何错误日志，极难排查。
+	if err := client.applyBotSettings(ctx, appKey, appSecret, botID); err != nil {
+		return RegisteredBot{}, err
+	}
+	return RegisteredBot{BotID: botID, UserID: payload.UserID, Token: payload.Token}, nil
+}
+
+// defaultBotSettings 返回 Ticket 群客服场景下 Bot 必须具备的消息接收设置。
+//
+// @return only_mentioned 为 false，表示群内任意消息都投递给 Bot，而非仅在被 @ 时
+func defaultBotSettings() map[string]any {
+	return map[string]any{"only_mentioned": false}
+}
+
+// applyBotSettings 调用 `/apigateway/bots/update` 显式写入 Bot 的消息接收设置。
+func (client *RegisterClient) applyBotSettings(ctx context.Context, appKey, appSecret, botID string) error {
+	body := map[string]any{"bot_id": botID, "bot_settings": defaultBotSettings()}
+	return client.callSigned(ctx, appKey, appSecret, "/apigateway/bots/update", body, nil, "SETTINGS")
+}
+
+// callSigned 以 IM Server 的 SHA1 签名协议发起请求，并把响应 data 解析到 out（out 可为 nil）。
+//
+// @param stage 出错时嵌进错误码的阶段标识，便于区分是注册还是设置环节失败
+func (client *RegisterClient) callSigned(ctx context.Context, appKey, appSecret, path string, body any, out any, stage string) error {
+	raw, _ := json.Marshal(body)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.apiBaseURL+path, bytes.NewReader(raw))
+	if err != nil {
+		return err
 	}
 	nonceValue, err := rand.Int(rand.Reader, big.NewInt(10000))
 	if err != nil {
-		return RegisteredBot{}, err
+		return err
 	}
 	nonce := nonceValue.String()
 	timestamp := fmt.Sprint(time.Now().UnixMilli())
@@ -81,25 +118,24 @@ func (client *RegisterClient) RegisterBot(ctx context.Context, appKey, botID, ni
 	request.Header.Set("signature", hex.EncodeToString(digest[:]))
 	response, err := client.client.Do(request)
 	if err != nil {
-		return RegisteredBot{}, &Error{Status: 502, Code: "502_IMBOT_REGISTER_REQUEST_FAILED", Message: "Bot 注册请求失败: " + err.Error()}
+		return &Error{Status: 502, Code: "502_IMBOT_" + stage + "_REQUEST_FAILED", Message: "Bot " + path + " 请求失败: " + err.Error()}
 	}
 	defer response.Body.Close()
-	var payload struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-		Data struct {
-			UserID string `json:"user_id"`
-			Token  string `json:"token"`
-		} `json:"data"`
+	envelope := struct {
+		Code int             `json:"code"`
+		Msg  string          `json:"msg"`
+		Data json.RawMessage `json:"data"`
+	}{}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		return &Error{Status: 502, Code: "502_IMBOT_" + stage + "_BAD_RESPONSE", Message: fmt.Sprintf("Bot %s 响应非 JSON: HTTP %d", path, response.StatusCode)}
 	}
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
-		return RegisteredBot{}, &Error{Status: 502, Code: "502_IMBOT_REGISTER_BAD_RESPONSE", Message: fmt.Sprintf("Bot 注册响应非 JSON: HTTP %d", response.StatusCode)}
+	if envelope.Code != 0 {
+		return &Error{Status: 502, Code: "502_IMBOT_" + stage + "_REJECTED", Message: fmt.Sprintf("Bot %s 被拒绝: code=%d %s", path, envelope.Code, envelope.Msg)}
 	}
-	if payload.Code != 0 {
-		return RegisteredBot{}, &Error{Status: 502, Code: "502_IMBOT_REGISTER_REJECTED", Message: "Bot 注册被拒绝: " + payload.Msg}
+	if out != nil && len(envelope.Data) > 0 {
+		if err := json.Unmarshal(envelope.Data, out); err != nil {
+			return &Error{Status: 502, Code: "502_IMBOT_" + stage + "_BAD_RESPONSE", Message: "Bot " + path + " 响应 data 解析失败"}
+		}
 	}
-	if strings.TrimSpace(payload.Data.UserID) == "" || strings.TrimSpace(payload.Data.Token) == "" {
-		return RegisteredBot{}, &Error{Status: 502, Code: "502_IMBOT_REGISTER_INCOMPLETE", Message: "Bot 注册响应缺少 user_id 或 token"}
-	}
-	return RegisteredBot{BotID: botID, UserID: payload.Data.UserID, Token: payload.Data.Token}, nil
+	return nil
 }

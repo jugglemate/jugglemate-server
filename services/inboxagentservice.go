@@ -211,21 +211,21 @@ func SetBotConnectionStateProbe(probe func(appKey, botUserID string) string) {
 	botConnectionStateProbe = probe
 }
 
-// LogTicketAgentBotDiagnostics 在客户消息进入 Ticket 群时输出 Agent 回复链路的诊断信息。
+// LogTicketAgentBotDiagnostics 在客户消息进入 Ticket 群时检查 Agent 回复链路，仅在异常时告警。
 //
 // 客户消息由 IM 直接投递给群内 Bot 的长连接，不经过本进程的 webhook 分支，因此 Bot 不回复时
-// webhook 日志里看不到任何线索。这里把三个独立的必要条件一次性打出来，定位断点：
-//   - 绑定：该 Ticket 所属 Inbox 有没有 active 的 Agent-Bot 绑定，上次同步有没有报错
+// webhook 日志里看不到任何线索。这里在"客户刚发言"这个时间点校验两个必要条件：
+//   - 绑定：该 Ticket 所属 Inbox 有没有 active 的 Agent-Bot 绑定，上次群成员同步有没有报错
 //   - 连接：该 Bot 在本进程里长连接是否处于 connected
-//   - 成员：该 Bot 在 IM 侧是否真的是这个 Ticket 群的成员
 //
-// 三者缺一，Bot 都收不到消息。任何一步查询失败都只记日志，绝不影响 webhook 主流程。
+// TIPS: 一切正常时不打日志。客户消息是最高频的事件，逐条记录会淹没真正的异常；正常路径的
+// 观测点是 imbot 的 "[IMBot] 收到消息" 与 "[Inbound] 回复已发送"，二者缺失即代表链路断了。
 //
 // @param ctx 请求上下文
 // @param appKey 应用 AppKey
 // @param inboxID Ticket 所属 Inbox ID
 // @param ticketID Ticket 群 ID
-// @param msgID 触发诊断的消息 ID，用于和 webhook 日志对齐
+// @param msgID 触发检查的消息 ID，用于和 webhook 日志对齐
 func LogTicketAgentBotDiagnostics(ctx context.Context, appKey, inboxID, ticketID, msgID string) {
 	detail, err := GetInboxAgent(ctx, appKey, inboxID)
 	if err != nil {
@@ -233,28 +233,18 @@ func LogTicketAgentBotDiagnostics(ctx context.Context, appKey, inboxID, ticketID
 		return
 	}
 	if detail == nil {
-		log.Printf("[AgentDiag] Inbox 未绑定 Agent，不会有 Bot 回复 appkey=%s inbox_id=%s ticket_id=%s msg_id=%s", appKey, inboxID, ticketID, msgID)
+		// Inbox 未绑定 Agent 是合法配置（纯人工坐席），降为一次性可查的低频信息即可。
 		return
 	}
-	state := "unknown(probe_not_set)"
+	state := "unknown"
 	if botConnectionStateProbe != nil {
 		state = botConnectionStateProbe(appKey, detail.BotUserID)
 	}
-	log.Printf("[AgentDiag] 绑定与连接 appkey=%s inbox_id=%s ticket_id=%s msg_id=%s agent_id=%s bot_user_id=%s conn_state=%s sync_error=%q",
+	if state == "connected" && detail.SyncError == "" {
+		return
+	}
+	log.Printf("[AgentDiag] Bot 回复链路异常 appkey=%s inbox_id=%s ticket_id=%s msg_id=%s agent_id=%s bot_user_id=%s conn_state=%s sync_error=%q",
 		appKey, inboxID, ticketID, msgID, detail.AgentID, detail.BotUserID, state, detail.SyncError)
-
-	sdk := getImSdkForInboxAgent(appKey)
-	if sdk == nil {
-		log.Printf("[AgentDiag] 群成员核对跳过：IM SDK 初始化失败 appkey=%s ticket_id=%s", appKey, ticketID)
-		return
-	}
-	members, code, _, err := sdk.GroupMembersByIds(juggleimsdk.GroupMembersReq{GroupId: ticketID, MemberIds: []string{detail.BotUserID}})
-	if err != nil || code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
-		log.Printf("[AgentDiag] 群成员核对失败 ticket_id=%s bot_user_id=%s code=%d err=%v", ticketID, detail.BotUserID, code, err)
-		return
-	}
-	inGroup := members != nil && len(members.Items) > 0
-	log.Printf("[AgentDiag] 群成员核对 ticket_id=%s bot_user_id=%s in_group=%t", ticketID, detail.BotUserID, inGroup)
 }
 
 func syncOpenTicketAgentBot(ctx context.Context, db *gorm.DB, appKey, inboxID string, previous *InboxAgentDetail, newBotUserID string) error {
