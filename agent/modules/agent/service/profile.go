@@ -148,10 +148,12 @@ func (service *Service) ListAgents(ctx context.Context, appKey, ownerID string, 
 // TIPS: 与 ListAgents 的差别只有状态口径 —— ListAgents 排除 deleted（draft/paused/
 // archived 都会返回），这里只保留 active。前端做「选一个可用 Agent 去对话」时用这个，
 // 免得把还没激活或已暂停的 Agent 也摆出来。系统兜底 Agent 同样只在其自身 active 时前置。
-func (service *Service) ListActiveAgents(ctx context.Context, appKey, ownerID string, page, pageSize int) (dto.ListResponse, error) {
+func (service *Service) ListActiveAgents(ctx context.Context, appKey, ownerID, sessionID string, page, pageSize int) (dto.ListResponse, error) {
 	page, pageSize = normalizePage(page, pageSize)
+	// TIPS: 不按 owner_id 过滤 —— 该接口用于给工单挑选可用 Agent，同一应用下任意 Owner
+	// 创建的 active Agent 都应可选。app_key 仍然保留，保证多租户隔离。
 	query := service.db.WithContext(ctx).Model(&model.Agent{}).
-		Where("app_key = ? AND owner_id = ? AND status = ?", appKey, ownerID, statusActive)
+		Where("app_key = ? AND status = ?", appKey, statusActive)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return dto.ListResponse{}, err
@@ -180,11 +182,82 @@ func (service *Service) ListActiveAgents(ctx context.Context, appKey, ownerID st
 	if err != nil {
 		return dto.ListResponse{}, err
 	}
+	// TIPS: 只查一次绑定关系再逐项标记，避免在循环里对每个 Agent 各查一次库。
+	// 一个工单至多绑定一个 Agent（唯一索引保证），所以列表里最多有一项 binded=true。
+	bindedAgentID, err := service.ticketBoundAgentID(ctx, appKey, sessionID)
+	if err != nil {
+		return dto.ListResponse{}, err
+	}
 	items := make([]dto.ConsoleListItem, 0, len(entities))
 	for index := range entities {
-		items = append(items, service.toListItem(&entities[index], knowledgeCounts[entities[index].ID], toolCounts[entities[index].ID]))
+		item := service.toListItem(&entities[index], knowledgeCounts[entities[index].ID], toolCounts[entities[index].ID])
+		item.Binded = bindedAgentID != "" && bindedAgentID == entities[index].ID
+		items = append(items, item)
 	}
 	return dto.ListResponse{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
+}
+
+// ticketBoundAgentID 返回指定工单当前绑定的 Agent ID；未传工单或未绑定时返回空串。
+//
+// @param sessionID 工单 ID（对前端沿用 session_id 的叫法）
+func (service *Service) ticketBoundAgentID(ctx context.Context, appKey, sessionID string) (string, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", nil
+	}
+	var binding model.TicketBinding
+	err := service.db.WithContext(ctx).
+		Where("app_key = ? AND ticket_id = ?", appKey, sessionID).
+		Take(&binding).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return binding.AgentID, nil
+}
+
+// BindTicketAgent 建立或覆盖工单与 Agent 的关联关系。
+//
+// TIPS: 只写绑定关系，不做任何 IM 侧操作 —— 不改群成员、不动 Bot、不影响入站路由。
+// 重复绑定按覆盖处理（同一工单换绑另一个 Agent），依赖唯一索引 uq_tab_app_ticket。
+//
+// @param appKey 应用 AppKey
+// @param sessionID 工单 ID
+// @param agentID 目标 Agent ID，必须是同一应用下的 active Agent
+func (service *Service) BindTicketAgent(ctx context.Context, appKey, sessionID, agentID string) (dto.BindTicketResponse, error) {
+	appKey, sessionID, agentID = strings.TrimSpace(appKey), strings.TrimSpace(sessionID), strings.TrimSpace(agentID)
+	if appKey == "" || sessionID == "" || agentID == "" {
+		return dto.BindTicketResponse{}, businessError(400, "400_INVALID_REQUEST", "appKey、sessionId、agentId 不能为空")
+	}
+	var ticketCount int64
+	if err := service.db.WithContext(ctx).Table("tickets").
+		Where("app_key = ? AND ticket_id = ?", appKey, sessionID).Count(&ticketCount).Error; err != nil {
+		return dto.BindTicketResponse{}, err
+	}
+	if ticketCount == 0 {
+		return dto.BindTicketResponse{}, businessError(404, "404_TICKET_NOT_FOUND", "工单不存在")
+	}
+	// TIPS: 内置 Juggle_Agent 的 app_key 为空串，不属于任何应用。这里按 owner=system 放行，
+	// 与 ListActiveAgents 的前置逻辑保持一致，否则它能出现在列表里却绑不上。
+	var agentCount int64
+	if err := service.db.WithContext(ctx).Model(&model.Agent{}).
+		Where("id = ? AND status = ? AND (app_key = ? OR owner_id = ?)", agentID, statusActive, appKey, systemOwnerID).
+		Count(&agentCount).Error; err != nil {
+		return dto.BindTicketResponse{}, err
+	}
+	if agentCount == 0 {
+		return dto.BindTicketResponse{}, businessError(404, "404_AGENT_NOT_BINDABLE", "Agent 不存在、未激活或不属于当前应用")
+	}
+	binding := model.TicketBinding{ID: uuid.NewString(), AppKey: appKey, TicketID: sessionID, AgentID: agentID}
+	if err := service.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "app_key"}, {Name: "ticket_id"}},
+		DoUpdates: clause.Assignments(map[string]any{"agent_id": agentID, "updated_at": time.Now().UTC()}),
+	}).Create(&binding).Error; err != nil {
+		return dto.BindTicketResponse{}, err
+	}
+	return dto.BindTicketResponse{SessionID: sessionID, AgentID: agentID, Binded: true}, nil
 }
 
 // UpdateAgent 按补丁更新 Agent Profile、记忆配置和目标能力集合。

@@ -144,6 +144,22 @@ type ConsoleListItem struct {
 	PublishedAt    *time.Time `json:"publishedAt"`
 	KnowledgeCount int64      `json:"knowledgeCount"`
 	ToolCount      int64      `json:"toolCount"`
+	// Binded 表示该 Agent 是否已绑定到查询时传入的工单；未传 session_id 时恒为 false。
+	Binded bool `json:"binded"`
+}
+
+// BindTicketRequest 表示工单与 Agent 的绑定请求。
+type BindTicketRequest struct {
+	// SessionID 为工单 ID，沿用前端 session_id 的叫法。
+	SessionID string `json:"sessionId" binding:"required,max=64"`
+	AgentID   string `json:"agentId" binding:"required,max=64"`
+}
+
+// BindTicketResponse 表示工单与 Agent 的绑定结果。
+type BindTicketResponse struct {
+	SessionID string `json:"sessionId"`
+	AgentID   string `json:"agentId"`
+	Binded    bool   `json:"binded"`
 }
 
 // ListResponse 表示 Agent 分页列表。

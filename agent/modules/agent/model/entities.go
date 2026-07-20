@@ -117,3 +117,20 @@ type BotBinding struct {
 
 // TableName 返回 Bot-Agent 绑定表名。
 func (BotBinding) TableName() string { return "bot_agent_bindings" }
+
+// TicketBinding 表示工单与 Agent 的关联关系。
+//
+// TIPS: 与 InboxAgentBinding 不同，本表只记录关联，不触发任何 IM 群成员变更，
+// 因此没有 bot_id / status / sync_error 字段。一个工单同时只关联一个 Agent，
+// 由唯一索引 uq_tab_app_ticket 保证，重复绑定按覆盖处理。
+type TicketBinding struct {
+	ID        string    `gorm:"size:64;primaryKey"`
+	AppKey    string    `gorm:"column:app_key;size:64;not null"`
+	TicketID  string    `gorm:"column:ticket_id;size:64;not null"`
+	AgentID   string    `gorm:"column:agent_id;size:64;not null"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+// TableName 返回工单-Agent 绑定表名。
+func (TicketBinding) TableName() string { return "ticket_agent_bindings" }

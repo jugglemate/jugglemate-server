@@ -32,6 +32,7 @@ func (handler *Handler) RegisterRoutes(group *gin.RouterGroup) {
 	routes.POST("/bind-bot", handler.bindBotLegacy)
 	routes.GET("", handler.list)
 	routes.GET("/active", handler.listActive)
+	routes.POST("/sessions/bind", handler.bindSession)
 	routes.POST("/update", handler.update)
 	routes.POST("/delete", handler.delete)
 	routes.POST("/:agent_id/activate", handler.activate)
@@ -165,10 +166,11 @@ func (handler *Handler) list(ctx *gin.Context) {
 	respond(ctx, result, err)
 }
 
-// listActive 分页查询当前 Owner 已激活（active）的 Agent 列表。
+// listActive 分页查询当前应用下已激活（active）的 Agent 列表。
 //
-// @param page     页码，从 1 开始，默认 1
-// @param pageSize 每页条数，1~100，默认 20
+// @param page       页码，从 1 开始，默认 1
+// @param pageSize   每页条数，1~100，默认 20
+// @param session_id 可选，工单 ID；传入后每项返回 binded 标识该 Agent 是否已绑定该工单
 func (handler *Handler) listActive(ctx *gin.Context) {
 	principal, err := identity.FromGin(ctx)
 	if err != nil {
@@ -181,7 +183,28 @@ func (handler *Handler) listActive(ctx *gin.Context) {
 		validation(ctx, errors.New("page 或 pageSize 超出范围"))
 		return
 	}
-	result, err := handler.service.ListActiveAgents(ctx.Request.Context(), principal.AppKey, principal.ID, page, size)
+	result, err := handler.service.ListActiveAgents(ctx.Request.Context(), principal.AppKey, principal.ID, ctx.Query("session_id"), page, size)
+	respond(ctx, result, err)
+}
+
+// bindSession 建立或覆盖工单与 Agent 的绑定关系。
+//
+// TIPS: 只写绑定关系，不改 IM 群成员、不影响入站路由。同一工单重复绑定按覆盖处理。
+//
+// @param sessionId 工单 ID
+// @param agentId   目标 Agent ID，需为当前应用下的 active Agent
+func (handler *Handler) bindSession(ctx *gin.Context) {
+	principal, err := identity.FromGin(ctx)
+	if err != nil {
+		unauthorized(ctx)
+		return
+	}
+	var request dto.BindTicketRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		validation(ctx, err)
+		return
+	}
+	result, err := handler.service.BindTicketAgent(ctx.Request.Context(), principal.AppKey, request.SessionID, request.AgentID)
 	respond(ctx, result, err)
 }
 

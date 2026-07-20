@@ -13,8 +13,18 @@ func TestRegisterRoutesIncludesAllAgentEndpoints(t *testing.T) {
 	engine := gin.New()
 	NewHandler(nil).RegisterRoutes(engine.Group("/api/v1"))
 	routes := engine.Routes()
-	if len(routes) != 21 {
-		t.Fatalf("Agent 路由数量应为 21，实际为 %d: %+v", len(routes), routes)
+	if len(routes) != 22 {
+		t.Fatalf("Agent 路由数量应为 22，实际为 %d: %+v", len(routes), routes)
+	}
+	// TIPS: /agents/sessions/bind 同样是静态段，必须能与 /agents/:agent_id 共存。
+	bindFound := false
+	for _, route := range routes {
+		if route.Method == "POST" && route.Path == "/api/v1/agents/sessions/bind" {
+			bindFound = true
+		}
+	}
+	if !bindFound {
+		t.Fatal("POST /api/v1/agents/sessions/bind 未注册")
 	}
 	// TIPS: /agents/active 是静态段，必须能与 /agents/:agent_id 共存而不被参数路由吞掉。
 	found := false
