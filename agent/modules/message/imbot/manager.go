@@ -49,7 +49,12 @@ func NewManager(config configures.AgentIMConfig) *Manager {
 // Start 连接数据库中全部 active Bot；单个连接失败不阻止服务启动。
 func (manager *Manager) Start(ctx context.Context, db *gorm.DB) error {
 	if !manager.enabled {
+		slog.WarnContext(ctx, "[IMBot] 模块已禁用，不会建立任何 Bot 连接，Agent 无法收到 Ticket 群消息", "config_enabled", false)
 		return nil
+	}
+	slog.InfoContext(ctx, "[IMBot] 开始建立 Bot 常驻连接", "ws_address", manager.config.WSAddress)
+	if problem := validateWSAddress(manager.config.WSAddress); problem != "" {
+		slog.ErrorContext(ctx, "[IMBot] wsAddress 配置非法，所有 Bot 连接都将失败", "ws_address", manager.config.WSAddress, "problem", problem)
 	}
 	var bots []struct {
 		AppKey    string `gorm:"column:app_key"`
@@ -57,25 +62,41 @@ func (manager *Manager) Start(ctx context.Context, db *gorm.DB) error {
 		Token     string `gorm:"column:token"`
 	}
 	if err := db.WithContext(ctx).Table("bots").Select("app_key, bot_user_id, token").Where("status = 'active'").Find(&bots).Error; err != nil {
+		slog.ErrorContext(ctx, "[IMBot] 查询 active Bot 失败", "error", err)
 		return err
 	}
+	slog.InfoContext(ctx, "[IMBot] active Bot 查询完成", "total", len(bots))
+	if len(bots) == 0 {
+		slog.WarnContext(ctx, "[IMBot] bots 表没有 status='active' 的记录，Agent 不会收到任何 Ticket 群消息")
+	}
+	connected, skipped, failed := 0, 0, 0
 	for _, bot := range bots {
 		if bot.Token == "" {
+			skipped++
+			slog.WarnContext(ctx, "[IMBot] 跳过：Bot token 为空，无法建立连接", "app_key", bot.AppKey, "bot_user_id", bot.BotUserID)
 			continue
 		}
 		if _, err := manager.EnsureBot(ctx, bot.AppKey, bot.Token, bot.BotUserID); err != nil {
-			slog.ErrorContext(ctx, "业务 IM Bot 连接失败", "app_key", bot.AppKey, "bot_user_id", bot.BotUserID, "error", err)
+			failed++
+			slog.ErrorContext(ctx, "[IMBot] 业务 IM Bot 连接失败", "app_key", bot.AppKey, "bot_user_id", bot.BotUserID, "error", err)
+			continue
 		}
+		connected++
+		slog.InfoContext(ctx, "[IMBot] Bot 连接成功", "app_key", bot.AppKey, "bot_user_id", bot.BotUserID)
 	}
+	slog.InfoContext(ctx, "[IMBot] Bot 连接建立完毕", "connected", connected, "skipped_no_token", skipped, "failed", failed)
 	return nil
 }
 
 // EnsureBot 确保指定 Bot 已连接，并返回握手确认的用户 ID。
 func (manager *Manager) EnsureBot(ctx context.Context, appKey, token, expectedUserID string) (string, error) {
 	if !manager.enabled {
+		slog.WarnContext(ctx, "[IMBot] EnsureBot 跳过：模块已禁用", "app_key", appKey, "bot_user_id", expectedUserID)
 		return expectedUserID, nil
 	}
 	if token == "" || appKey == "" || manager.config.WSAddress == "" {
+		slog.ErrorContext(ctx, "[IMBot] EnsureBot 前置校验失败", "app_key", appKey, "bot_user_id", expectedUserID,
+			"has_token", token != "", "ws_address", manager.config.WSAddress)
 		return "", &Error{Status: 500, Code: "500_IMBOT_CREDENTIALS_NOT_CONFIGURED", Message: "IM Bot WebSocket 配置或 token 缺失"}
 	}
 	manager.mu.RLock()
@@ -84,6 +105,7 @@ func (manager *Manager) EnsureBot(ctx context.Context, appKey, token, expectedUs
 	if existing != nil && existing.GetState() == utils.State_connected {
 		return expectedUserID, nil
 	}
+	slog.InfoContext(ctx, "[IMBot] 正在连接 Bot", "app_key", appKey, "bot_user_id", expectedUserID, "ws_address", manager.config.WSAddress)
 	client := imbotclients.NewImBotClient(manager.config.WSAddress, appKey)
 	type connectResult struct {
 		userID string
@@ -239,16 +261,36 @@ type messageListener struct {
 
 // OnMessageReceive 接收 IM SDK 消息并投递到 Go Message 入站处理器。
 func (listener *messageListener) OnMessageReceive(message *sdkmodels.Message) {
-	if message == nil || message.SenderId == "" || message.SenderId == listener.botUserID {
+	if message == nil {
+		slog.Warn("[IMBot] 收到空消息", "bot_user_id", listener.botUserID)
+		return
+	}
+	targetLog, channelLog := "", pbobjs.ChannelType_Private
+	if message.Conversation != nil {
+		targetLog, channelLog = message.Conversation.ConversationId, message.Conversation.ConversationType
+	}
+	slog.Info("[IMBot] 收到消息", "app_key", listener.appKey, "bot_user_id", listener.botUserID,
+		"sender_id", message.SenderId, "msg_id", message.MsgId, "target_id", targetLog, "channel_type", int(channelLog))
+	if message.SenderId == "" || message.SenderId == listener.botUserID {
+		slog.Info("[IMBot] 跳过：发送者为空或是 Bot 自己", "bot_user_id", listener.botUserID, "sender_id", message.SenderId, "msg_id", message.MsgId)
 		return
 	}
 	textContent, ok := message.MsgContent.(*messages.TextMessage)
-	if !ok || strings.TrimSpace(textContent.Content) == "" {
+	if !ok {
+		slog.Info("[IMBot] 跳过：非文本消息", "bot_user_id", listener.botUserID, "msg_id", message.MsgId,
+			"content_type", fmt.Sprintf("%T", message.MsgContent))
+		return
+	}
+	if strings.TrimSpace(textContent.Content) == "" {
+		slog.Info("[IMBot] 跳过：文本内容为空", "bot_user_id", listener.botUserID, "msg_id", message.MsgId)
 		return
 	}
 	listener.manager.mu.RLock()
 	handler := listener.manager.handler
 	listener.manager.mu.RUnlock()
+	if handler == nil {
+		slog.Error("[IMBot] 跳过：入站处理器未注册", "bot_user_id", listener.botUserID, "msg_id", message.MsgId)
+	}
 	if handler != nil {
 		targetID := ""
 		channel := pbobjs.ChannelType_Private
@@ -258,6 +300,35 @@ func (listener *messageListener) OnMessageReceive(message *sdkmodels.Message) {
 		}
 		go handler(context.Background(), InboundMessage{AppKey: listener.appKey, BotUserID: listener.botUserID, SenderID: message.SenderId, MessageID: message.MsgId, Text: textContent.Content, TargetID: targetID, ChannelType: channel})
 	}
+}
+
+// validateWSAddress 校验 wsAddress 是否符合 SDK 要求；合法返回空串，否则返回问题描述。
+//
+// TIPS: imbot SDK 的 wsURL() 把 scheme 之后的整段当作 URL.Host 并硬编码 Path="/imbot"。
+// 因此 wsAddress 只能是 host[:port]，一旦带路径（如 wss://ws.juggleim.com/im），那个 "/"
+// 会被转义成 %2F，最终报 `invalid URL escape "%2F"`，且错误只出现在 SDK 自己的输出里，
+// 从业务日志完全看不出来。这里在启动时就把问题点破。
+func validateWSAddress(address string) string {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return "为空"
+	}
+	rest := ""
+	switch {
+	case strings.HasPrefix(address, "wss://"):
+		rest = address[6:]
+	case strings.HasPrefix(address, "ws://"):
+		rest = address[5:]
+	default:
+		return "缺少 ws:// 或 wss:// 前缀"
+	}
+	if rest == "" {
+		return "缺少主机名"
+	}
+	if strings.ContainsAny(rest, "/?#") {
+		return "只能填 host[:port]，不能带路径或查询参数（SDK 会固定拼接 /imbot，路径中的 / 会被转义成 %2F 导致连接失败）"
+	}
+	return ""
 }
 
 func clientKey(appKey, botUserID string) string {

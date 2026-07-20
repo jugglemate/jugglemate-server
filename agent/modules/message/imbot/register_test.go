@@ -47,3 +47,23 @@ func TestDisabledManagerSkipsConnection(t *testing.T) {
 		t.Fatalf("关闭 IM 后应直接返回期望用户: userID=%q err=%v", userID, err)
 	}
 }
+
+// TestValidateWSAddress 覆盖线上踩过的带路径 wsAddress 配置。
+func TestValidateWSAddress(t *testing.T) {
+	cases := []struct {
+		address string
+		ok      bool
+	}{
+		{"ws://127.0.0.1:9002", true},
+		{"wss://ws.juggleim.com", true},
+		{"wss://ws.juggleim.com/im", false},
+		{"ws.juggleim.com", false},
+		{"", false},
+		{"wss://", false},
+	}
+	for _, item := range cases {
+		if problem := validateWSAddress(item.address); (problem == "") != item.ok {
+			t.Fatalf("wsAddress=%q 期望合法=%v，实际 problem=%q", item.address, item.ok, problem)
+		}
+	}
+}

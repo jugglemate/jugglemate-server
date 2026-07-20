@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
@@ -22,6 +23,12 @@ var errorLogger *logrus.Logger
 func InitLogs() {
 	initErrorLogger()
 	initInfoLogger()
+	// TIPS: 收口另外两条日志通道，否则它们只写 stderr，不进 logs/<name>.log：
+	// slog 被 agent 模块（imbot/入站推理）大量使用，log.Printf 被 webhook 入口使用。
+	slog.SetDefault(slog.New(newSlogHandler()))
+	// 走 logrus Writer 让格式与其他日志一致；SetFlags(0) 避免时间戳重复。
+	log.SetOutput(infoLogger.WriterLevel(logrus.InfoLevel))
+	log.SetFlags(0)
 }
 
 func SetLogger(info *logrus.Logger, err *logrus.Logger) {

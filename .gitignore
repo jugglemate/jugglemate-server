@@ -4,4 +4,4 @@ conf/config.yml
 *.test
 .agents
 docs
-logs
+/logs
