@@ -3,5 +3,4 @@ conf/config.yml
 .DS_Store
 *.test
 .agents
-docs
 /logs
