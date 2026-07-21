@@ -16,8 +16,6 @@ import (
 )
 
 const (
-	systemOwnerID  = "system"
-	builtinAgentID = "Juggle_Agent"
 	// statusDeleted 软删除状态：Agent 行保留（计费与会话历史仍可追溯），但对所有查询不可见。
 	statusDeleted = "deleted"
 	// statusActive 已激活状态：只有该状态的 Agent 能被绑定到 Inbox 并对外提供服务。
@@ -103,10 +101,7 @@ func (service *Service) findAgent(ctx context.Context, agentID string) (*model.A
 	return &entity, err
 }
 
-func assertPermission(actor Actor, entity *model.Agent, allowBuiltin bool) error {
-	if allowBuiltin && entity.ID == builtinAgentID && entity.OwnerID == systemOwnerID {
-		return nil
-	}
+func assertPermission(actor Actor, entity *model.Agent) error {
 	if strings.TrimSpace(actor.AppKey) == "" || actor.AppKey != entity.AppKey {
 		return businessError(403, "403_APP_KEY_MISMATCH", "Agent 不属于当前应用")
 	}

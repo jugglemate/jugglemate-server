@@ -31,17 +31,45 @@ func TestBindTicketAgentAgainstPostgres(t *testing.T) {
 	if err := migrations.Apply(ctx, db); err != nil {
 		t.Fatalf("执行迁移失败: %v", err)
 	}
-	service := &Service{db: db}
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatalf("开启测试事务失败: %v", tx.Error)
+	}
+	t.Cleanup(func() { tx.Rollback() })
+	if err := tx.Exec("DELETE FROM ticket_agent_bindings WHERE app_key IN (?, ?)", ticketBindTestAppKey, ticketBindTestAppKey+"_other").Error; err != nil {
+		t.Fatalf("清理测试绑定失败: %v", err)
+	}
+	if err := tx.Exec("DELETE FROM tickets WHERE app_key = ?", ticketBindTestAppKey).Error; err != nil {
+		t.Fatalf("清理测试工单失败: %v", err)
+	}
+	if err := tx.Exec("DELETE FROM agents WHERE app_key = ?", ticketBindTestAppKey).Error; err != nil {
+		t.Fatalf("清理测试 Agent 失败: %v", err)
+	}
+	service := &Service{db: tx}
 
 	ticketID := "ticket_" + uuid.NewString()[:8]
-	firstAgent := seedActiveAgent(t, db, ticketBindTestAppKey)
-	secondAgent := seedActiveAgent(t, db, ticketBindTestAppKey)
-	seedTicket(t, db, ticketBindTestAppKey, ticketID)
-	t.Cleanup(func() {
-		db.Exec("DELETE FROM ticket_agent_bindings WHERE app_key=?", ticketBindTestAppKey)
-		db.Exec("DELETE FROM tickets WHERE app_key=?", ticketBindTestAppKey)
-		db.Exec("DELETE FROM agents WHERE app_key=?", ticketBindTestAppKey)
-	})
+	firstAgent := seedActiveAgent(t, tx, ticketBindTestAppKey)
+	secondAgent := seedActiveAgent(t, tx, ticketBindTestAppKey)
+	seedTicket(t, tx, ticketBindTestAppKey, ticketID)
+	// TIPS: 在事务中强制准备历史系统 Agent，确保 active 列表不会再把它跨租户前置；
+	// 回滚会恢复测试前状态，不修改已有数据。
+	if err := tx.Exec(`INSERT INTO agents (id, app_key, owner_id, name, type, status, created_at, updated_at)
+		VALUES ('Juggle_Agent', '', 'system', 'Juggle Agent', 'assistant', 'active', now(), now())
+		ON CONFLICT (id) DO UPDATE SET app_key='', owner_id='system', status='active'`).Error; err != nil {
+		t.Fatalf("准备历史系统 Agent 失败: %v", err)
+	}
+	list, err := service.ListActiveAgents(ctx, ticketBindTestAppKey, "", 1, 20)
+	if err != nil {
+		t.Fatalf("查询 active Agent 失败: %v", err)
+	}
+	if list.Total != 2 || len(list.Items) != 2 {
+		t.Fatalf("active 列表只能返回当前应用的 2 个 Agent，实际 total=%d items=%d", list.Total, len(list.Items))
+	}
+	for _, item := range list.Items {
+		if item.AgentID == "Juggle_Agent" {
+			t.Fatal("active 列表不应注入历史系统 Juggle_Agent")
+		}
+	}
 
 	if _, err := service.BindTicketAgent(ctx, ticketBindTestAppKey, ticketID, firstAgent); err != nil {
 		t.Fatalf("首次绑定失败: %v", err)
@@ -60,7 +88,7 @@ func TestBindTicketAgentAgainstPostgres(t *testing.T) {
 		t.Fatalf("换绑后应为 %s，实际 %s err=%v", secondAgent, bound, err)
 	}
 	var rows int64
-	if err := db.Model(&model.TicketBinding{}).Where("app_key=? AND ticket_id=?", ticketBindTestAppKey, ticketID).Count(&rows).Error; err != nil {
+	if err := tx.Model(&model.TicketBinding{}).Where("app_key=? AND ticket_id=?", ticketBindTestAppKey, ticketID).Count(&rows).Error; err != nil {
 		t.Fatalf("统计绑定行数失败: %v", err)
 	}
 	if rows != 1 {
@@ -78,6 +106,30 @@ func TestBindTicketAgentAgainstPostgres(t *testing.T) {
 	}
 	if _, err := service.BindTicketAgent(ctx, ticketBindTestAppKey, ticketID, "agent_missing"); err == nil {
 		t.Fatal("绑定不存在的 Agent 应失败")
+	}
+
+	otherAppKey := ticketBindTestAppKey + "_other"
+	if err := tx.Create(&model.TicketBinding{ID: uuid.NewString(), AppKey: otherAppKey, TicketID: ticketID, AgentID: "other_agent"}).Error; err != nil {
+		t.Fatalf("准备其他应用绑定失败: %v", err)
+	}
+	unbound, err := service.UnbindTicketAgent(ctx, ticketBindTestAppKey, ticketID)
+	if err != nil {
+		t.Fatalf("解绑失败: %v", err)
+	}
+	if unbound.SessionID != ticketID || unbound.AgentID != secondAgent || unbound.Binded {
+		t.Fatalf("解绑响应异常: %+v", unbound)
+	}
+	bound, err = service.ticketBoundAgentID(ctx, ticketBindTestAppKey, ticketID)
+	if err != nil || bound != "" {
+		t.Fatalf("解绑后应无绑定，实际 %q err=%v", bound, err)
+	}
+	if err := tx.Model(&model.TicketBinding{}).Where("app_key=? AND ticket_id=?", otherAppKey, ticketID).Count(&rows).Error; err != nil || rows != 1 {
+		t.Fatalf("解绑不应删除其他应用的同名工单绑定: rows=%d err=%v", rows, err)
+	}
+	// 重复解绑按幂等成功处理，原 Agent ID 为空。
+	unbound, err = service.UnbindTicketAgent(ctx, ticketBindTestAppKey, ticketID)
+	if err != nil || unbound.AgentID != "" || unbound.Binded {
+		t.Fatalf("重复解绑应幂等成功: result=%+v err=%v", unbound, err)
 	}
 }
 

@@ -24,9 +24,6 @@ func Seed(ctx context.Context, db *gorm.DB, cfg SeedConfig) error {
 		cfg.InnerAPIBaseURL = "https://t.JG.pro"
 	}
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := seedBuiltinAgent(tx); err != nil {
-			return err
-		}
 		if err := seedSystemWallet(tx); err != nil {
 			return err
 		}
@@ -37,29 +34,7 @@ func Seed(ctx context.Context, db *gorm.DB, cfg SeedConfig) error {
 	})
 }
 
-// seedBuiltinAgent 初始化未绑定 Bot 的系统兜底 Agent。
-func seedBuiltinAgent(tx *gorm.DB) error {
-	const statement = `
-		INSERT INTO agents (
-			id, owner_id, name, type, prompt, llm_model, llm_provider_id,
-			status, react_config, memory_config,
-			total_invocations, success_count, fail_count, failure_rate,
-			activated_at, created_at, updated_at
-		) VALUES (
-			'Juggle_Agent', 'system', 'Juggle Agent', 'assistant', ?, NULL, NULL,
-			'active', CAST(? AS JSONB), CAST(? AS JSONB),
-			0, 0, 0, 0, now(), now(), now()
-		)
-		ON CONFLICT (id) DO NOTHING`
-	reactConfig := `{"maxRounds":5,"targetRounds":3,"toolsPerRound":2,"confidenceThreshold":0.85}`
-	memoryConfig := `{"shortTermEnabled":true,"shortTermWindowSize":5,"summaryEnabled":false,"summaryTriggerTokens":2000,"summaryMaxTokens":500,"summaryModel":"","longTermEnabled":false,"longTermExtractOnClose":true,"longTermInjectTopK":3,"longTermExpireDays":90}`
-	if err := tx.Exec(statement, "你是 Juggle Agent，一个友好、专业的智能助手，请用简洁清晰的语言帮助用户解决问题。", reactConfig, memoryConfig).Error; err != nil {
-		return fmt.Errorf("初始化系统 Agent 失败: %w", err)
-	}
-	return nil
-}
-
-// seedSystemWallet 初始化系统 Agent 的运营预算钱包。
+// seedSystemWallet 初始化系统运营预算钱包。
 func seedSystemWallet(tx *gorm.DB) error {
 	const statement = `
 		INSERT INTO credit_wallets (

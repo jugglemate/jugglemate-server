@@ -99,13 +99,13 @@ func (service *Service) GetAgent(ctx context.Context, actor Actor, agentID strin
 	if err != nil {
 		return dto.DetailResponse{}, err
 	}
-	if err := assertPermission(actor, entity, true); err != nil {
+	if err := assertPermission(actor, entity); err != nil {
 		return dto.DetailResponse{}, err
 	}
 	return service.toDetail(ctx, entity)
 }
 
-// ListAgents 分页查询当前 Owner Agent，并在首页前置系统兜底 Agent。
+// ListAgents 分页查询当前 Owner 的 Agent。
 func (service *Service) ListAgents(ctx context.Context, appKey, ownerID string, page, pageSize int) (dto.ListResponse, error) {
 	page, pageSize = normalizePage(page, pageSize)
 	// TIPS: 软删除的 Agent 对列表不可见（行仍在库里用于计费与会话历史追溯）。
@@ -118,15 +118,6 @@ func (service *Service) ListAgents(ctx context.Context, appKey, ownerID string, 
 	var entities []model.Agent
 	if err := query.Order("updated_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {
 		return dto.ListResponse{}, err
-	}
-	if ownerID != systemOwnerID && page == 1 {
-		var builtin model.Agent
-		if err := service.db.WithContext(ctx).Where("id = ? AND owner_id = ?", builtinAgentID, systemOwnerID).First(&builtin).Error; err == nil {
-			entities = append([]model.Agent{builtin}, entities...)
-			total++
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return dto.ListResponse{}, err
-		}
 	}
 	knowledgeCounts, err := service.bindingCounts(ctx, "agent_knowledge", entities)
 	if err != nil {
@@ -143,12 +134,12 @@ func (service *Service) ListAgents(ctx context.Context, appKey, ownerID string, 
 	return dto.ListResponse{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
-// ListActiveAgents 分页查询当前 Owner 处于 active 状态的 Agent。
+// ListActiveAgents 分页查询当前应用下处于 active 状态的 Agent。
 //
 // TIPS: 与 ListAgents 的差别只有状态口径 —— ListAgents 排除 deleted（draft/paused/
 // archived 都会返回），这里只保留 active。前端做「选一个可用 Agent 去对话」时用这个，
-// 免得把还没激活或已暂停的 Agent 也摆出来。系统兜底 Agent 同样只在其自身 active 时前置。
-func (service *Service) ListActiveAgents(ctx context.Context, appKey, ownerID, sessionID string, page, pageSize int) (dto.ListResponse, error) {
+// 免得把还没激活或已暂停的 Agent 也摆出来。
+func (service *Service) ListActiveAgents(ctx context.Context, appKey, sessionID string, page, pageSize int) (dto.ListResponse, error) {
 	page, pageSize = normalizePage(page, pageSize)
 	// TIPS: 不按 owner_id 过滤 —— 该接口用于给工单挑选可用 Agent，同一应用下任意 Owner
 	// 创建的 active Agent 都应可选。app_key 仍然保留，保证多租户隔离。
@@ -161,18 +152,6 @@ func (service *Service) ListActiveAgents(ctx context.Context, appKey, ownerID, s
 	var entities []model.Agent
 	if err := query.Order("updated_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {
 		return dto.ListResponse{}, err
-	}
-	if ownerID != systemOwnerID && page == 1 {
-		var builtin model.Agent
-		err := service.db.WithContext(ctx).
-			Where("id = ? AND owner_id = ? AND status = ?", builtinAgentID, systemOwnerID, statusActive).
-			First(&builtin).Error
-		if err == nil {
-			entities = append([]model.Agent{builtin}, entities...)
-			total++
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return dto.ListResponse{}, err
-		}
 	}
 	knowledgeCounts, err := service.bindingCounts(ctx, "agent_knowledge", entities)
 	if err != nil {
@@ -239,11 +218,9 @@ func (service *Service) BindTicketAgent(ctx context.Context, appKey, sessionID, 
 	if ticketCount == 0 {
 		return dto.BindTicketResponse{}, businessError(404, "404_TICKET_NOT_FOUND", "工单不存在")
 	}
-	// TIPS: 内置 Juggle_Agent 的 app_key 为空串，不属于任何应用。这里按 owner=system 放行，
-	// 与 ListActiveAgents 的前置逻辑保持一致，否则它能出现在列表里却绑不上。
 	var agentCount int64
 	if err := service.db.WithContext(ctx).Model(&model.Agent{}).
-		Where("id = ? AND status = ? AND (app_key = ? OR owner_id = ?)", agentID, statusActive, appKey, systemOwnerID).
+		Where("id = ? AND status = ? AND app_key = ?", agentID, statusActive, appKey).
 		Count(&agentCount).Error; err != nil {
 		return dto.BindTicketResponse{}, err
 	}
@@ -260,13 +237,35 @@ func (service *Service) BindTicketAgent(ctx context.Context, appKey, sessionID, 
 	return dto.BindTicketResponse{SessionID: sessionID, AgentID: agentID, Binded: true}, nil
 }
 
+// UnbindTicketAgent 解除工单当前的 Agent 绑定。
+//
+// TIPS: 解绑只删除选择关系，不产生 IM 侧动作。删除使用 RETURNING 原子返回原 Agent ID，
+// 避免“先查再删”期间发生换绑时返回错误的 Agent；未绑定时按幂等成功处理。
+//
+// @param appKey 应用 AppKey
+// @param sessionID 工单 ID
+func (service *Service) UnbindTicketAgent(ctx context.Context, appKey, sessionID string) (dto.BindTicketResponse, error) {
+	appKey, sessionID = strings.TrimSpace(appKey), strings.TrimSpace(sessionID)
+	if appKey == "" || sessionID == "" {
+		return dto.BindTicketResponse{}, businessError(400, "400_INVALID_REQUEST", "appKey、sessionId 不能为空")
+	}
+	binding := model.TicketBinding{}
+	result := service.db.WithContext(ctx).Clauses(clause.Returning{Columns: []clause.Column{{Name: "agent_id"}}}).
+		Where("app_key = ? AND ticket_id = ?", appKey, sessionID).
+		Delete(&binding)
+	if result.Error != nil {
+		return dto.BindTicketResponse{}, result.Error
+	}
+	return dto.BindTicketResponse{SessionID: sessionID, AgentID: binding.AgentID, Binded: false}, nil
+}
+
 // UpdateAgent 按补丁更新 Agent Profile、记忆配置和目标能力集合。
 func (service *Service) UpdateAgent(ctx context.Context, actor Actor, request dto.UpdateRequest) (dto.DetailResponse, error) {
 	entity, err := service.findAgent(ctx, request.AgentID)
 	if err != nil {
 		return dto.DetailResponse{}, err
 	}
-	if err := assertPermission(actor, entity, true); err != nil {
+	if err := assertPermission(actor, entity); err != nil {
 		return dto.DetailResponse{}, err
 	}
 	if entity.Status == "archived" {
@@ -333,7 +332,7 @@ func (service *Service) UpdateAgent(ctx context.Context, actor Actor, request dt
 
 // DeleteAgent 软删除 Agent，并清理它的全部关联关系。
 //
-// 简要描述：任意状态（除系统内置 Agent）均可删除。删除会依次解绑 Inbox（含把 Bot 移出未关闭
+// 简要描述：任意状态均可删除。删除会依次解绑 Inbox（含把 Bot 移出未关闭
 // Ticket 群）、停用 Bot 与 Bot-Agent 绑定、卸载知识/技能/工具，最后把 Agent 置为 deleted。
 //
 // TIPS: 这里刻意不物理删除。conversations、consumption_records（计费）、llm_model_calls 等表
@@ -346,9 +345,8 @@ func (service *Service) DeleteAgent(ctx context.Context, actor Actor, agentID st
 	if err != nil {
 		return err
 	}
-	// allowBuiltin=false：系统内置 Juggle_Agent 不允许删除。
 	// 已删除的 Agent 在 findAgent 处就会返回 404，这里不需要再判断 deleted。
-	if err := assertPermission(actor, entity, false); err != nil {
+	if err := assertPermission(actor, entity); err != nil {
 		return err
 	}
 
@@ -452,7 +450,7 @@ func (service *Service) ActivateAgent(ctx context.Context, actor Actor, agentID 
 	if err != nil {
 		return dto.LifecycleResponse{}, err
 	}
-	if err := assertPermission(actor, entity, false); err != nil {
+	if err := assertPermission(actor, entity); err != nil {
 		return dto.LifecycleResponse{}, err
 	}
 	previous := entity.Status
@@ -492,7 +490,7 @@ func (service *Service) PauseAgent(ctx context.Context, actor Actor, agentID str
 	if err != nil {
 		return dto.LifecycleResponse{}, err
 	}
-	if err := assertPermission(actor, entity, false); err != nil {
+	if err := assertPermission(actor, entity); err != nil {
 		return dto.LifecycleResponse{}, err
 	}
 	if err := assertTransition(entity.Status, "paused"); err != nil {
@@ -518,7 +516,7 @@ func (service *Service) ArchiveAgent(ctx context.Context, actor Actor, agentID, 
 	if err != nil {
 		return dto.LifecycleResponse{}, err
 	}
-	if err := assertPermission(actor, entity, false); err != nil {
+	if err := assertPermission(actor, entity); err != nil {
 		return dto.LifecycleResponse{}, err
 	}
 	if err := assertTransition(entity.Status, "archived"); err != nil {

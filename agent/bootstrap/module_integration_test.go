@@ -49,9 +49,9 @@ func TestModuleStartAndStopAgainstInfrastructure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	module.RegisterNativeRoutes(engine)
-	// 145 - 5（移除的 /bot/human-interventions/*）+ 1（新增的 /agents/sessions/bind）= 141
-	if count := len(engine.Routes()); count != 141 {
-		t.Fatalf("源兼容路由应为 141 条，实际为 %d", count)
+	// 145 - 5（移除的 /bot/human-interventions/*）+ 2（新增 sessions bind/unbind）= 142
+	if count := len(engine.Routes()); count != 142 {
+		t.Fatalf("源兼容路由应为 142 条，实际为 %d", count)
 	}
 	if err := module.Stop(ctx); err != nil {
 		t.Fatalf("关闭 Agent 模块失败: %v", err)

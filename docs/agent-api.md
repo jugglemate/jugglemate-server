@@ -1,10 +1,11 @@
 # Agent 接口说明（前端对接）
 
-本文覆盖前端控制台需要的三个接口：
+本文覆盖前端控制台需要的四个接口：
 
 1. `GET /jmate/agentapi/agents/active` —— 获取已激活的 Agent 列表（可带工单绑定状态）
 2. `POST /jmate/agentapi/agents/sessions/bind` —— 绑定工单与 Agent
-3. `POST /jmate/agentapi/chat/stream` —— 与 Agent 流式对话（SSE）
+3. `POST /jmate/agentapi/agents/sessions/unbind` —— 解除工单与 Agent 的绑定
+4. `POST /jmate/agentapi/chat/stream` —— 与 Agent 流式对话（SSE）
 
 > 说明：`/jmate/agentapi/*` 是控制台登录态入口，由 `routers/router.go` 转发到 Agent 模块。
 > Agent 模块自身的原生入口是 `/api/v1/*`（走内部密钥鉴权），前端不要直接调。
@@ -15,7 +16,7 @@
 
 ### 鉴权
 
-两个接口都要求控制台登录态，请求头：
+这些接口都要求控制台登录态，请求头：
 
 | Header | 必填 | 说明 |
 | --- | --- | --- |
@@ -98,9 +99,8 @@ GET /jmate/agentapi/agents/active
 
 ### 注意
 
-- 第一页会**前置系统兜底 Agent**（`Juggle_Agent`），且仅当它自身也是 `active` 时才出现，
-  `total` 会相应 +1。它不属于当前 Owner，前端如需隐藏可按 `ownerId === "system"` 过滤。
-- 排序为 `updatedAt` 倒序（兜底 Agent 除外，它恒在首位）。
+- 列表严格按当前 AppKey 隔离，不会额外注入系统级 Agent。
+- 排序为 `updatedAt` 倒序。
 - 一个工单同时只能绑定一个 Agent，因此**整个列表里最多有一项 `binded === true`**。
   注意它可能不在当前页——绑定的 Agent 恰好排在第 3 页时，第 1 页会全是 `false`。
   前端如果要「回显已选中项」，建议不要依赖翻页查找，直接用列表接口返回的 `binded` 做勾选状态即可。
@@ -175,8 +175,8 @@ Content-Type: application/json
 
 - **一个工单同时只能绑定一个 Agent。** 对同一工单重复调用属于**换绑**，直接覆盖旧记录，
   不会报冲突、也不会留下多条记录。前端切换选择时直接调用即可，无需先解绑。
-- 目标 Agent 必须是 `active` 且属于当前 AppKey。系统兜底 Agent（`Juggle_Agent`）可以绑定。
-- 当前**没有解绑接口**。如需清除，只能换绑到另一个 Agent。
+- 目标 Agent 必须是 `active` 且属于当前 AppKey。
+- 如需清除当前选择，调用下方的 `sessions/unbind` 接口。
 
 ### 错误码
 
@@ -220,7 +220,66 @@ await post("/jmate/agentapi/agents/sessions/bind", { sessionId: ticketId, agentI
 
 ---
 
-## 3. 流式对话（SSE）
+## 3. 解除工单与 Agent 绑定
+
+```
+POST /jmate/agentapi/agents/sessions/unbind
+Content-Type: application/json
+```
+
+清除工单当前选择的 Agent。该接口只删除 `ticket_agent_bindings` 中的选择关系，不移出 Bot、
+不修改 Ticket 群成员，也不改变 Inbox 级自动回复路由。
+
+### 请求体
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `sessionId` | string | 是 | 要解除绑定的工单 ID，最长 64 |
+
+### 响应 `data`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `sessionId` | string | 回显工单 ID |
+| `agentId` | string | 本次被解除的 Agent ID；原本未绑定时为空字符串 |
+| `binded` | bool | 成功时恒为 `false` |
+
+### 语义
+
+- 接口按当前 AppKey 隔离，不会删除其他应用下同名工单的绑定。
+- 接口是幂等的：工单不存在、没有绑定或重复解绑均返回成功，`agentId` 为空字符串。
+- 解绑与换绑不同；换绑仍可直接调用 `sessions/bind`，无需先解绑。
+
+### 错误码
+
+| `code` | 说明 |
+| --- | --- |
+| `422` | JSON 格式错误，或 `sessionId` 为空、超过 64 个字符 |
+
+### 示例
+
+```bash
+curl -X POST "https://<host>/jmate/agentapi/agents/sessions/unbind" \
+  -H "appkey: $APPKEY" -H "Authorization: $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId":"ticket_aZrCeNMUk3A8JncZd7wp25"}'
+```
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "sessionId": "ticket_aZrCeNMUk3A8JncZd7wp25",
+    "agentId": "053793b9-d514-4743-ba14-fdba26057e12",
+    "binded": false
+  }
+}
+```
+
+---
+
+## 4. 流式对话（SSE）
 
 ```
 POST /jmate/agentapi/chat/stream

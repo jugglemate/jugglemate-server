@@ -266,7 +266,7 @@ func (service *Service) assertCanEdit(ctx context.Context, actor Actor, agentID 
 	if err != nil {
 		return err
 	}
-	if err := assertPermission(actor, entity, false); err != nil {
+	if err := assertPermission(actor, entity); err != nil {
 		return err
 	}
 	if entity.Status == "archived" {

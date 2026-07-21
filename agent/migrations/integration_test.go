@@ -23,6 +23,10 @@ func TestApplyAndSeedAgainstPostgres(t *testing.T) {
 	if err := Apply(ctx, db); err != nil {
 		t.Fatalf("执行最终态迁移失败: %v", err)
 	}
+	var agentsBefore int64
+	if err := db.Table("agents").Where("id = 'Juggle_Agent'").Count(&agentsBefore).Error; err != nil {
+		t.Fatalf("读取 Seed 前系统 Agent 数量失败: %v", err)
+	}
 	if err := Seed(ctx, db, SeedConfig{InnerAPIBaseURL: "https://acceptance.invalid"}); err != nil {
 		t.Fatalf("执行系统 Seed 失败: %v", err)
 	}
@@ -35,9 +39,9 @@ func TestApplyAndSeedAgainstPostgres(t *testing.T) {
 			t.Fatalf("迁移后缺少表 %s: exists=%v err=%v", table, exists, err)
 		}
 	}
-	var agents, tools int64
-	if err := db.Table("agents").Where("id = 'Juggle_Agent'").Count(&agents).Error; err != nil || agents != 1 {
-		t.Fatalf("系统 Agent Seed 异常: count=%d err=%v", agents, err)
+	var agentsAfter, tools int64
+	if err := db.Table("agents").Where("id = 'Juggle_Agent'").Count(&agentsAfter).Error; err != nil || agentsAfter != agentsBefore {
+		t.Fatalf("Seed 不应新增或删除系统 Agent: before=%d after=%d err=%v", agentsBefore, agentsAfter, err)
 	}
 	if err := db.Table("tool_definitions").Where("id = 'td_system_jg_payment_history'").Count(&tools).Error; err != nil || tools != 1 {
 		t.Fatalf("系统 Tool Seed 异常: count=%d err=%v", tools, err)

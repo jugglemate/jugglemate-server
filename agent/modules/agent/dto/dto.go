@@ -155,6 +155,12 @@ type BindTicketRequest struct {
 	AgentID   string `json:"agentId" binding:"required,max=64"`
 }
 
+// UnbindTicketRequest 表示工单与 Agent 的解绑请求。
+type UnbindTicketRequest struct {
+	// SessionID 为要清除 Agent 绑定的工单 ID。
+	SessionID string `json:"sessionId" binding:"required,max=64"`
+}
+
 // BindTicketResponse 表示工单与 Agent 的绑定结果。
 type BindTicketResponse struct {
 	SessionID string `json:"sessionId"`

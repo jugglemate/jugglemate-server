@@ -17,7 +17,7 @@ import (
 	"github.com/juggleim/jugglemate-server/agent/shared/identity"
 )
 
-// Handler 暴露 Agent 非 Bot 相关的 17 个源兼容接口。
+// Handler 暴露 Agent Profile、生命周期、能力和工单绑定相关接口。
 type Handler struct{ service *agentservice.Service }
 
 // NewHandler 创建 Agent HTTP Handler。
@@ -33,6 +33,7 @@ func (handler *Handler) RegisterRoutes(group *gin.RouterGroup) {
 	routes.GET("", handler.list)
 	routes.GET("/active", handler.listActive)
 	routes.POST("/sessions/bind", handler.bindSession)
+	routes.POST("/sessions/unbind", handler.unbindSession)
 	routes.POST("/update", handler.update)
 	routes.POST("/delete", handler.delete)
 	routes.POST("/:agent_id/activate", handler.activate)
@@ -183,7 +184,7 @@ func (handler *Handler) listActive(ctx *gin.Context) {
 		validation(ctx, errors.New("page 或 pageSize 超出范围"))
 		return
 	}
-	result, err := handler.service.ListActiveAgents(ctx.Request.Context(), principal.AppKey, principal.ID, ctx.Query("session_id"), page, size)
+	result, err := handler.service.ListActiveAgents(ctx.Request.Context(), principal.AppKey, ctx.Query("session_id"), page, size)
 	respond(ctx, result, err)
 }
 
@@ -205,6 +206,26 @@ func (handler *Handler) bindSession(ctx *gin.Context) {
 		return
 	}
 	result, err := handler.service.BindTicketAgent(ctx.Request.Context(), principal.AppKey, request.SessionID, request.AgentID)
+	respond(ctx, result, err)
+}
+
+// unbindSession 解除工单当前的 Agent 绑定。
+//
+// TIPS: 接口按幂等语义处理；工单未绑定 Agent 时仍返回成功，不产生 IM 侧动作。
+//
+// @param sessionId 工单 ID
+func (handler *Handler) unbindSession(ctx *gin.Context) {
+	principal, err := identity.FromGin(ctx)
+	if err != nil {
+		unauthorized(ctx)
+		return
+	}
+	var request dto.UnbindTicketRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		validation(ctx, err)
+		return
+	}
+	result, err := handler.service.UnbindTicketAgent(ctx.Request.Context(), principal.AppKey, request.SessionID)
 	respond(ctx, result, err)
 }
 

@@ -114,7 +114,7 @@ func (service *Service) BindExistingBot(ctx context.Context, actor Actor, agentI
 	if err != nil {
 		return dto.BindBotResponse{}, err
 	}
-	if err := assertPermission(actor, entity, false); err != nil {
+	if err := assertPermission(actor, entity); err != nil {
 		return dto.BindBotResponse{}, err
 	}
 	if entity.Status == "archived" {

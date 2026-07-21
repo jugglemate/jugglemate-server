@@ -7,14 +7,14 @@ import (
 	"github.com/juggleim/jugglemate-server/agent/modules/agent/dto"
 )
 
-// TestRegisterRoutesIncludesAllAgentEndpoints 校验 Agent 21 个接口没有遗漏。
+// TestRegisterRoutesIncludesAllAgentEndpoints 校验 Agent 接口没有遗漏。
 func TestRegisterRoutesIncludesAllAgentEndpoints(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	NewHandler(nil).RegisterRoutes(engine.Group("/api/v1"))
 	routes := engine.Routes()
-	if len(routes) != 22 {
-		t.Fatalf("Agent 路由数量应为 22，实际为 %d: %+v", len(routes), routes)
+	if len(routes) != 23 {
+		t.Fatalf("Agent 路由数量应为 23，实际为 %d: %+v", len(routes), routes)
 	}
 	// TIPS: /agents/sessions/bind 同样是静态段，必须能与 /agents/:agent_id 共存。
 	bindFound := false
@@ -25,6 +25,16 @@ func TestRegisterRoutesIncludesAllAgentEndpoints(t *testing.T) {
 	}
 	if !bindFound {
 		t.Fatal("POST /api/v1/agents/sessions/bind 未注册")
+	}
+	// TIPS: 解绑与绑定保持同一静态路由层级，避免被 /agents/:agent_id 吞掉。
+	unbindFound := false
+	for _, route := range routes {
+		if route.Method == "POST" && route.Path == "/api/v1/agents/sessions/unbind" {
+			unbindFound = true
+		}
+	}
+	if !unbindFound {
+		t.Fatal("POST /api/v1/agents/sessions/unbind 未注册")
 	}
 	// TIPS: /agents/active 是静态段，必须能与 /agents/:agent_id 共存而不被参数路由吞掉。
 	found := false

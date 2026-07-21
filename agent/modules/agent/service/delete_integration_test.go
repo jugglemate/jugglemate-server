@@ -95,11 +95,6 @@ func TestDeleteAgentAgainstPostgres(t *testing.T) {
 	if len(unbound) != 1 {
 		t.Fatalf("重复删除不应再次解绑: %v", unbound)
 	}
-
-	// 7) 系统内置 Agent 不允许删除。
-	if err := service.DeleteAgent(ctx, actor, builtinAgentID); err == nil {
-		t.Fatal("系统内置 Agent 不应允许删除")
-	}
 }
 
 // TestCreateAgentAfterSoftDeleteAgainstPostgres 验收「软删掉全部 Agent 后仍能重新创建」。
