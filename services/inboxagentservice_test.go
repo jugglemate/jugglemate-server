@@ -219,3 +219,107 @@ func seedInboxAgentFixture(t *testing.T, db *gorm.DB, appKey string) {
 		}
 	}
 }
+
+// TestResolveInboxSeatIDsSkipsAlreadyRegisteredSeats 校验已注册坐席不再重复调 IM 注册接口。
+//
+// TIPS: 坐席的注册时机是添加用户时（console CreateUser / 自助 Register），入群前的注册只是
+// 兜底。转人工是客户触发的同步链路，逐个坐席重注册会把耗时拉成 O(坐席数)。
+func TestResolveInboxSeatIDsSkipsAlreadyRegisteredSeats(t *testing.T) {
+	userStorage := &mockUserStorage{users: map[string]*storageModels.User{
+		"seat_1": {UserId: "seat_1", Nickname: "坐席一", ImToken: "token_1"},
+		"seat_2": {UserId: "seat_2", Nickname: "坐席二", ImToken: "token_2"},
+	}}
+	registered := restoreSeatRegisterStub(t, userStorage, []string{"seat_1", "seat_2"},
+		func(userId string) (errs.IMErrorCode, string) {
+			return errs.IMErrorCode_SUCCESS, "fresh_" + userId
+		})
+
+	seatIDs, err := resolveInboxSeatIDs("app_1", "inbox_1", &juggleimsdk.JuggleIMSdk{})
+	if err != nil {
+		t.Fatalf("resolveInboxSeatIDs 失败: %v", err)
+	}
+	if len(seatIDs) != 2 {
+		t.Fatalf("坐席 = %v，期望两个都可入群", seatIDs)
+	}
+	if len(*registered) != 0 {
+		t.Fatalf("im_token 非空的坐席不应重复注册，实际注册了 %v", *registered)
+	}
+}
+
+// TestResolveInboxSeatIDsBackfillsMissingRegistration 校验缺注册的坐席会被补注册并回写 token。
+//
+// TIPS: 回写是收敛的关键 —— 不落库的话每次转人工都要为同一批历史账号重来一遍。
+func TestResolveInboxSeatIDsBackfillsMissingRegistration(t *testing.T) {
+	userStorage := &mockUserStorage{users: map[string]*storageModels.User{
+		"seat_1": {UserId: "seat_1", Nickname: "坐席一", ImToken: ""},
+	}}
+	registered := restoreSeatRegisterStub(t, userStorage, []string{"seat_1"},
+		func(userId string) (errs.IMErrorCode, string) {
+			return errs.IMErrorCode_SUCCESS, "fresh_" + userId
+		})
+
+	seatIDs, err := resolveInboxSeatIDs("app_1", "inbox_1", &juggleimsdk.JuggleIMSdk{})
+	if err != nil {
+		t.Fatalf("resolveInboxSeatIDs 失败: %v", err)
+	}
+	if len(seatIDs) != 1 || seatIDs[0] != "seat_1" {
+		t.Fatalf("坐席 = %v，期望补注册后可入群", seatIDs)
+	}
+	if len(*registered) != 1 || (*registered)[0] != "seat_1" {
+		t.Fatalf("补注册记录 = %v，期望只补 seat_1", *registered)
+	}
+	if userStorage.updatedImTokens["seat_1"] != "fresh_seat_1" {
+		t.Fatalf("im_token 未回写: %v", userStorage.updatedImTokens)
+	}
+}
+
+// TestResolveInboxSeatIDsSkipsSeatWhenBackfillFails 校验单个坐席补注册失败不阻断整批转人工。
+//
+// TIPS: 这是把注册从入群链路上摘掉的核心收益 —— 一条离职坐席的脏数据曾经能让整个 Inbox
+// 都转不了人工，而转人工失败是客户直接可感知的。
+func TestResolveInboxSeatIDsSkipsSeatWhenBackfillFails(t *testing.T) {
+	userStorage := &mockUserStorage{users: map[string]*storageModels.User{
+		"seat_bad": {UserId: "seat_bad", Nickname: "脏数据坐席", ImToken: ""},
+		"seat_ok":  {UserId: "seat_ok", Nickname: "正常坐席", ImToken: "token_ok"},
+	}}
+	restoreSeatRegisterStub(t, userStorage, []string{"seat_bad", "seat_ok"},
+		func(userId string) (errs.IMErrorCode, string) {
+			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, ""
+		})
+
+	seatIDs, err := resolveInboxSeatIDs("app_1", "inbox_1", &juggleimsdk.JuggleIMSdk{})
+	if err != nil {
+		t.Fatalf("单个坐席补注册失败不应让整批失败: %v", err)
+	}
+	if len(seatIDs) != 1 || seatIDs[0] != "seat_ok" {
+		t.Fatalf("坐席 = %v，期望跳过脏数据只保留 seat_ok", seatIDs)
+	}
+}
+
+// restoreSeatRegisterStub 挡掉坐席查询与 IM 注册，返回被真实补注册过的 userId 列表。
+func restoreSeatRegisterStub(
+	t *testing.T,
+	userStorage *mockUserStorage,
+	memberIDs []string,
+	register func(userId string) (errs.IMErrorCode, string),
+) *[]string {
+	t.Helper()
+	members := make([]*storageModels.InboxMember, 0, len(memberIDs))
+	for _, memberID := range memberIDs {
+		members = append(members, &storageModels.InboxMember{InboxId: "inbox_1", MemberId: memberID})
+	}
+	memberStorage := &mockInboxMemberStorage{members: members}
+
+	origMember, origUser, origRegister := newInboxMemberStorageForInboxAgent, newUserStorageForInboxAgent, registerSeatIMUserForInboxAgent
+	newInboxMemberStorageForInboxAgent = func() storageModels.IInboxMemberStorage { return memberStorage }
+	newUserStorageForInboxAgent = func() storageModels.IUserStorage { return userStorage }
+	registered := make([]string, 0, len(memberIDs))
+	registerSeatIMUserForInboxAgent = func(_ *juggleimsdk.JuggleIMSdk, userId, _, _ string) (errs.IMErrorCode, string) {
+		registered = append(registered, userId)
+		return register(userId)
+	}
+	t.Cleanup(func() {
+		newInboxMemberStorageForInboxAgent, newUserStorageForInboxAgent, registerSeatIMUserForInboxAgent = origMember, origUser, origRegister
+	})
+	return &registered
+}

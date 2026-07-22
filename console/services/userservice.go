@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
 
 	consoleModels "github.com/juggleim/jugglemate-server/console/apis/models"
@@ -233,8 +234,34 @@ func UpdateUser(ctx context.Context, userId string, req *consoleModels.UpdateUse
 	if err != nil || updated == nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
+	// TIPS: 昵称改了要同步回 IM，否则群成员列表、消息发送者一直显示旧名字。IM 的 register 是
+	// upsert，再调一次即可。这里失败不阻断请求：Console 侧已经改完，且该用户下次登录
+	// （services.Login 同样会带最新昵称调 register）会自愈。
+	if updates.Nickname != nil {
+		syncUserProfileToIM(appkey, updated)
+	}
 	item := ToUserItem(updated)
 	return errs.IMErrorCode_SUCCESS, &item
+}
+
+// syncUserProfileToIM 把用户的昵称/头像同步到 IM 侧，失败只记日志。
+//
+// @param appkey 应用 AppKey
+// @param user 已更新的用户资料
+func syncUserProfileToIM(appkey string, user *storageModels.User) {
+	sdk := imsdk.GetImSdk(appkey)
+	if sdk == nil {
+		log.Printf("[UpdateUser] 同步用户资料到 IM 失败：无法初始化 SDK appkey=%s user_id=%s", appkey, user.UserId)
+		return
+	}
+	_, code, _, err := sdk.Register(juggleimsdk.User{
+		UserId:       user.UserId,
+		Nickname:     user.Nickname,
+		UserPortrait: user.Avator,
+	})
+	if err != nil || code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
+		log.Printf("[UpdateUser] 同步用户资料到 IM 失败 appkey=%s user_id=%s code=%d: %v", appkey, user.UserId, code, err)
+	}
 }
 
 func DeleteUser(ctx context.Context, userId string) errs.IMErrorCode {

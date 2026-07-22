@@ -30,7 +30,7 @@ var (
 	newTicketStorageForCustomer           = storages.NewTicketStorage
 	getImSdkForCustomer                   = imsdk.GetImSdk
 	registerIMUserForCustomer             = registerIMUser
-	registerCustomerIMUserForCustomer     = registerCustomerIMUser
+	registerCustomerIMUserForCustomer     = registerIMUserWithToken
 	createGroupForCustomer                = func(sdk *juggleimsdk.JuggleIMSdk, req juggleimsdk.GroupMembersReq) (juggleimsdk.ApiCode, string, error) {
 		return sdk.CreateGroup(req)
 	}
@@ -38,25 +38,23 @@ var (
 	syncTicketGlobalConversationTagsForCustomer = SyncTicketGlobalConversationTags
 )
 
+// registerIMUser 注册 IM 用户但不关心返回的 token。
 func registerIMUser(sdk *juggleimsdk.JuggleIMSdk, userId, nickname, portrait string) errs.IMErrorCode {
-	resp, code, _, err := sdk.Register(juggleimsdk.User{
-		UserId:       userId,
-		Nickname:     nickname,
-		UserPortrait: portrait,
-	})
-	if err != nil {
-		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
-	}
-	if code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
-		return errs.IMErrorCode(code)
-	}
-	if resp == nil || resp.Token == "" {
-		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
-	}
-	return errs.IMErrorCode_SUCCESS
+	code, _ := registerIMUserWithToken(sdk, userId, nickname, portrait)
+	return code
 }
 
-func registerCustomerIMUser(sdk *juggleimsdk.JuggleIMSdk, userId, nickname, portrait string) (errs.IMErrorCode, string) {
+// registerIMUserWithToken 在 IM 侧注册（或更新）一个身份并返回其 token。
+//
+// TIPS: IM 的 register 是 upsert —— 重复调用不会报错，且会把 nickname/portrait 覆盖成本次入参，
+// 因此它同时承担"注册"和"资料同步""token 刷新"三种用途。
+//
+// @param sdk 目标 AppKey 对应的 IM SDK
+// @param userId IM 身份 ID（坐席用 users.user_id，客户用 customer_inbox_rels.source_id）
+// @param nickname 昵称
+// @param portrait 头像 URL
+// @return 错误码与 IM token，失败时 token 为空串
+func registerIMUserWithToken(sdk *juggleimsdk.JuggleIMSdk, userId, nickname, portrait string) (errs.IMErrorCode, string) {
 	resp, code, _, err := sdk.Register(juggleimsdk.User{
 		UserId:       userId,
 		Nickname:     nickname,

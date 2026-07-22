@@ -28,6 +28,21 @@ func checkAccount(account string) bool {
 	return accountRegex.MatchString(account)
 }
 
+// rollbackRegisteredUser 在 IM 注册失败后删掉刚落库的用户。
+//
+// TIPS: 不回滚会留下"库里有、IM 侧没有"的僵尸账号，代价有两层：本人重试注册直接撞
+// USER_EXISTED 再也注册不上；该账号一旦被加进 Inbox，转人工时还要为它做一次补注册
+// （见 ensureSeatIMRegistered）。这里与 console 的 CreateUser 保持同样的处理。
+//
+// @param userStorage 用户存储
+// @param appkey 应用 AppKey
+// @param userId 待回滚的用户 ID
+func rollbackRegisteredUser(userStorage storageModels.IUserStorage, appkey, userId string) {
+	if err := userStorage.Delete(appkey, userId); err != nil {
+		log.Printf("[Register] IM 注册失败后回滚用户失败 appkey=%s user_id=%s: %v", appkey, userId, err)
+	}
+}
+
 func Register(ctx context.Context, account, password string) (errs.IMErrorCode, *apiModels.LoginResp) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	if appkey == "" {
@@ -72,6 +87,7 @@ func Register(ctx context.Context, account, password string) (errs.IMErrorCode, 
 	sdk := imsdk.GetImSdk(appkey)
 	if sdk == nil {
 		fmt.Printf("[Register] GetImSdk failed for appkey: %s\n", appkey)
+		rollbackRegisteredUser(userStorage, appkey, userId)
 		return errs.IMErrorCode_APP_NOT_EXISTED, nil
 	}
 	fmt.Printf("[Register] GetImSdk success, calling Register API\n")
@@ -83,14 +99,17 @@ func Register(ctx context.Context, account, password string) (errs.IMErrorCode, 
 	fmt.Printf("[Register] resp=%+v, code=%d, err=%v\n", resp, code, err)
 	if err != nil {
 		fmt.Printf("[Register] IM Register failed: appkey=%s, userId=%s, err=%v\n", appkey, userId, err)
+		rollbackRegisteredUser(userStorage, appkey, userId)
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
 	if code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
 		fmt.Printf("[Register] IM Register returned error code: %d\n", code)
+		rollbackRegisteredUser(userStorage, appkey, userId)
 		return errs.IMErrorCode(code), nil
 	}
 	if resp == nil || resp.Token == "" {
 		fmt.Printf("[Register] IM Register returned empty token\n")
+		rollbackRegisteredUser(userStorage, appkey, userId)
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
 

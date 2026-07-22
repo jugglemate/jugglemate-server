@@ -546,6 +546,10 @@ type mockUserStorage struct {
 	user  *storageModels.User
 	users map[string]*storageModels.User
 	err   error
+	// updatedImTokens 记录 UpdateImToken 的入参，供"补注册后回写 token"这类断言使用。
+	updatedImTokens map[string]string
+	// deleted 记录 Delete 的入参，供注册失败回滚的断言使用。
+	deleted []string
 }
 
 func (s *mockUserStorage) Create(item storageModels.User) error {
@@ -568,6 +572,10 @@ func (s *mockUserStorage) FindByAccountWithAppkey(account, appkey string) (*stor
 }
 
 func (s *mockUserStorage) UpdateImToken(appkey, userId, imToken string) error {
+	if s.updatedImTokens == nil {
+		s.updatedImTokens = map[string]string{}
+	}
+	s.updatedImTokens[userId] = imToken
 	return nil
 }
 
@@ -580,6 +588,7 @@ func (s *mockUserStorage) UpdateUser(appkey, userId string, updates storageModel
 }
 
 func (s *mockUserStorage) Delete(appkey, userId string) error {
+	s.deleted = append(s.deleted, userId)
 	return nil
 }
 

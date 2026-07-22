@@ -39,6 +39,7 @@ var (
 	}
 	newInboxMemberStorageForInboxAgent = storages.NewInboxMemberStorage
 	newUserStorageForInboxAgent        = storages.NewUserStorage
+	registerSeatIMUserForInboxAgent    = registerIMUserWithToken
 )
 
 // InboxAgentBinding 表示 Inbox 当前生效的 Agent 与 Bot 绑定。
@@ -307,7 +308,7 @@ func SwitchTicketToHuman(ctx context.Context, appKey, ticketID, botUserID string
 	return nil
 }
 
-// resolveInboxSeatIDs 返回 Inbox 下全部坐席的 IM 身份，并确保它们在 IM 侧已注册。
+// resolveInboxSeatIDs 返回 Inbox 下全部坐席的 IM 身份。
 func resolveInboxSeatIDs(appKey, inboxID string, sdk *juggleimsdk.JuggleIMSdk) ([]string, error) {
 	members, err := newInboxMemberStorageForInboxAgent().QryByInbox(appKey, inboxID, 0, 1000)
 	if err != nil {
@@ -327,12 +328,42 @@ func resolveInboxSeatIDs(appKey, inboxID string, sdk *juggleimsdk.JuggleIMSdk) (
 		if user == nil {
 			continue
 		}
-		if code := registerIMUser(sdk, user.UserId, user.Nickname, user.Avator); code != errs.IMErrorCode_SUCCESS {
-			return nil, fmt.Errorf("坐席 IM 注册失败 user=%s code=%d", userID, code)
+		if !ensureSeatIMRegistered(sdk, userStorage, appKey, user) {
+			continue
 		}
 		seatIDs = append(seatIDs, userID)
 	}
 	return seatIDs, nil
+}
+
+// ensureSeatIMRegistered 兜底保证坐席在 IM 侧存在，返回它是否可以入群。
+//
+// TIPS: 坐席的 IM 注册时机是**添加用户时**（console CreateUser / 自助 Register），不是入群时。
+// 这里只处理少量"库里有、IM 侧没有"的历史账号：注册中途失败、直接导库、或换了 IM 环境
+// （ImApiDomain 一变，老 users 在新 imserver 上全都不存在）。判断依据是 users.im_token 是否为
+// 空——注册成功必然写回 token，因此补注册后要把 token 落库，让下次转人工直接跳过、逐步收敛。
+//
+// 补注册失败只跳过该坐席：转人工是客户发消息触发的同步链路，一条离职坐席的脏数据不能阻断整个
+// Inbox 的转人工。
+//
+// @param sdk 目标 AppKey 对应的 IM SDK
+// @param userStorage 用户存储，用于回写 im_token
+// @param appKey 应用 AppKey
+// @param user 坐席用户资料
+// @return 该坐席是否可以加入 Ticket 群
+func ensureSeatIMRegistered(sdk *juggleimsdk.JuggleIMSdk, userStorage storageModels.IUserStorage, appKey string, user *storageModels.User) bool {
+	if strings.TrimSpace(user.ImToken) != "" {
+		return true
+	}
+	code, imToken := registerSeatIMUserForInboxAgent(sdk, user.UserId, user.Nickname, user.Avator)
+	if code != errs.IMErrorCode_SUCCESS {
+		log.Printf("[AgentHandoff] 坐席 IM 补注册失败，跳过入群 appkey=%s user_id=%s code=%d", appKey, user.UserId, code)
+		return false
+	}
+	if err := userStorage.UpdateImToken(appKey, user.UserId, imToken); err != nil {
+		log.Printf("[AgentHandoff] 坐席 im_token 落库失败，下次转人工会重复补注册 appkey=%s user_id=%s: %v", appKey, user.UserId, err)
+	}
+	return true
 }
 
 func syncOpenTicketAgentBot(ctx context.Context, db *gorm.DB, appKey, inboxID string, previous *InboxAgentDetail, newBotUserID string) error {
