@@ -22,6 +22,9 @@ type TicketInfo struct {
 
 type QryTicketsResp struct {
 	Items []*TicketInfo `json:"items"`
+	Total int64         `json:"total"`
+	Limit int64         `json:"limit"`
+	Offset int64        `json:"offset"`
 }
 
 type QryTicketInboxMembersReq struct {

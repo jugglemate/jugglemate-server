@@ -9,6 +9,7 @@ import (
 	apiModels "github.com/juggleim/jugglemate-server/apis/models"
 	"github.com/juggleim/jugglemate-server/commons/ctxs"
 	"github.com/juggleim/jugglemate-server/commons/errs"
+	"github.com/juggleim/jugglemate-server/commons/logs"
 	"github.com/juggleim/jugglemate-server/commons/imsdk"
 	"github.com/juggleim/jugglemate-server/commons/tools"
 	"github.com/juggleim/jugglemate-server/storages"
@@ -153,15 +154,19 @@ func Login(ctx context.Context, account, password string) (errs.IMErrorCode, *ap
 	if sdk == nil {
 		return errs.IMErrorCode_APP_NOT_EXISTED, nil
 	}
-	resp, code, _, err := sdk.Register(juggleimsdk.User{
+	resp, code, trace, err := sdk.Register(juggleimsdk.User{
 		UserId:       user.UserId,
 		Nickname:     user.Nickname,
 		UserPortrait: user.Avator,
 	})
 	if err != nil {
+		logs.Errorf("[Login] IM Register http error: appkey=%s user_id=%s trace=%s err=%v",
+			appkey, user.UserId, trace, err)
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
 	if code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
+		logs.Errorf("[Login] IM Register biz error: appkey=%s user_id=%s trace=%s code=%d",
+			appkey, user.UserId, trace, code)
 		return errs.IMErrorCode(code), nil
 	}
 

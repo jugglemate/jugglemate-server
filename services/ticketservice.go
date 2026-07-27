@@ -7,6 +7,7 @@ import (
 	juggleimsdk "github.com/juggleim/imserver-sdk-go"
 	apiModels "github.com/juggleim/jugglemate-server/apis/models"
 	"github.com/juggleim/jugglemate-server/commons/ctxs"
+	"github.com/juggleim/jugglemate-server/commons/dbcommons"
 	"github.com/juggleim/jugglemate-server/commons/errs"
 	"github.com/juggleim/jugglemate-server/commons/imsdk"
 	"github.com/juggleim/jugglemate-server/storages"
@@ -129,6 +130,13 @@ func QryTickets(ctx context.Context, req *apiModels.QryTicketsReq) (errs.IMError
 
 	var tickets []*storageModels.Ticket
 	ticketStorage := newTicketStorageForQuery()
+	db := dbcommons.GetDb().WithContext(ctx).Model(&storageModels.Ticket{}).Where("app_key=?", appkey)
+	if status != nil {
+		db = db.Where("status=?", int(*status))
+	}
+	if user.Role == storageModels.UserRoleCustomerService {
+		db = db.Where("(status=? OR assignee_id=?)", int(storageModels.TicketStatusPending), requesterId)
+	}
 	switch user.Role {
 	case storageModels.UserRoleAdmin:
 		tickets, err = ticketStorage.QryAll(appkey, status, req.Limit, req.Offset)
@@ -145,6 +153,13 @@ func QryTickets(ctx context.Context, req *apiModels.QryTicketsReq) (errs.IMError
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	resp.Total = total
+	resp.Limit = req.Limit
+	resp.Offset = req.Offset
 	return errs.IMErrorCode_SUCCESS, resp
 }
 
