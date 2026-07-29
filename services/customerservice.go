@@ -384,7 +384,7 @@ func QryCustomerTickets(ctx context.Context, req *apiModels.QryCustomerTicketsRe
 
 	// Fetch one extra row to determine whether another page exists without a
 	// separate count query.
-	tickets, err := newTicketStorageForCustomer().QryByCustomer(appkey, customerId, req.StartId, req.Limit+1)
+	tickets, err := newTicketStorageForCustomer().QryByCustomer(appkey, customerId, req.IsHumanTakenOver, req.StartId, req.Limit+1)
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}

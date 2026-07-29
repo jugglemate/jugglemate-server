@@ -92,6 +92,18 @@ func (module *Module) SetHumanHandoff(fn messageservice.HumanHandoffFunc) {
 	}
 }
 
+// SetMarkHumanTakeover 注入转人工事实持久化回调。
+//
+// TIPS: 同样由 main.go 在 Start 之后装配，与 SetHumanHandoff 同一目的 —— 写库逻辑
+// 落在客服域，Agent 平台模块不直接 import services 包。
+func (module *Module) SetMarkHumanTakeover(fn messageservice.MarkHumanTakeoverFunc) {
+	module.mu.RLock()
+	defer module.mu.RUnlock()
+	if module.messageService != nil {
+		module.messageService.SetMarkHumanTakeover(fn)
+	}
+}
+
 // New 创建尚未启动的 Agent 模块。
 func New(cfg configures.AgentConfig) *Module {
 	return &Module{cfg: cfg}

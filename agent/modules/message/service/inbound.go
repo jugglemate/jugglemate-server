@@ -47,6 +47,15 @@ func (service *Service) HandleInbound(ctx context.Context, inbound imbot.Inbound
 	if MatchHandoffKeyword(inbound.Text) {
 		slog.InfoContext(ctx, "[Inbound] 客户触发转人工", "agent_id", agent.ID, "ticket_id", inbound.TargetID,
 			"sender_id", inbound.SenderID, "msg_id", inbound.MessageID)
+		// TIPS: 先持久化「工单转人工」事实 —— 哪怕 IM 后续失败，事件流水与 is_human_taken_over
+		// 标记也已经留下审计痕迹；失败时记录错误日志但不阻塞后续 IM 副作用（与原逻辑保持
+		// 一致：IM 失败仍继续走 Agent 兜底）。
+		if service.markHumanTakeover != nil {
+			if markErr := service.markHumanTakeover(ctx, inbound.AppKey, inbound.TargetID, inbound.SenderID, "customer"); markErr != nil {
+				slog.ErrorContext(ctx, "[Inbound] 写入转人工事实失败", "agent_id", agent.ID, "ticket_id", inbound.TargetID,
+					"sender_id", inbound.SenderID, "msg_id", inbound.MessageID, "error", markErr)
+			}
+		}
 		if handoffErr := service.handoffToHuman(ctx, inbound.AppKey, inbound.TargetID, inbound.BotUserID); handoffErr != nil {
 			slog.ErrorContext(ctx, "[Inbound] 转人工失败", "agent_id", agent.ID, "ticket_id", inbound.TargetID,
 				"bot_user_id", inbound.BotUserID, "msg_id", inbound.MessageID, "error", handoffErr)

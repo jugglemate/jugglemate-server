@@ -108,6 +108,13 @@ func parseQryTicketsReq(ctx *gin.Context) (*apiModels.QryTicketsReq, bool) {
 		}
 		req.Status = &status
 	}
+	if handoffStr := ctx.Query("is_human_taken_over"); handoffStr != "" {
+		value, err := strconv.ParseBool(handoffStr)
+		if err != nil {
+			return nil, false
+		}
+		req.IsHumanTakenOver = &value
+	}
 	if limitStr := ctx.Query("limit"); limitStr != "" {
 		limit, err := strconv.ParseInt(limitStr, 10, 64)
 		if err != nil || limit <= 0 {

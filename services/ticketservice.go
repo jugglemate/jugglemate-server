@@ -130,18 +130,25 @@ func QryTickets(ctx context.Context, req *apiModels.QryTicketsReq) (errs.IMError
 
 	var tickets []*storageModels.Ticket
 	ticketStorage := newTicketStorageForQuery()
-	db := dbcommons.GetDb().WithContext(ctx).Model(&storageModels.Ticket{}).Where("app_key=?", appkey)
-	if status != nil {
-		db = db.Where("status=?", int(*status))
-	}
-	if user.Role == storageModels.UserRoleCustomerService {
-		db = db.Where("(status=? OR assignee_id=?)", int(storageModels.TicketStatusPending), requesterId)
+	// TIPS: count 通过 dbcommons.GetDb() 做 WHERE 计数；不接 DB 时（单测场景）跳过 total 写入。
+	db := dbcommons.GetDb()
+	if db != nil {
+		db = db.WithContext(ctx).Model(&storageModels.Ticket{}).Where("app_key=?", appkey)
+		if status != nil {
+			db = db.Where("status=?", int(*status))
+		}
+		if req.IsHumanTakenOver != nil {
+			db = db.Where("is_human_taken_over=?", *req.IsHumanTakenOver)
+		}
+		if user.Role == storageModels.UserRoleCustomerService {
+			db = db.Where("(status=? OR assignee_id=?)", int(storageModels.TicketStatusPending), requesterId)
+		}
 	}
 	switch user.Role {
 	case storageModels.UserRoleAdmin:
-		tickets, err = ticketStorage.QryAll(appkey, status, req.Limit, req.Offset)
+		tickets, err = ticketStorage.QryAll(appkey, status, req.IsHumanTakenOver, req.Limit, req.Offset)
 	case storageModels.UserRoleCustomerService:
-		tickets, err = ticketStorage.QryVisible(appkey, requesterId, status, req.Limit, req.Offset)
+		tickets, err = ticketStorage.QryVisible(appkey, requesterId, status, req.IsHumanTakenOver, req.Limit, req.Offset)
 	default:
 		return errs.IMErrorCode_APP_NOT_LOGIN, nil
 	}
@@ -153,11 +160,13 @@ func QryTickets(ctx context.Context, req *apiModels.QryTicketsReq) (errs.IMError
 	if err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
-	var total int64
-	if err := db.Count(&total).Error; err != nil {
-		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	if db != nil {
+		var total int64
+		if err := db.Count(&total).Error; err != nil {
+			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+		}
+		resp.Total = total
 	}
-	resp.Total = total
 	resp.Limit = req.Limit
 	resp.Offset = req.Offset
 	return errs.IMErrorCode_SUCCESS, resp
@@ -358,17 +367,20 @@ func ticketsToAPI(appkey string, tickets []*storageModels.Ticket) (*apiModels.Qr
 			return nil, err
 		}
 		resp.Items = append(resp.Items, &apiModels.TicketInfo{
-			TicketId:    ticket.TicketId,
-			SourceId:    ticket.SourceId,
-			CustomerId:  ticket.CustomerId,
-			Customer:    customer,
-			InboxId:     ticket.InboxId,
-			ChannelType: ticket.ChannelType,
-			AssigneeId:  ticket.AssigneeId,
-			Assignee:    assignee,
-			Status:      int(ticket.Status),
-			CreatedTime: ticket.CreatedTime,
-			UpdatedTime: ticket.UpdatedTime,
+			TicketId:         ticket.TicketId,
+			SourceId:         ticket.SourceId,
+			CustomerId:       ticket.CustomerId,
+			Customer:         customer,
+			InboxId:          ticket.InboxId,
+			ChannelType:      ticket.ChannelType,
+			AssigneeId:       ticket.AssigneeId,
+			Assignee:         assignee,
+			Status:           int(ticket.Status),
+			IsHumanTakenOver: ticket.IsHumanTakenOver,
+			HumanTakenOverAt: ticket.HumanTakenOverAt,
+			HumanTakenOverBy: ticket.HumanTakenOverBy,
+			CreatedTime:      ticket.CreatedTime,
+			UpdatedTime:      ticket.UpdatedTime,
 		})
 	}
 	return resp, nil

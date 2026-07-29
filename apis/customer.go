@@ -36,6 +36,13 @@ func parseQryCustomerTicketsReq(ctx *gin.Context) (*models.QryCustomerTicketsReq
 		return nil, false
 	}
 	req := &models.QryCustomerTicketsReq{CustomerId: customerId, Limit: 20}
+	if handoffStr := ctx.Query("is_human_taken_over"); handoffStr != "" {
+		value, err := strconv.ParseBool(handoffStr)
+		if err != nil {
+			return nil, false
+		}
+		req.IsHumanTakenOver = &value
+	}
 	if startIdStr := ctx.Query("start_id"); startIdStr != "" {
 		startId, err := strconv.ParseInt(startIdStr, 10, 64)
 		if err != nil || startId < 0 {

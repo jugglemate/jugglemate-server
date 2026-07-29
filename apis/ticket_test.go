@@ -42,6 +42,31 @@ func TestParseQryTicketsReqExplicitPagination(t *testing.T) {
 	}
 }
 
+func TestParseQryTicketsReqHumanTakeOverFilter(t *testing.T) {
+	ctx := newTicketTestContext("/tickets/list?is_human_taken_over=true")
+	req, ok := parseQryTicketsReq(ctx)
+	if !ok || req.IsHumanTakenOver == nil || !*req.IsHumanTakenOver {
+		t.Fatalf("req = %+v ok=%v, want is_human_taken_over=true", req, ok)
+	}
+
+	ctx = newTicketTestContext("/tickets/list?is_human_taken_over=0")
+	req, ok = parseQryTicketsReq(ctx)
+	if !ok || req.IsHumanTakenOver == nil || *req.IsHumanTakenOver {
+		t.Fatalf("req = %+v ok=%v, want is_human_taken_over=false", req, ok)
+	}
+}
+
+func TestParseQryTicketsReqRejectsInvalidHumanTakeOverFilter(t *testing.T) {
+	for _, target := range []string{
+		"/tickets/list?is_human_taken_over=abc",
+		"/tickets/list?is_human_taken_over=2",
+	} {
+		if _, ok := parseQryTicketsReq(newTicketTestContext(target)); ok {
+			t.Fatalf("target=%q should be invalid", target)
+		}
+	}
+}
+
 func TestParseQryTicketsReqInvalidStatus(t *testing.T) {
 	for _, target := range []string{
 		"/tickets/list?status=-1",

@@ -11,17 +11,20 @@ import (
 )
 
 type TicketDao struct {
-	ID          int64     `gorm:"primary_key"`
-	TicketId    string    `gorm:"ticket_id"`
-	SourceId    string    `gorm:"source_id"`
-	CustomerId  string    `gorm:"customer_id"`
-	InboxId     string    `gorm:"inbox_id"`
-	ChannelType string    `gorm:"channel_type"`
-	AssigneeId  string    `gorm:"assignee_id"`
-	Status      int       `gorm:"status"`
-	CreatedTime time.Time `gorm:"created_time"`
-	UpdatedTime time.Time `gorm:"updated_time"`
-	AppKey      string    `gorm:"app_key"`
+	ID               int64     `gorm:"primary_key"`
+	TicketId         string    `gorm:"ticket_id"`
+	SourceId         string    `gorm:"source_id"`
+	CustomerId       string    `gorm:"customer_id"`
+	InboxId          string    `gorm:"inbox_id"`
+	ChannelType      string    `gorm:"channel_type"`
+	AssigneeId       string    `gorm:"assignee_id"`
+	Status           int       `gorm:"status"`
+	IsHumanTakenOver bool      `gorm:"is_human_taken_over"`
+	HumanTakenOverAt time.Time `gorm:"human_taken_over_at"`
+	HumanTakenOverBy string    `gorm:"human_taken_over_by"`
+	CreatedTime      time.Time `gorm:"created_time"`
+	UpdatedTime      time.Time `gorm:"updated_time"`
+	AppKey           string    `gorm:"app_key"`
 }
 
 func (TicketDao) TableName() string {
@@ -29,31 +32,45 @@ func (TicketDao) TableName() string {
 }
 
 func (d *TicketDao) toModel() *models.Ticket {
-	return &models.Ticket{
-		ID:          d.ID,
-		TicketId:    d.TicketId,
-		SourceId:    d.SourceId,
-		CustomerId:  d.CustomerId,
-		InboxId:     d.InboxId,
-		ChannelType: d.ChannelType,
-		AssigneeId:  d.AssigneeId,
-		Status:      models.TicketStatus(d.Status),
-		CreatedTime: d.CreatedTime.UnixMilli(),
-		UpdatedTime: d.UpdatedTime.UnixMilli(),
-		AppKey:      d.AppKey,
+	if d == nil {
+		return nil
 	}
+	item := &models.Ticket{
+		ID:               d.ID,
+		TicketId:         d.TicketId,
+		SourceId:         d.SourceId,
+		CustomerId:       d.CustomerId,
+		InboxId:          d.InboxId,
+		ChannelType:      d.ChannelType,
+		AssigneeId:       d.AssigneeId,
+		Status:           models.TicketStatus(d.Status),
+		IsHumanTakenOver: d.IsHumanTakenOver,
+		HumanTakenOverBy: d.HumanTakenOverBy,
+		AppKey:           d.AppKey,
+		CreatedTime:      d.CreatedTime.UnixMilli(),
+		UpdatedTime:      d.UpdatedTime.UnixMilli(),
+	}
+	if !d.HumanTakenOverAt.IsZero() {
+		item.HumanTakenOverAt = d.HumanTakenOverAt.UnixMilli()
+	}
+	return item
 }
 
 func newTicketDao(item models.Ticket) *TicketDao {
 	dao := &TicketDao{
-		TicketId:    item.TicketId,
-		SourceId:    item.SourceId,
-		CustomerId:  item.CustomerId,
-		InboxId:     item.InboxId,
-		ChannelType: item.ChannelType,
-		AssigneeId:  item.AssigneeId,
-		Status:      int(item.Status),
-		AppKey:      item.AppKey,
+		TicketId:         item.TicketId,
+		SourceId:         item.SourceId,
+		CustomerId:       item.CustomerId,
+		InboxId:          item.InboxId,
+		ChannelType:      item.ChannelType,
+		AssigneeId:       item.AssigneeId,
+		Status:           int(item.Status),
+		IsHumanTakenOver: item.IsHumanTakenOver,
+		HumanTakenOverBy: item.HumanTakenOverBy,
+		AppKey:           item.AppKey,
+	}
+	if item.HumanTakenOverAt > 0 {
+		dao.HumanTakenOverAt = time.UnixMilli(item.HumanTakenOverAt)
 	}
 	if item.CreatedTime > 0 {
 		dao.CreatedTime = time.UnixMilli(item.CreatedTime)
@@ -74,6 +91,9 @@ func (d *TicketDao) Create(item models.Ticket) error {
 	if item.UpdatedTime <= 0 {
 		omits = append(omits, "updated_time")
 	}
+	if item.HumanTakenOverAt <= 0 {
+		omits = append(omits, "human_taken_over_at")
+	}
 	if len(omits) > 0 {
 		db = db.Omit(omits...)
 	}
@@ -81,17 +101,24 @@ func (d *TicketDao) Create(item models.Ticket) error {
 }
 
 func (d *TicketDao) Update(item models.Ticket) error {
+	updates := map[string]interface{}{
+		"customer_id":  item.CustomerId,
+		"source_id":    item.SourceId,
+		"inbox_id":     item.InboxId,
+		"channel_type": item.ChannelType,
+		"assignee_id":  item.AssigneeId,
+		"status":       int(item.Status),
+		"updated_time": time.Now(),
+	}
+	if item.HumanTakenOverAt > 0 {
+		updates["human_taken_over_at"] = time.UnixMilli(item.HumanTakenOverAt)
+	}
+	if item.HumanTakenOverBy != "" {
+		updates["human_taken_over_by"] = item.HumanTakenOverBy
+	}
 	return dbcommons.GetDb().Model(&TicketDao{}).
 		Where("app_key=? and ticket_id=?", item.AppKey, item.TicketId).
-		Updates(map[string]interface{}{
-			"customer_id":  item.CustomerId,
-			"source_id":    item.SourceId,
-			"inbox_id":     item.InboxId,
-			"channel_type": item.ChannelType,
-			"assignee_id":  item.AssigneeId,
-			"status":       int(item.Status),
-			"updated_time": time.Now(),
-		}).Error
+		Updates(updates).Error
 }
 
 func (d *TicketDao) Upsert(item models.Ticket) error {
@@ -102,6 +129,9 @@ func (d *TicketDao) Upsert(item models.Ticket) error {
 	db := dbcommons.GetDb()
 	if dao.CreatedTime.IsZero() {
 		db = db.Omit("created_time")
+	}
+	if dao.HumanTakenOverAt.IsZero() {
+		db = db.Omit("human_taken_over_at")
 	}
 	return db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "app_key"}, {Name: "ticket_id"}},
@@ -152,26 +182,35 @@ func (d *TicketDao) FindBySource(appkey, sourceId string) (*models.Ticket, error
 	return item.toModel(), nil
 }
 
-func (d *TicketDao) QryAll(appkey string, status *models.TicketStatus, limit, offset int64) ([]*models.Ticket, error) {
+func (d *TicketDao) QryAll(appkey string, status *models.TicketStatus, isHumanTakenOver *bool, limit, offset int64) ([]*models.Ticket, error) {
 	db := dbcommons.GetDb().Where("app_key=?", appkey)
 	if status != nil {
 		db = db.Where("status=?", int(*status))
 	}
+	if isHumanTakenOver != nil {
+		db = db.Where("is_human_taken_over=?", *isHumanTakenOver)
+	}
 	return queryTicketsWithOffset(db, limit, offset)
 }
 
-func (d *TicketDao) QryVisible(appkey, assigneeId string, status *models.TicketStatus, limit, offset int64) ([]*models.Ticket, error) {
+func (d *TicketDao) QryVisible(appkey, assigneeId string, status *models.TicketStatus, isHumanTakenOver *bool, limit, offset int64) ([]*models.Ticket, error) {
 	db := dbcommons.GetDb().
 		Where("app_key=?", appkey).
 		Where("(status=? or assignee_id=?)", int(models.TicketStatusPending), assigneeId)
 	if status != nil {
 		db = db.Where("status=?", int(*status))
 	}
+	if isHumanTakenOver != nil {
+		db = db.Where("is_human_taken_over=?", *isHumanTakenOver)
+	}
 	return queryTicketsWithOffset(db, limit, offset)
 }
 
-func (d *TicketDao) QryByCustomer(appkey, customerId string, startId, limit int64) ([]*models.Ticket, error) {
+func (d *TicketDao) QryByCustomer(appkey, customerId string, isHumanTakenOver *bool, startId, limit int64) ([]*models.Ticket, error) {
 	db := dbcommons.GetDb().Where("app_key=? and customer_id=?", appkey, customerId)
+	if isHumanTakenOver != nil {
+		db = db.Where("is_human_taken_over=?", *isHumanTakenOver)
+	}
 	if startId > 0 {
 		db = db.Where("id<?", startId)
 	}
@@ -263,6 +302,22 @@ func (d *TicketDao) TransferIfAssignee(appkey, ticketId, oldAssigneeId, newAssig
 	return d.FindByTicketId(appkey, ticketId)
 }
 
+// MarkHumanTakenOverIfZero 仅在工单尚未转人工时一次性写入首次转人工事实。
+//
+// TIPS: 重复触发只补 ticket_events，不更新 human_taken_over_at —— 事务内一句 UPDATE
+// 配合 ticket_events INSERT 即可保证单调递增。
+func (d *TicketDao) MarkHumanTakenOverIfZero(appkey, ticketId, by string, atMs int64) error {
+	at := time.UnixMilli(atMs)
+	return dbcommons.GetDb().Model(&TicketDao{}).
+		Where("app_key=? and ticket_id=? and is_human_taken_over=?", appkey, ticketId, false).
+		Updates(map[string]interface{}{
+			"is_human_taken_over": true,
+			"human_taken_over_at": at,
+			"human_taken_over_by": by,
+			"updated_time":        time.Now(),
+		}).Error
+}
+
 func queryTickets(db *gorm.DB, limit int64) ([]*models.Ticket, error) {
 	return queryTicketsWithOffset(db, limit, 0)
 }
@@ -280,8 +335,10 @@ func queryTicketsWithOffset(db *gorm.DB, limit, offset int64) ([]*models.Ticket,
 		return nil, err
 	}
 	ret := make([]*models.Ticket, 0, len(items))
-	for _, item := range items {
-		ret = append(ret, item.toModel())
+	for i := range items {
+		ret = append(ret, items[i].toModel())
 	}
 	return ret, nil
 }
+
+var _ models.ITicketStorage = (*TicketDao)(nil)

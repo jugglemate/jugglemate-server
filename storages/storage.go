@@ -33,6 +33,10 @@ func NewTicketStorage() models.ITicketStorage {
 	return &dbs.TicketDao{}
 }
 
+func NewTicketEventStorage() models.ITicketEventStorage {
+	return &dbs.TicketEventDao{}
+}
+
 func NewInboxStorage() models.IInboxStorage {
 	return &dbs.InboxDao{}
 }

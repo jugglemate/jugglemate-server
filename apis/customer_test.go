@@ -19,10 +19,22 @@ func TestParseQryCustomerTicketsReq(t *testing.T) {
 	if !ok || req.CustomerId != "customer_1" || req.StartId != 0 || req.Limit != 20 {
 		t.Fatalf("req=%+v ok=%v", req, ok)
 	}
+	if req.IsHumanTakenOver != nil {
+		t.Fatalf("IsHumanTakenOver = %v, want nil", req.IsHumanTakenOver)
+	}
 
-	req, ok = parseQryCustomerTicketsReq(newTicketTestContext("/customers/tickets?customerId=customer_1&start_id=99&limit=100"))
+	req, ok = parseQryCustomerTicketsReq(newTicketTestContext("/customers/tickets?customerId=customer_1&start_id=99&limit=100&is_human_taken_over=true"))
 	if !ok || req.CustomerId != "customer_1" || req.StartId != 99 || req.Limit != 100 {
 		t.Fatalf("req=%+v ok=%v", req, ok)
+	}
+	if req.IsHumanTakenOver == nil || !*req.IsHumanTakenOver {
+		t.Fatalf("IsHumanTakenOver = %v, want true", req.IsHumanTakenOver)
+	}
+}
+
+func TestParseQryCustomerTicketsReqRejectsInvalidHumanTakeOver(t *testing.T) {
+	if _, ok := parseQryCustomerTicketsReq(newTicketTestContext("/customers/tickets?customer_id=customer_1&is_human_taken_over=xyz")); ok {
+		t.Fatalf("invalid human_takeover flag should be rejected")
 	}
 }
 

@@ -415,6 +415,7 @@ type CustomChatMsgReq struct {
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
 | `status` | int | 否 | 无 | 工单状态。只能是 `0`、`1`、`2` |
+| `is_human_taken_over` | bool | 否 | 无 | 是否曾转人工。`true` / `false` / `1` / `0` 均可，不传则不过滤 |
 | `limit` | int | 否 | `20` | 每页数量，必须大于 `0` |
 | `offset` | int | 否 | `0` | 跳过数量，必须大于等于 `0` |
 
@@ -463,6 +464,9 @@ curl -X GET 'http://localhost:8080/jmate/tickets/list?status=1&limit=10&offset=2
           "avatar": "https://example.com/agent.png"
         },
         "status": 1,
+        "is_human_taken_over": true,
+        "human_taken_over_at": 1782360180000,
+        "human_taken_over_by": "customer_8mQz6RkV2pXnT4bYcS1aE9",
         "created_time": 1782360000000,
         "updated_time": 1782360300000
       }
@@ -503,6 +507,9 @@ curl -X GET 'http://localhost:8080/jmate/tickets/list?status=1&limit=10&offset=2
 | `items[].assignee.nickname` | string | 客服昵称 |
 | `items[].assignee.avatar` | string | 客服头像 |
 | `items[].status` | int | 工单状态：`0` 待处理，`1` 处理中，`2` 关闭 |
+| `items[].is_human_taken_over` | bool | 是否曾转人工。`false` 表示从未转人工，`true` 表示曾被客户触发转人工 |
+| `items[].human_taken_over_at` | int64 | 首次转人工时的毫秒时间戳；未转人工时为 `0` |
+| `items[].human_taken_over_by` | string | 首次转人工的触发者标识（当前为客户 `customer_id`，未来由坐席触发可填充 `user_id`）；未转人工时为空串 |
 | `items[].created_time` | int64 | 创建时间，毫秒时间戳 |
 | `items[].updated_time` | int64 | 更新时间，毫秒时间戳 |
 
@@ -948,3 +955,77 @@ curl -X POST 'http://localhost:8080/jmate/tickets/3xvJK7Xwq2sTnQp6aLm9Z0/transfe
   "msg": ""
 }
 ```
+
+## 查询工单事件流水
+
+按工单 ID 拉取其事件历史（当前仅落地 `human_takeover` 类型），按 `id desc` 倒序返回。
+
+### 请求
+
+`GET /jmate/tickets/:ticket_id/events`
+
+该接口需要登录。
+
+### Headers
+
+| 名称 | 必填 | 说明 |
+| --- | --- | --- |
+| `appkey` | 是 | 当前应用的 appkey |
+| `Authorization` | 是 | 用户登录 token |
+
+### Query 参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `limit` | int | 否 | `50` | 每页数量，1-100 |
+| `offset` | int | 否 | `0` | 跳过数量，必须大于等于 `0` |
+
+### 请求示例
+
+```bash
+curl -X GET 'http://localhost:8080/jmate/tickets/3xvJK7Xwq2sTnQp6aLm9Z0/events?limit=20' \
+  -H 'appkey: app_xxx' \
+  -H 'Authorization: user-token'
+```
+
+### 成功响应
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "items": [
+      {
+        "id": 1024,
+        "ticket_id": "3xvJK7Xwq2sTnQp6aLm9Z0",
+        "event_type": "human_takeover",
+        "operator_id": "customer_8mQz6RkV2pXnT4bYcS1aE9",
+        "operator_type": "customer",
+        "payload": "{\"trigger\":\"keyword\"}",
+        "created_time": 1782360180000
+      }
+    ],
+    "next_start_id": 1024
+  }
+}
+```
+
+### 响应字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `items` | array | 事件列表 |
+| `items[].id` | int64 | 事件 ID |
+| `items[].ticket_id` | string | 工单 ID |
+| `items[].event_type` | string | 事件类型，目前为 `human_takeover`，未来扩展 `claim` / `transfer` / `close` / `reopen` |
+| `items[].operator_id` | string | 触发者标识。客户触发时为 `customer_id` |
+| `items[].operator_type` | string | 触发者类型：`customer` / `user` / `system` |
+| `items[].payload` | string | 事件扩展字段，原始 JSON 字符串 |
+| `items[].created_time` | int64 | 事件时间，毫秒时间戳 |
+| `next_start_id` | int64 | 翻页游标（取本页最后一条事件的 `id`），下次请求可用 `WHERE id < next_start_id` 思路继续翻页；当前接口暂不直接做 keyset，使用 `limit` + `offset` 即可 |
+
+### 注意事项
+
+- `is_human_taken_over` 一旦为 `true` 不可回滚；同一工单多次触发转人工只会新增事件，不会覆盖首次时间。
+- 转人工副作用由后台事务原子完成：先持久化 `is_human_taken_over`，再写 `ticket_events`，最后才在 IM 群里拉坐席、移 Bot。

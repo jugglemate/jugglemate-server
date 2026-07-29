@@ -47,6 +47,9 @@ func main() {
 	// TIPS: 转人工时需要把 Inbox 坐席拉进 Ticket 群并移出 Agent Bot，同样属于客服域能力，
 	// 与上面一样用注入方式装配，同样依赖已就绪的 PostgreSQL。
 	agentModule.SetHumanHandoff(services.SwitchTicketToHuman)
+	// TIPS: 持久化「工单转人工」事实与事件流水与上一行同源；解耦注入避免 Agent 平台模块
+	// 直接依赖客服域 services 包。
+	agentModule.SetMarkHumanTakeover(services.MarkHumanTakeover)
 
 	httpServer := gin.Default()
 	agentModule.RegisterNativeRoutes(httpServer)

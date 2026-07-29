@@ -625,17 +625,18 @@ func (s *mockCustomerStorage) FindByIdentifier(appkey, identifier string) (*stor
 }
 
 type mockTicketStorage struct {
-	called        string
-	appkey        string
-	assigneeId    string
-	status        *storageModels.TicketStatus
-	limit         int64
-	offset        int64
-	tickets       []*storageModels.Ticket
-	err           error
-	customerId    string
-	startId       int64
-	customerLimit int64
+	called           string
+	appkey           string
+	assigneeId       string
+	status           *storageModels.TicketStatus
+	isHumanTakenOver *bool
+	limit            int64
+	offset           int64
+	tickets          []*storageModels.Ticket
+	err              error
+	customerId       string
+	startId          int64
+	customerLimit    int64
 
 	claimAppkey      string
 	claimTicketId    string
@@ -652,6 +653,12 @@ type mockTicketStorage struct {
 	transferOldId    string
 	transferNewId    string
 	transferTicket   *storageModels.Ticket
+
+	markAppkey   string
+	markTicketId string
+	markBy       string
+	markAt       int64
+	markErr      error
 }
 
 type mockInboxMemberStorage struct {
@@ -712,30 +719,33 @@ func (s *mockTicketStorage) FindBySource(appkey, sourceId string) (*storageModel
 	return nil, nil
 }
 
-func (s *mockTicketStorage) QryAll(appkey string, status *storageModels.TicketStatus, limit, offset int64) ([]*storageModels.Ticket, error) {
+func (s *mockTicketStorage) QryAll(appkey string, status *storageModels.TicketStatus, isHumanTakenOver *bool, limit, offset int64) ([]*storageModels.Ticket, error) {
 	s.called = "all"
 	s.appkey = appkey
 	s.status = status
 	s.limit = limit
 	s.offset = offset
+	s.isHumanTakenOver = isHumanTakenOver
 	return s.tickets, s.err
 }
 
-func (s *mockTicketStorage) QryVisible(appkey, assigneeId string, status *storageModels.TicketStatus, limit, offset int64) ([]*storageModels.Ticket, error) {
+func (s *mockTicketStorage) QryVisible(appkey, assigneeId string, status *storageModels.TicketStatus, isHumanTakenOver *bool, limit, offset int64) ([]*storageModels.Ticket, error) {
 	s.called = "visible"
 	s.appkey = appkey
 	s.assigneeId = assigneeId
 	s.status = status
 	s.limit = limit
 	s.offset = offset
+	s.isHumanTakenOver = isHumanTakenOver
 	return s.tickets, s.err
 }
 
-func (s *mockTicketStorage) QryByCustomer(appkey, customerId string, startId, limit int64) ([]*storageModels.Ticket, error) {
+func (s *mockTicketStorage) QryByCustomer(appkey, customerId string, isHumanTakenOver *bool, startId, limit int64) ([]*storageModels.Ticket, error) {
 	s.appkey = appkey
 	s.customerId = customerId
 	s.startId = startId
 	s.customerLimit = limit
+	s.isHumanTakenOver = isHumanTakenOver
 	return s.tickets, s.err
 }
 
@@ -775,4 +785,12 @@ func (s *mockTicketStorage) TransferIfAssignee(appkey, ticketId, oldAssigneeId, 
 	s.transferOldId = oldAssigneeId
 	s.transferNewId = newAssigneeId
 	return s.transferTicket, s.err
+}
+
+func (s *mockTicketStorage) MarkHumanTakenOverIfZero(appkey, ticketId, by string, atMs int64) error {
+	s.markAppkey = appkey
+	s.markTicketId = ticketId
+	s.markBy = by
+	s.markAt = atMs
+	return s.markErr
 }

@@ -329,13 +329,13 @@ func (s *telegramFakeTicketStorage) FindByTicketId(appkey, ticketId string) (*st
 func (s *telegramFakeTicketStorage) FindBySource(appkey, sourceId string) (*storageModels.Ticket, error) {
 	return s.bySource[sourceId], nil
 }
-func (s *telegramFakeTicketStorage) QryAll(appkey string, status *storageModels.TicketStatus, limit, offset int64) ([]*storageModels.Ticket, error) {
+func (s *telegramFakeTicketStorage) QryAll(appkey string, status *storageModels.TicketStatus, isHumanTakenOver *bool, limit, offset int64) ([]*storageModels.Ticket, error) {
 	return nil, nil
 }
-func (s *telegramFakeTicketStorage) QryVisible(appkey, assigneeId string, status *storageModels.TicketStatus, limit, offset int64) ([]*storageModels.Ticket, error) {
+func (s *telegramFakeTicketStorage) QryVisible(appkey, assigneeId string, status *storageModels.TicketStatus, isHumanTakenOver *bool, limit, offset int64) ([]*storageModels.Ticket, error) {
 	return nil, nil
 }
-func (s *telegramFakeTicketStorage) QryByCustomer(appkey, customerId string, startId, limit int64) ([]*storageModels.Ticket, error) {
+func (s *telegramFakeTicketStorage) QryByCustomer(appkey, customerId string, isHumanTakenOver *bool, startId, limit int64) ([]*storageModels.Ticket, error) {
 	return nil, nil
 }
 func (s *telegramFakeTicketStorage) QryByAssignee(appkey, assigneeId string, status int, startId, limit int64) ([]*storageModels.Ticket, error) {
@@ -358,6 +358,9 @@ func (s *telegramFakeTicketStorage) RevertClaimIfAssignee(appkey, ticketId, assi
 }
 func (s *telegramFakeTicketStorage) TransferIfAssignee(appkey, ticketId, oldAssigneeId, newAssigneeId string) (*storageModels.Ticket, error) {
 	return nil, nil
+}
+func (s *telegramFakeTicketStorage) MarkHumanTakenOverIfZero(appkey, ticketId, by string, atMs int64) error {
+	return nil
 }
 
 func (s *telegramFakeTicketStorage) String() string {

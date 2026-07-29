@@ -36,18 +36,30 @@ func (err *Error) Error() string { return err.Code + ": " + err.Message }
 // UnbindInboxAgentFunc 是同一套做法。
 type HumanHandoffFunc func(ctx context.Context, appKey, ticketID, botUserID string) error
 
+// MarkHumanTakeoverFunc 持久化「工单转人工」事实并补一条 ticket_events。
+//
+// TIPS: 与 HumanHandoffFunc 同源 —— 客服域写库、Agent 域不直接依赖客服域 package。
+// 装配在 main.go 完成；customer 维度由 inbound.go 透传 inbound.SenderID 决定。
+type MarkHumanTakeoverFunc func(ctx context.Context, appKey, ticketID, operatorId, operatorType string) error
+
 // Service 聚合 Message 域的真实 PostgreSQL、Reasoning、Billing 与 IM 依赖。
 type Service struct {
-	db           *gorm.DB
-	reasoning    *reasoningservice.Service
-	billing      *billingservice.Service
-	connections  *imbot.Manager
-	humanHandoff HumanHandoffFunc
+	db                *gorm.DB
+	reasoning         *reasoningservice.Service
+	billing           *billingservice.Service
+	connections       *imbot.Manager
+	humanHandoff      HumanHandoffFunc
+	markHumanTakeover MarkHumanTakeoverFunc
 }
 
 // SetHumanHandoff 注入转人工的群成员切换实现。
 func (service *Service) SetHumanHandoff(fn HumanHandoffFunc) {
 	service.humanHandoff = fn
+}
+
+// SetMarkHumanTakeover 注入转人工事实持久化实现。
+func (service *Service) SetMarkHumanTakeover(fn MarkHumanTakeoverFunc) {
+	service.markHumanTakeover = fn
 }
 
 // New 创建 Message 业务服务。
