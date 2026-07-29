@@ -92,4 +92,9 @@ func RouteConsole(group *gin.RouterGroup) {
 	group.GET("/inboxes/:inbox_id/agent", consoleApis.QryInboxAgent)
 	group.PUT("/inboxes/:inbox_id/agent", consoleApis.BindInboxAgent)
 	group.DELETE("/inboxes/:inbox_id/agent", consoleApis.UnbindInboxAgent)
+
+	// 客服数据统计（详见 docs/console-stats-api.md）。
+	group.GET("/stats/overview", apis.ConsoleStatsOverview)
+	group.GET("/stats/agents", apis.ConsoleStatsAgents)
+	group.GET("/stats/customers", apis.ConsoleStatsCustomers)
 }
