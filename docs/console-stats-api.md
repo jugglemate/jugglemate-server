@@ -44,10 +44,11 @@
 
 ### 暂时未支持的字段
 
-- `transferred_to_human`（转人工数量）：当前固定为 `0`，并附 `transferred_to_human_pending: true` 标识尚未采集。
 - `csat_avg`（坐席平均满意度） / `frt_avg_ms`（坐席首次响应毫秒数）：当前固定为 `null`，并附 `csat_pending: true` / `frt_pending: true` 标识尚未采集。
 
-前端在渲染时可依据这些 `*_pending` 字段显示「数据采集中」占位，等待后续版本上线。
+> `transferred_to_human` 已接通真实数据（2026-07-29 上线）：基于 `tickets.is_human_taken_over` 字段统计时间窗内新建工单中曾转人工的工单数。`transferred_to_human_pending` 永远为 `false`。字段上线前的历史工单 `is_human_taken_over` 默认为 `false`，因此上线后该指标从 0 开始累加，不做历史回填。
+
+前端在渲染时可依据其他 `*_pending` 字段显示「数据采集中」占位。
 
 ---
 
@@ -104,15 +105,15 @@ curl -G 'http://localhost:8050/jmate/console/stats/overview' \
       "total_sessions": 1234,
       "ai_resolved_sessions": 678,
       "ai_resolution_rate": 54.94,
-      "transferred_to_human": 0,
-      "transferred_to_human_pending": true,
+      "transferred_to_human": 87,
+      "transferred_to_human_pending": false,
       "open_sessions": 88,
       "closed_sessions": 1146
     },
     "new_sessions_trend": [
-      { "bucket": "2026-07-20", "total": 120, "ai_resolved": 70, "transferred_to_human": 0 },
-      { "bucket": "2026-07-21", "total": 150, "ai_resolved": 86, "transferred_to_human": 0 },
-      { "bucket": "2026-07-22", "total": 200, "ai_resolved": 110, "transferred_to_human": 0 }
+      { "bucket": "2026-07-20", "total": 120, "ai_resolved": 70, "transferred_to_human": 5 },
+      { "bucket": "2026-07-21", "total": 150, "ai_resolved": 86, "transferred_to_human": 12 },
+      { "bucket": "2026-07-22", "total": 200, "ai_resolved": 110, "transferred_to_human": 9 }
     ],
     "channel_ranking": [
       { "channel_type": "widget",    "count": 800, "percentage": 64.83 },
@@ -132,8 +133,8 @@ curl -G 'http://localhost:8050/jmate/console/stats/overview' \
     "to": "2026-07-27",
     "granularity": "hour",
     "new_sessions_trend": [
-      { "bucket": "2026-07-27 09", "total": 5, "ai_resolved": 2, "transferred_to_human": 0 },
-      { "bucket": "2026-07-27 10", "total": 11, "ai_resolved": 6, "transferred_to_human": 0 }
+      { "bucket": "2026-07-27 09", "total": 5, "ai_resolved": 2, "transferred_to_human": 1 },
+      { "bucket": "2026-07-27 10", "total": 11, "ai_resolved": 6, "transferred_to_human": 3 }
     ]
   }
 }
@@ -150,15 +151,15 @@ curl -G 'http://localhost:8050/jmate/console/stats/overview' \
 | `totals.total_sessions` | int64 | 时间窗内的工单总数 |
 | `totals.ai_resolved_sessions` | int64 | AI 独立闭环的会话数（`status=2` 且 `assignee_id` 为空或空字符串） |
 | `totals.ai_resolution_rate` | float | AI 解决率百分比，2 位小数。`total_sessions=0` 时为 `0`。公式：`ai_resolved_sessions / total_sessions × 100` |
-| `totals.transferred_to_human` | int64 | 时间窗内触发转人工的会话数。当前固定 `0`。 |
-| `totals.transferred_to_human_pending` | bool | `true` 表示该字段尚未采集，等后续版本上线真实值 |
+| `totals.transferred_to_human` | int64 | 时间窗内新建工单中，曾触发转人工的工单数（基于 `tickets.is_human_taken_over` 字段） |
+| `totals.transferred_to_human_pending` | bool | 当前始终为 `false`。保留是为前端统一处理各类 `*_pending` 标志 |
 | `totals.open_sessions` | int64 | 时间窗内处于 `未关闭` 状态的工单数（`status ∈ {0,1,3}`） |
 | `totals.closed_sessions` | int64 | 时间窗内已关闭工单数（`status=2`） |
 | `new_sessions_trend` | array | 按 `granularity` 桶化的时间序列，按 `bucket` 升序排列 |
 | `new_sessions_trend[].bucket` | string | 桶标签：`day` 为 `YYYY-MM-DD`，`hour` 为 `YYYY-MM-DD HH` |
 | `new_sessions_trend[].total` | int64 | 该桶内的新增工单数 |
 | `new_sessions_trend[].ai_resolved` | int64 | 该桶内 AI 独立闭环的工单数 |
-| `new_sessions_trend[].transferred_to_human` | int64 | 该桶内转人工的工单数，当前固定 `0` |
+| `new_sessions_trend[].transferred_to_human` | int64 | 该桶内转人工的工单数（按 `created_time` 分桶，与 total 同口径） |
 | `channel_ranking` | array | 渠道访问量排行，按 `count` 降序 |
 | `channel_ranking[].channel_type` | string | 渠道类型：`widget` / `telegram` / `juggleim` |
 | `channel_ranking[].count` | int64 | 时间窗内该渠道的工单数 |
@@ -168,8 +169,9 @@ curl -G 'http://localhost:8050/jmate/console/stats/overview' \
 
 - `total_sessions` 统计 `tickets` 表中 `app_key` 等于当前应用、`created_time` 落在时间窗内的所有行。
 - `ai_resolved_sessions` 在 `total_sessions` 的基础上进一步过滤 `status=2 AND (assignee_id IS NULL OR assignee_id='')`：表示「AI 接待到关闭，人工从未 Claim 过」的会话。
+- `transferred_to_human` 在 `total_sessions` 的基础上过滤 `is_human_taken_over=true`：基于持久化字段统计，自 2026-07-29 上线后方开始累加，上线前历史工单该字段默认为 `false`，**不**做回填。
 - `open_sessions` / `closed_sessions` 同样基于 `status` 字段过滤，与 AI / 转人工无关。
-- `new_sessions_trend` 用 PostgreSQL `date_trunc('day' | 'hour', created_time)` 桶化，按桶聚合；空桶不会出现（每天 0 工单 → 无返回项）。
+- `new_sessions_trend` 用 PostgreSQL `date_trunc('day' | 'hour', created_time)` 桶化，按桶聚合；空桶不会出现（每天 0 工单 → 无返回项）。`transferred_to_human` 沿用 `created_time` 分桶，与 `total` 同口径。
 - `channel_ranking.percentage` = 该渠道 `count` / 所有渠道总 `count` × 100，2 位小数。
 
 ### 错误响应
@@ -418,7 +420,9 @@ curl -X POST 'http://localhost:8050/jmate/user/login' \
 
 ### 占位字段渲染
 
-`totals.transferred_to_human_pending`、`items[].csat_pending`、`items[].frt_pending` 这三个布尔字段供前端识别"数据采集中"。建议在面板中显示「—」或「数据采集中」徽章，避免误把 `0` / `null` 当成真实数据。
+`items[].csat_pending`、`items[].frt_pending` 这两个布尔字段供前端识别"数据采集中"。建议在面板中显示「—」或「数据采集中」徽章，避免误把 `0` / `null` 当成真实数据。
+
+> `transferred_to_human_pending` 已在 2026-07-29 切到真实值，统一固定为 `false`。前端如果仍按 `*_pending` 做占位判断也兼容；建议前端逻辑里把这一项从「采集中」文案里去掉，转为直接渲染数字。
 
 ### 数据缓存与刷新
 
