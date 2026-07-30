@@ -44,7 +44,10 @@
 
 ### 暂时未支持的字段
 
-- `csat_avg`（坐席平均满意度） / `frt_avg_ms`（坐席首次响应毫秒数）：当前固定为 `null`，并附 `csat_pending: true` / `frt_pending: true` 标识尚未采集。
+- `frt_avg_ms`（坐席首次响应毫秒数）：当前固定为 `null`，并附 `frt_pending: true` 标识尚未采集。后续 change 接 FRT 时实现。
+
+> `csat_avg` 自 2026-07-29 上线接通真实数据（基于 `ticket_ratings` 聚合），
+> `csat_pending` 当前固定为 `false`。
 
 > `transferred_to_human` 已接通真实数据（2026-07-29 上线）：基于 `tickets.is_human_taken_over` 字段统计时间窗内新建工单中曾转人工的工单数。`transferred_to_human_pending` 永远为 `false`。字段上线前的历史工单 `is_human_taken_over` 默认为 `false`，因此上线后该指标从 0 开始累加，不做历史回填。
 
@@ -244,9 +247,10 @@ curl -G 'http://localhost:8050/jmate/console/stats/agents' \
         "total_sessions": 142,
         "responded_sessions": 138,
         "open_sessions": 4,
-        "csat_avg": null,
+        "csat_avg": 4.32,
+        "rating_count": 17,
         "frt_avg_ms": null,
-        "csat_pending": true,
+        "csat_pending": false,
         "frt_pending": true
       }
     ],
@@ -272,9 +276,10 @@ curl -G 'http://localhost:8050/jmate/console/stats/agents' \
 | `items[].total_sessions` | int64 | 时间窗内，被该坐席 `Claim` 过的工单总数（`tickets.assignee_id` = `user_id`） |
 | `items[].responded_sessions` | int64 | 时间窗内被该坐席处理中的工单数（`status ∈ {1,2,3}` 且分配给本人） |
 | `items[].open_sessions` | int64 | 时间窗内该坐席名下未关闭的工单数（`status ∈ {0,1,3}`） |
-| `items[].csat_avg` | float/null | 客户满意度平均分（1-5）。当前固定 `null` |
+| `items[].csat_avg` | float/null | 该坐席在时间窗内的客户满意度平均分（1-5）。无评分时为 `null` |
+| `items[].rating_count` | int64 | 该坐席在时间窗内收到的评分条数 |
 | `items[].frt_avg_ms` | int/null | 首次响应平均耗时毫秒数。当前固定 `null` |
-| `items[].csat_pending` | bool | `true` 表示尚未采集 CSAT |
+| `items[].csat_pending` | bool | 当前固定 `false`（CSAT 已接通） |
 | `items[].frt_pending` | bool | `true` 表示尚未采集 FRT |
 | `total` | int64 | 满足 `include_admin` 过滤的坐席总人数（不受分页影响） |
 | `limit` | int64 | 服务端实际使用的 `pageSize`，夹紧后值 |
@@ -420,9 +425,9 @@ curl -X POST 'http://localhost:8050/jmate/user/login' \
 
 ### 占位字段渲染
 
-`items[].csat_pending`、`items[].frt_pending` 这两个布尔字段供前端识别"数据采集中"。建议在面板中显示「—」或「数据采集中」徽章，避免误把 `0` / `null` 当成真实数据。
+`items[].frt_pending` 这个布尔字段供前端识别"首响时间采集中"。建议在面板中显示「—」或「数据采集中」徽章，避免误把 `0` / `null` 当成真实数据。
 
-> `transferred_to_human_pending` 已在 2026-07-29 切到真实值，统一固定为 `false`。前端如果仍按 `*_pending` 做占位判断也兼容；建议前端逻辑里把这一项从「采集中」文案里去掉，转为直接渲染数字。
+> `transferred_to_human_pending`、`items[].csat_pending` 已在 2026-07-29 切到真实值，统一固定为 `false`（转人工 / CSAT 都已接通）。前端如果仍按 `*_pending` 做占位判断也兼容；建议前端逻辑里把这两项从「采集中」文案里去掉，转为直接渲染数字。
 
 ### 数据缓存与刷新
 

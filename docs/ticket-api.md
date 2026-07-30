@@ -1029,3 +1029,267 @@ curl -X GET 'http://localhost:8080/jmate/tickets/3xvJK7Xwq2sTnQp6aLm9Z0/events?l
 
 - `is_human_taken_over` 一旦为 `true` 不可回滚；同一工单多次触发转人工只会新增事件，不会覆盖首次时间。
 - 转人工副作用由后台事务原子完成：先持久化 `is_human_taken_over`，再写 `ticket_events`，最后才在 IM 群里拉坐席、移 Bot。
+
+## 工单自动关闭 & 评价系统
+
+### 概述
+
+工单超时自动关闭（自 2026-07-29 上线）：系统后台每 30 秒扫描一次，对
+`status=1`（processing）且 `last_user_msg_at < now - 5min` 的工单按抢占式 SQL 关闭
+（status→2、closed_at=now），同时在 IM 群里发 `jgm:csat` 自定义消息邀请客户评价。
+
+**评价写入全部走 IM 自定义消息**，本服务**不暴露**评分写接口。前端用户在卡片
+上点击 5★，通过 `imSdk.sendGroupMsg(msg_type="jgm:csatreply", content=...)` 把
+评分作为群消息发出，webhook 入站后服务端解析与落库。
+
+### 工单自动关闭：服务端动作
+
+```
+[T0 坐席最后消息]
+    ↓ webhook 入站 → ticket_messages 落库 + UPDATE last_user_msg_at = T0
+[T0+5min 后台 ticker 命中]
+    ├─ UPDATE tickets SET status=2, closed_at=now() WHERE WHERE 抢占条件
+    ├─ INSERT ticket_events (event_type='close', op=system, payload={"reason":"idle_timeout"})
+    └─ 立刻通过 SDK SendCustomMessage 发 jgm:csat 邀请卡
+
+后续任意时刻：
+  - 客户 / 坐席在群里发任意消息 → ticket_messages 落库（不动 status）
+  - 客户发 jgm:csatreply {rating, comment} → ticket_ratings 落库（不动 status）
+```
+
+### 数据模型增量
+
+#### `tickets` 表新增字段
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `last_user_msg_at` | `DATETIME(3)` / `TIMESTAMPTZ` | 坐席/系统消息最后时间；客户消息不更新 |
+| `closed_at` | `DATETIME(3)` / `TIMESTAMPTZ` | 工单关闭时间；status=2 时被赋值 |
+
+#### `ticket_messages` 表（新增）
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | BIGINT PK | |
+| `app_key` | VARCHAR | |
+| `ticket_id` | VARCHAR | |
+| `sender_id` | VARCHAR | 发送者 IM 身份 |
+| `sender_role` | VARCHAR | `customer` / `user` / `bot` / `system` |
+| `msg_id` | VARCHAR | IM server 的 msg_id（用于幂等去重） |
+| `msg_type` | VARCHAR | 原 msg_type，包括 `jg:text` / `jg:csatreply` / 自定义业务协议 |
+| `created_time` | TIMESTAMP | |
+
+约束：`UNIQUE (app_key, msg_id)`；索引 `(app_key, ticket_id, created_time)`。
+
+> TIPS: 不存 message content（正文已存 JuggleIM 自身），只存 who/when/type 用于审计与计时。
+
+#### `ticket_ratings` 表（新增）
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | BIGINT PK | |
+| `app_key` | VARCHAR | |
+| `ticket_id` | VARCHAR | |
+| `customer_id` | VARCHAR | 评价者（客户） |
+| `assignee_id` | VARCHAR | 被评的坐席；自动从 tickets.assignee_id 取 |
+| `rating` | TINYINT / SMALLINT | 1-5 |
+| `comment` | TEXT | ≤ 500 字符（服务端超长截断） |
+| `source` | VARCHAR | `card_button`（无 comment） / `card_with_comment`（有 comment） |
+| `created_time` | TIMESTAMP | |
+
+约束：`UNIQUE (app_key, ticket_id, customer_id)` —— **同一客户对同一工单只能评一次**。
+重复评分走静默忽略（webhook 返回 SUCCESS，service 不写第二条）。
+
+### IM 自定义消息协议
+
+#### `jgm:csat`：邀请评价卡片（服务端 → 客户）
+
+发送时机：工单关闭那一刻。
+
+```json
+{
+  "msg_type": "jgm:csat",
+  "msg_content": {
+    "kind": "csat",
+    "version": 1,
+    "app_key": "nsw3sue72begyv7y",
+    "ticket_id": "ticket_xxx",
+    "text": "您的会话已结束。请对本次服务做个评价：\n1 很差 / 2 不满意 / 3 一般 / 4 满意 / 5 很满意。\n评分 ≤3 时建议同时写点意见，方便我们改进。",
+    "csat": {
+      "low_rating_threshold": 3,
+      "low_rating_hint": "评分 ≤3 时，请附带文字说明问题，方便我们改进。",
+      "options": [
+        {"value": 1, "label": "1 很差"},
+        {"value": 2, "label": "2 不满意"},
+        {"value": 3, "label": "3 一般"},
+        {"value": 4, "label": "4 满意"},
+        {"value": 5, "label": "5 很满意"}
+      ],
+      "reply_msg_type": "jgm:csatreply",
+      "reply_schema": {
+        "rating":  "int 1..5",
+        "comment": "string optional (≤ 500 chars); recommended when rating ≤ 3"
+      }
+    }
+  }
+}
+```
+
+前端 UI 按 `msg_type === "jgm:csat"` 路由到评分卡；点按按钮后**构造 `jgm:csatreply`
+消息发到同一 IM 群里**（不调任何 HTTP 接口）。
+
+#### `jgm:csatreply`：客户评分回复（客户 → 服务端）
+
+接收路径：webhook 入站，自动路由到 `services.RecordFromCustomMessage`。
+
+```json
+{
+  "msg_type": "jgm:csatreply",
+  "msg_content": {
+    "kind": "csatreply",
+    "version": 1,
+    "app_key": "nsw3sue72begyv7y",
+    "ticket_id": "ticket_xxx",
+    "rating": 5,
+    "comment": "",
+    "client_ts": 1785380000000
+  }
+}
+```
+
+或带 comment：
+
+```json
+{
+  "msg_type": "jgm:csatreply",
+  "msg_content": {
+    "kind": "csatreply",
+    "version": 1,
+    "app_key": "nsw3sue72begyv7y",
+    "ticket_id": "ticket_xxx",
+    "rating": 3,
+    "comment": "客服回复慢",
+    "client_ts": 1785380000000
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `kind` | string | 是 | 必须是 `csatreply` |
+| `version` | int | 是 | 当前为 1 |
+| `app_key` | string | 是 | 必须与 webhook receiver 所在 app 一致（**服务端强校验**） |
+| `ticket_id` | string | 是 | 工单 ID（**强校验**） |
+| `rating` | int | 是 | [1, 5]；非法值被静默丢 |
+| `comment` | string | 否 | ≤ 500 字符；超长服务端截断 |
+| `client_ts` | int64 | 否 | 客户端时间，便于审计 |
+
+#### 服务端入站校验
+
+| 规则 | 行为 |
+|---|---|
+| `kind != "csatreply"` | 静默丢 |
+| `app_key` / `ticket_id` 不匹配 ctx 或 receiver | 静默丢 |
+| `sender` ≠ `tickets.source_id`（不是客户发的） | 静默丢 |
+| `rating` 越界 | 静默丢 |
+| `UNIQUE` 冲突（同 customer 重复评分） | 静默丢（webhook 返回 SUCCESS） |
+| TGIM server 重投（msg_id 相同） | `ticket_messages` upsert 幂等 |
+
+### 查询工单评价（HTTP）
+
+#### 请求
+
+`GET /jmate/tickets/:ticket_id/rating?customer_id=...`
+
+#### Headers
+
+| 名称 | 必填 | 说明 |
+| --- | --- | --- |
+| `appkey` | 是 | 当前应用的 appkey |
+| `Authorization` | 是 | 登录 token |
+
+#### Query 参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `customer_id` | string | 是 | 客户 ID（按 UNIQUE (app_key, ticket_id, customer_id) 查询） |
+
+#### 请求示例
+
+```bash
+curl -G 'http://localhost:8050/jmate/tickets/ticket_xxx/rating' \
+  -H 'appkey: app_xxx' \
+  -H 'Authorization: <token>' \
+  --data-urlencode 'customer_id=customer_xxx'
+```
+
+#### 成功响应
+
+```json
+{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "rating": {
+      "ticket_id": "ticket_xxx",
+      "customer_id": "customer_xxx",
+      "assignee_id": "u_seat_1",
+      "rating": 5,
+      "comment": "好评",
+      "created_time": 1785000000000
+    }
+  }
+}
+```
+
+未评时 `data.rating = null`，整体 `code=0`。
+
+#### 响应字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `rating` | object/null | 评价对象；不存在时为 `null` |
+| `rating.ticket_id` | string | 工单 ID |
+| `rating.customer_id` | string | 客户 ID |
+| `rating.assignee_id` | string | 被评的坐席 user_id |
+| `rating.rating` | int | 1-5 |
+| `rating.comment` | string | 评论（超长截断） |
+| `rating.created_time` | int64 | 时间，毫秒 |
+
+### 工单列表新增字段
+
+`TicketInfo` 透出工单的关闭时间与最后活跃时间：
+
+```json
+{
+  "ticket_id": "ticket_xxx",
+  "status": 2,
+  "is_human_taken_over": false,
+  "human_taken_over_at": 0,
+  "human_taken_over_by": "",
+  "last_user_msg_at": 1785379200000,
+  "closed_at": 1785379500000,
+  "created_time": 1785378000000,
+  "updated_time": 1785379500000,
+  ...
+}
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `last_user_msg_at` | int64 | 最后坐席消息毫秒时间戳；0 表示无活跃坐席消息 |
+| `closed_at` | int64 | 工单关闭毫秒时间戳；0 表示未关闭 |
+
+### 注意事项
+
+- **超时阈值默认 5 分钟**；可通过 `agent.auto_close.idle_minutes` 配置覆盖。
+- **多实例安全**：所有 ticker 抢占都用 `UPDATE ... WHERE status=1 AND last_user_msg_at < cutoff`，
+  `RowsAffected` 防重复关闭。
+- **jgm:csat 发送失败不影响关闭**：`status=2` 已入库，IM 失败仅 slog，不重试。
+- **评价通过 webhook 入库**：不在服务侧暴露评分写接口，避免被绕过群消息机制。
+
+## 后续工作（不在本 change 范围）
+
+- FRT（first response time）统计：需要 `ticket_messages` 完整 metadata + 跨窗口聚合。
+- WhatsApp channel 适配：telegram/whatsapp 渠道客户 jgm:csatreply 的 UI 适配。
+- 管理后台评价模块：评分列表 / 回复建议 / 坐席排行。
