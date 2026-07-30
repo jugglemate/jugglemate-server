@@ -22,6 +22,8 @@ type TicketDao struct {
 	IsHumanTakenOver bool      `gorm:"is_human_taken_over"`
 	HumanTakenOverAt time.Time `gorm:"human_taken_over_at"`
 	HumanTakenOverBy string    `gorm:"human_taken_over_by"`
+	LastUserMsgAt    *time.Time `gorm:"last_user_msg_at"`
+	ClosedAt         *time.Time `gorm:"closed_at"`
 	CreatedTime      time.Time `gorm:"created_time"`
 	UpdatedTime      time.Time `gorm:"updated_time"`
 	AppKey           string    `gorm:"app_key"`
@@ -53,6 +55,12 @@ func (d *TicketDao) toModel() *models.Ticket {
 	if !d.HumanTakenOverAt.IsZero() {
 		item.HumanTakenOverAt = d.HumanTakenOverAt.UnixMilli()
 	}
+	if d.LastUserMsgAt != nil && !d.LastUserMsgAt.IsZero() {
+		item.LastUserMsgAt = d.LastUserMsgAt.UnixMilli()
+	}
+	if d.ClosedAt != nil && !d.ClosedAt.IsZero() {
+		item.ClosedAt = d.ClosedAt.UnixMilli()
+	}
 	return item
 }
 
@@ -71,6 +79,14 @@ func newTicketDao(item models.Ticket) *TicketDao {
 	}
 	if item.HumanTakenOverAt > 0 {
 		dao.HumanTakenOverAt = time.UnixMilli(item.HumanTakenOverAt)
+	}
+	if item.LastUserMsgAt > 0 {
+		t := time.UnixMilli(item.LastUserMsgAt)
+		dao.LastUserMsgAt = &t
+	}
+	if item.ClosedAt > 0 {
+		t := time.UnixMilli(item.ClosedAt)
+		dao.ClosedAt = &t
 	}
 	if item.CreatedTime > 0 {
 		dao.CreatedTime = time.UnixMilli(item.CreatedTime)
@@ -316,6 +332,57 @@ func (d *TicketDao) MarkHumanTakenOverIfZero(appkey, ticketId, by string, atMs i
 			"human_taken_over_by": by,
 			"updated_time":        time.Now(),
 		}).Error
+}
+
+// UpdateLastUserMsgAt 在 atMs 大于当前 last_user_msg_at 时才覆盖。
+//
+// TIPS: 历史消息回灌不会"倒退" 时间戳；PostgreSQL 用 GREATEST 函数，MySQL 用
+// CASE WHEN 实现同样的语义（IF/GREATEST 在 MySQL 8 才有）。
+func (d *TicketDao) UpdateLastUserMsgAt(appkey, ticketId string, atMs int64) error {
+	at := time.UnixMilli(atMs)
+	db := dbcommons.GetDb()
+	dialect := db.Dialector.Name()
+	var query string
+	var args []interface{}
+	switch dialect {
+	case "postgres":
+		query = `UPDATE tickets
+			SET last_user_msg_at = GREATEST(COALESCE(last_user_msg_at, $1::timestamptz), $2::timestamptz),
+			    updated_time = now()
+			WHERE app_key=$3 AND ticket_id=$4`
+		args = []interface{}{at, at, appkey, ticketId}
+	default:
+		query = `UPDATE tickets
+			SET last_user_msg_at = CASE
+			    WHEN last_user_msg_at IS NULL THEN ?
+			    WHEN last_user_msg_at < ? THEN ?
+			    ELSE last_user_msg_at
+			END,
+			updated_time = NOW()
+			WHERE app_key=? AND ticket_id=?`
+		args = []interface{}{at, at, at, appkey, ticketId}
+	}
+	return db.Exec(query, args...).Error
+}
+
+// CloseByIdle 抢占式关闭：仅在 status=1 且 last_user_msg_at < cutoff 时执行；
+// 其他实例已处理则 RowsAffected=0，返回 (false, nil)。
+func (d *TicketDao) CloseByIdle(appkey, ticketId string, idleMs int64, atMs int64) (bool, error) {
+	now := time.UnixMilli(atMs)
+	cutoffMs := atMs - idleMs
+	cutoff := time.UnixMilli(cutoffMs)
+	res := dbcommons.GetDb().Model(&TicketDao{}).
+		Where("app_key=? AND ticket_id=? AND status=? AND last_user_msg_at IS NOT NULL AND last_user_msg_at < ?",
+			appkey, ticketId, int(models.TicketStatusProcessing), cutoff).
+		Updates(map[string]interface{}{
+			"status":       int(models.TicketStatusClosed),
+			"closed_at":    now,
+			"updated_time": now,
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 func queryTickets(db *gorm.DB, limit int64) ([]*models.Ticket, error) {

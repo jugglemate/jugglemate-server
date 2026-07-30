@@ -276,7 +276,8 @@ func GetStatsAgents(ctx context.Context, fromStr, toStr string, includeAdmin boo
 		     WHERE m.app_key=u.app_key AND m.member_id=u.user_id) AS inbox_count,
 		  COALESCE(t.total_sessions,    0) AS total_sessions,
 		  COALESCE(t.responded_sessions,0) AS responded_sessions,
-		  COALESCE(t.open_sessions,     0) AS open_sessions
+		  COALESCE(t.open_sessions,     0) AS open_sessions,
+		  cr.csat_avg, cr.rating_count
 		FROM users u
 		LEFT JOIN (
 		  SELECT assignee_id,
@@ -288,8 +289,17 @@ func GetStatsAgents(ctx context.Context, fromStr, toStr string, includeAdmin boo
 		    AND created_time>=? AND created_time<?
 		  GROUP BY assignee_id
 		) t ON t.assignee_id = u.user_id
+		LEFT JOIN (
+		  SELECT assignee_id,
+		         AVG(rating)::float AS csat_avg,
+		         COUNT(*)           AS rating_count
+		  FROM ticket_ratings
+		  WHERE app_key=? AND assignee_id<>''
+		    AND created_time>=? AND created_time<?
+		  GROUP BY assignee_id
+		) cr ON cr.assignee_id = u.user_id
 		WHERE u.app_key=? AND %s
-		ORDER BY total_sessions DESC NULLS LAST, u.nickname
+		ORDER BY t.total_sessions DESC NULLS LAST, u.nickname
 		LIMIT ? OFFSET ?`, roleFilter)
 
 	var rows []struct {
@@ -303,8 +313,10 @@ func GetStatsAgents(ctx context.Context, fromStr, toStr string, includeAdmin boo
 		TotalSessions     int64
 		RespondedSessions int64
 		OpenSessions      int64
+		CsatAvg           *float64
+		RatingCount       int64
 	}
-	if err := db.Raw(query, appkey, start, end, appkey, limit, offset).Scan(&rows).Error; err != nil {
+	if err := db.Raw(query, appkey, start, end, appkey, start, end, appkey, limit, offset).Scan(&rows).Error; err != nil {
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 	}
 
@@ -328,9 +340,10 @@ func GetStatsAgents(ctx context.Context, fromStr, toStr string, includeAdmin boo
 			TotalSessions:     r.TotalSessions,
 			RespondedSessions: r.RespondedSessions,
 			OpenSessions:      r.OpenSessions,
-			CSATAvg:           nil,
-			FRTAvgMs:          nil,
-			CSATPending:       true,
+			CSATAvg:           r.CsatAvg, // nil 表示该坐席在时间窗内没有评价
+			RatingCount:       r.RatingCount,
+			FRTAvgMs:          nil,    // FRT 仍 pending
+			CSATPending:       false,  // CSAT 已接通
 			FRTPending:        true,
 		})
 	}

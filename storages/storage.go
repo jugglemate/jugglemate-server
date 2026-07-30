@@ -37,6 +37,14 @@ func NewTicketEventStorage() models.ITicketEventStorage {
 	return &dbs.TicketEventDao{}
 }
 
+func NewTicketMessageStorage() models.ITicketMessageStorage {
+	return &dbs.TicketMessageDao{}
+}
+
+func NewTicketRatingStorage() models.ITicketRatingStorage {
+	return &dbs.TicketRatingDao{}
+}
+
 func NewInboxStorage() models.IInboxStorage {
 	return &dbs.InboxDao{}
 }

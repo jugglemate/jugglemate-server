@@ -20,6 +20,8 @@ type TicketInfo struct {
 	IsHumanTakenOver bool      `json:"is_human_taken_over"`
 	HumanTakenOverAt int64     `json:"human_taken_over_at"`
 	HumanTakenOverBy string    `json:"human_taken_over_by"`
+	LastUserMsgAt    int64     `json:"last_user_msg_at"`
+	ClosedAt         int64     `json:"closed_at,omitempty"`
 	CreatedTime      int64     `json:"created_time"`
 	UpdatedTime      int64     `json:"updated_time"`
 }

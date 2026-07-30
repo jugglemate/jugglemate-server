@@ -69,13 +69,19 @@ type InboxAgentDetail struct {
 	SyncError string
 }
 
-// GetInboxAgent 查询指定 Inbox 当前绑定的 Agent 和 Bot。
-func GetInboxAgent(ctx context.Context, appKey, inboxID string) (*InboxAgentDetail, error) {
+// getInboxAgentFn 提供 GetInboxAgent 的可注入实现；单测可替换。
+// 默认走 getInboxAgentWithDB。
+var getInboxAgentFn = func(ctx context.Context, appKey, inboxID string) (*InboxAgentDetail, error) {
 	db := dbcommons.GetDb()
 	if db == nil {
 		return nil, fmt.Errorf("PostgreSQL 尚未初始化")
 	}
 	return getInboxAgentWithDB(ctx, db, appKey, inboxID)
+}
+
+// GetInboxAgent 查询指定 Inbox 当前绑定的 Agent 和 Bot。
+func GetInboxAgent(ctx context.Context, appKey, inboxID string) (*InboxAgentDetail, error) {
+	return getInboxAgentFn(ctx, appKey, inboxID)
 }
 
 func getInboxAgentWithDB(ctx context.Context, db *gorm.DB, appKey, inboxID string) (*InboxAgentDetail, error) {

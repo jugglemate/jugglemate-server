@@ -794,3 +794,11 @@ func (s *mockTicketStorage) MarkHumanTakenOverIfZero(appkey, ticketId, by string
 	s.markAt = atMs
 	return s.markErr
 }
+
+func (s *mockTicketStorage) UpdateLastUserMsgAt(appkey, ticketId string, atMs int64) error {
+	return nil
+}
+
+func (s *mockTicketStorage) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
+	return false, nil
+}

@@ -64,6 +64,14 @@ func (s *mockTicketStorageForHandoff) MarkHumanTakenOverIfZero(appkey, ticketId,
 	return s.err
 }
 
+func (s *mockTicketStorageForHandoff) UpdateLastUserMsgAt(appkey, ticketId string, atMs int64) error {
+	return nil
+}
+
+func (s *mockTicketStorageForHandoff) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
+	return false, nil
+}
+
 type mockTicketEventStorageForHandoff struct {
 	created    []storageModels.TicketEvent
 	err        error

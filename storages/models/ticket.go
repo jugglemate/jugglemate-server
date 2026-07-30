@@ -29,6 +29,7 @@ type TicketEventOperator string
 const (
 	TicketEventOperatorCustomer TicketEventOperator = "customer"
 	TicketEventOperatorUser     TicketEventOperator = "user"
+	TicketEventOperatorBot     TicketEventOperator = "bot"
 	TicketEventOperatorSystem   TicketEventOperator = "system"
 )
 
@@ -44,6 +45,8 @@ type Ticket struct {
 	IsHumanTakenOver bool
 	HumanTakenOverAt int64
 	HumanTakenOverBy string
+	LastUserMsgAt    int64
+	ClosedAt         int64
 	CreatedTime      int64
 	UpdatedTime      int64
 	AppKey           string
@@ -67,6 +70,13 @@ type ITicketStorage interface {
 	RevertClaimIfAssignee(appkey, ticketId, assigneeId string) error
 	TransferIfAssignee(appkey, ticketId, oldAssigneeId, newAssigneeId string) (*Ticket, error)
 	MarkHumanTakenOverIfZero(appkey, ticketId, by string, atMs int64) error
+
+	// UpdateLastUserMsgAt 只在 msg_time > 现有值时更新"坐席最后消息时间"，
+	// 防止历史消息回灌覆盖最新活跃时间。
+	UpdateLastUserMsgAt(appkey, ticketId string, atMs int64) error
+	// CloseByIdle 抢占式关闭工单。仅在 status=1 且 last_user_msg_at 早于
+	// 给定阈值时返回 (true, nil)；已被其他实例处理或状态变更则返回 (false, nil)。
+	CloseByIdle(appkey, ticketId string, idleMs int64, atMs int64) (bool, error)
 }
 
 // TicketEvent 记录工单生命周期中的事件事实。

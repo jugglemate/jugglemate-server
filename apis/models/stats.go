@@ -46,7 +46,8 @@ type OverviewResp struct {
 
 // AgentStatsItem 是坐席列表的一项。
 //
-// CSATAvg / FRT Avg 在 Phase 1 固定为 nil，配合对应 *_pending 字段让前端识别"暂未支持"。
+// CSATAvg 自 2026-07-29 ticket-auto-close change 接入真实数据；FRTPending 仍
+// 保留 true（首响时间未实现）。
 type AgentStatsItem struct {
 	UserID            string   `json:"user_id"`
 	LoginAccount      string   `json:"login_account"`
@@ -59,6 +60,7 @@ type AgentStatsItem struct {
 	RespondedSessions int64    `json:"responded_sessions"`
 	OpenSessions      int64    `json:"open_sessions"`
 	CSATAvg           *float64 `json:"csat_avg"`
+	RatingCount        int64    `json:"rating_count"`
 	FRTAvgMs          *int64   `json:"frt_avg_ms"`
 	CSATPending       bool     `json:"csat_pending"`
 	FRTPending        bool     `json:"frt_pending"`

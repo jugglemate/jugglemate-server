@@ -293,6 +293,17 @@ func (module *Module) Redis() (*redis.Client, error) {
 	return module.redis, nil
 }
 
+// BotConnections 返回 IM Bot 长连接管理器，供 main.go 在装配 csatIMSender
+// 时调用 SendCustomMessage。
+func (module *Module) BotConnections() (*messageimbot.Manager, error) {
+	module.mu.RLock()
+	defer module.mu.RUnlock()
+	if !module.started || module.botConnections == nil {
+		return nil, fmt.Errorf("Agent 模块尚未启动或 botConnections 未初始化")
+	}
+	return module.botConnections, nil
+}
+
 // RegisterNativeRoutes 注册与源服务兼容的 `/api/v1` 路由。
 func (module *Module) RegisterNativeRoutes(engine *gin.Engine) {
 	if !module.Enabled() {

@@ -42,6 +42,7 @@ func Route(eng *gin.Engine, prefix string, agentRouters ...AgentRouter) {
 	group.POST("/tickets/:ticket_id/claim", apis.ClaimTicket)
 	group.POST("/tickets/:ticket_id/transfer", apis.TransferTicket)
 	group.GET("/tickets/:ticket_id/events", apis.QryTicketEvents)
+	group.GET("/tickets/:ticket_id/rating", apis.QryTicketRating)
 
 	// 联系人方向坐席目录：登录即可调用，不限 admin。
 	group.GET("/seats/list", apis.SeatsList)

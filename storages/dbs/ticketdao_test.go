@@ -50,3 +50,29 @@ func TestTicketDaoHumanTakenOverMapping(t *testing.T) {
 		t.Fatalf("unset mapped = %+v, want zero values", mappedUnset)
 	}
 }
+
+// TestTicketDaoAutoCloseMapping 验证 last_user_msg_at / closed_at 字段映射。
+func TestTicketDaoAutoCloseMapping(t *testing.T) {
+	now := time.Now()
+	t1 := now.Add(-10 * time.Minute)
+	t2 := now
+
+	dao := &TicketDao{
+		TicketId:         "ticket_ac",
+		LastUserMsgAt:    &t1,
+		ClosedAt:         &t2,
+	}
+	mapped := dao.toModel()
+	if mapped.LastUserMsgAt != t1.UnixMilli() {
+		t.Fatalf("mapped last_user_msg_at = %d, want %d", mapped.LastUserMsgAt, t1.UnixMilli())
+	}
+	if mapped.ClosedAt != t2.UnixMilli() {
+		t.Fatalf("mapped closed_at = %d, want %d", mapped.ClosedAt, t2.UnixMilli())
+	}
+
+	unset := &TicketDao{TicketId: "ticket_ac_empty"}
+	mappedUnset := unset.toModel()
+	if mappedUnset.LastUserMsgAt != 0 || mappedUnset.ClosedAt != 0 {
+		t.Fatalf("unset mapped = %+v, want zero values", mappedUnset)
+	}
+}

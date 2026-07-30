@@ -1,6 +1,8 @@
 package services
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -224,3 +226,122 @@ func newOutboundTestEnv(t *testing.T) *outboundTestEnv {
 	})
 	return env
 }
+
+// ---- jgm:csatreply webhook 路由测试 ----
+
+type csatOutboundTestEnv struct {
+	rating      *mockRatingStorage
+	message     *mockMessageStorage
+	ticket      *fakeTicketStorage
+	csatCreated bool
+	called      bool
+}
+
+func setupCsatTestEnv(t *testing.T, ticket *storageModels.Ticket) *csatOutboundTestEnv {
+	t.Helper()
+	if ticket == nil {
+		ticket = &storageModels.Ticket{
+			AppKey:     "app_1",
+			TicketId:   "ticket_1",
+			SourceId:   "customer_1",
+			AssigneeId: "u_seat_1",
+		}
+	}
+	rt := &mockRatingStorage{}
+	msg := &mockMessageStorage{}
+	tk := &fakeTicketStorage{ticket: ticket}
+	oldRating := newTicketRatingStorageForRating
+	oldMsg := newTicketMessageStorageForRating
+	oldTicket := newTicketStorageForRating
+	newTicketRatingStorageForRating = func() storageModels.ITicketRatingStorage { return rt }
+	newTicketMessageStorageForRating = func() storageModels.ITicketMessageStorage { return msg }
+	newTicketStorageForRating = func() storageModels.ITicketStorage { return tk }
+	t.Cleanup(func() {
+		newTicketRatingStorageForRating = oldRating
+		newTicketMessageStorageForRating = oldMsg
+		newTicketStorageForRating = oldTicket
+	})
+	return &csatOutboundTestEnv{rating: rt, message: msg, ticket: tk}
+}
+
+func makeCsatReplyJSON(appKey, ticketId string, rating int, comment string) string {
+	p := CsatReplyPayload{Kind: "csatreply", Version: 1, AppKey: appKey, TicketID: ticketId, Rating: rating, Comment: comment, ClientTs: 1785000000000}
+	b, _ := json.Marshal(p)
+	return string(b)
+}
+
+func TestProcessWebhookMessageCsatReplyOK(t *testing.T) {
+	env := setupCsatTestEnv(t, nil)
+	code := ProcessWebhookMessage("app_1", WebhookMessagePayload{
+		Sender:     "customer_1",
+		Receiver:   "ticket_1",
+		ConverType: ConversationType_Ticket,
+		MsgType:    "jgm:csatreply",
+		MsgContent: makeCsatReplyJSON("app_1", "ticket_1", 5, "很好"),
+		MsgID:      "msg_csat_1",
+		MsgTime:    1785000000000,
+	})
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code = %d", code)
+	}
+	if len(env.rating.created) != 1 {
+		t.Fatalf("rating 创建失败：%v", env.rating.created)
+	}
+	if env.message.last.MsgId != "msg_csat_1" {
+		t.Fatalf("ticket_messages 未留痕：%+v", env.message.last)
+	}
+}
+
+func TestProcessWebhookMessageCsatReplyDuplicate(t *testing.T) {
+	env := setupCsatTestEnv(t, nil)
+	env.rating.createErr = errors.New("UNIQUE constraint failed: ticket_ratings")
+	content := makeCsatReplyJSON("app_1", "ticket_1", 5, "")
+	code := ProcessWebhookMessage("app_1", WebhookMessagePayload{
+		Sender: "customer_1", Receiver: "ticket_1", ConverType: ConversationType_Ticket,
+		MsgType: "jgm:csatreply", MsgContent: content, MsgID: "msg_csat_2", MsgTime: 1785000000000,
+	})
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("duplicate 也应该 SUCCESS，code=%d", code)
+	}
+}
+
+func TestProcessWebhookMessageCsatReplyNotCustomer(t *testing.T) {
+	setupCsatTestEnv(t, nil)
+	content := makeCsatReplyJSON("app_1", "ticket_1", 5, "")
+	// sender 是 u_seat_1，不是 customer_1；应 ParamError 被静默吞
+	code := ProcessWebhookMessage("app_1", WebhookMessagePayload{
+		Sender: "u_seat_1", Receiver: "ticket_1", ConverType: ConversationType_Ticket,
+		MsgType: "jgm:csatreply", MsgContent: content, MsgID: "msg_csat_3", MsgTime: 1785000000000,
+	})
+	if code != errs.IMErrorCode_APP_ParamError {
+		t.Fatalf("非客户发送应 ParamError，实际=%d", code)
+	}
+}
+
+func TestProcessWebhookMessageCsatReplyAppKeyMismatch(t *testing.T) {
+	setupCsatTestEnv(t, nil)
+	content := makeCsatReplyJSON("EVIL", "ticket_1", 5, "")
+	code := ProcessWebhookMessage("app_1", WebhookMessagePayload{
+		Sender: "customer_1", Receiver: "ticket_1", ConverType: ConversationType_Ticket,
+		MsgType: "jgm:csatreply", MsgContent: content, MsgID: "msg_csat_4", MsgTime: 1785000000000,
+	})
+	if code != errs.IMErrorCode_APP_ParamError {
+		t.Fatalf("appkey mismatch 应 ParamError，实际=%d", code)
+	}
+}
+
+func TestProcessWebhookMessageCsatReplyInvalidJSON(t *testing.T) {
+	setupCsatTestEnv(t, nil)
+	code := ProcessWebhookMessage("app_1", WebhookMessagePayload{
+		Sender: "customer_1", Receiver: "ticket_1", ConverType: ConversationType_Ticket,
+		MsgType: "jgm:csatreply", MsgContent: "{not json", MsgID: "msg_csat_5", MsgTime: 1785000000000,
+	})
+	// service 层不对返回码做特殊化；record 失败会被 log 出但 webhook 返回 SUCCESS。
+	// 测试只确保不 panic、且不调外部系统。
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("invalid JSON 应 SUCCESS，code=%d", code)
+	}
+}
+
+// 防止 lint 报 context 未引用
+var _ = context.Background

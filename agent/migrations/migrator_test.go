@@ -10,8 +10,15 @@ func TestListContainsCompleteBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取迁移失败: %v", err)
 	}
-	if len(items) != 5 {
-		t.Fatalf("当前应包含 Agent 基线、客服域收敛、Agent 软删除、工单-Agent 绑定、工单转人工标记迁移，实际为 %d", len(items))
+	if len(items) != 6 {
+		t.Fatalf("当前应包含 Agent 基线、客服域收敛、Agent 软删除、工单-Agent 绑定、工单转人工标记、工单自动关闭与评价迁移，实际为 %d", len(items))
+	}
+	if items[5].Version != "000006" ||
+		!strings.Contains(items[5].SQL, "ALTER TABLE tickets") ||
+		!strings.Contains(items[5].SQL, "last_user_msg_at") ||
+		!strings.Contains(items[5].SQL, "CREATE TABLE IF NOT EXISTS ticket_messages") ||
+		!strings.Contains(items[5].SQL, "CREATE TABLE IF NOT EXISTS ticket_ratings") {
+		t.Fatalf("工单自动关闭与评价迁移不完整: version=%s", items[5].Version)
 	}
 	if items[4].Version != "000005" ||
 		!strings.Contains(items[4].SQL, "ALTER TABLE tickets") ||

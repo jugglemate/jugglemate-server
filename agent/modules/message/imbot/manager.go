@@ -2,6 +2,7 @@ package imbot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -248,6 +249,45 @@ func (manager *Manager) SendText(ctx context.Context, appKey, botUserID, targetI
 	case response := <-done:
 		if response.code != utils.ClientErrorCode_Success || response.ack == nil {
 			return "", fmt.Errorf("发送 IM 消息失败 code=%d", response.code)
+		}
+		return response.ack.GetMsgId(), nil
+	}
+}
+
+// SendCustomMessage 发送任意 msg_type 的自定义消息。
+//
+// TIPS: 用来发业务自定义协议（如 jgm:csat 邀请卡 / jgm:ticketassign 通知），
+// IM server 端按 msg_type 路由分发。msg_content 必须是可以被 JSON 序列化的对象。
+func (manager *Manager) SendCustomMessage(ctx context.Context, appKey, botUserID, targetID string, channelType pbobjs.ChannelType, msgType string, msgContent interface{}) (string, error) {
+	client, err := manager.client(appKey, botUserID)
+	if err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(msgContent)
+	if err != nil {
+		return "", err
+	}
+	up := &pbobjs.UpMsg{
+		MsgType:    msgType,
+		MsgContent: raw,
+		Flags:      0,
+		ClientUid:  fmt.Sprintf("agent-%s-%d", msgType, time.Now().UnixNano()),
+	}
+	type result struct {
+		code utils.ClientErrorCode
+		ack  *pbobjs.PublishAckMsgBody
+	}
+	done := make(chan result, 1)
+	go func() {
+		code, ack := client.SendMessage(&sdkmodels.Conversation{ConversationId: targetID, ConversationType: channelType}, up)
+		done <- result{code: code, ack: ack}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case response := <-done:
+		if response.code != utils.ClientErrorCode_Success || response.ack == nil {
+			return "", fmt.Errorf("发送自定义 IM 消息失败 msg_type=%s code=%d", msgType, response.code)
 		}
 		return response.ack.GetMsgId(), nil
 	}

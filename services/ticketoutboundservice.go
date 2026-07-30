@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"strings"
 
@@ -55,6 +56,13 @@ func ProcessWebhookMessage(appkey string, payload WebhookMessagePayload) errs.IM
 		return errs.IMErrorCode_SUCCESS
 	}
 
+	// 路由 1：jgm:csatreply 是客户在群内回复的评分自定义消息。
+	// 走独立路径（不写入 ticket_messages "客户消息"流，不走 telegram 出站），
+	// 由 RecordFromCustomMessage 落 ticket_ratings 并在 ticket_messages 留痕。
+	if payload.MsgType == "jgm:csatreply" {
+		return processCsatReplyCustomMessage(context.Background(), appkey, payload)
+	}
+
 	ticket, err := newTicketStorageForOutbound().FindByTicketId(appkey, payload.Receiver)
 	if err != nil {
 		log.Printf("[WebhookMsgs] ticket lookup failed appkey=%s ticket_id=%s err=%v", appkey, payload.Receiver, err)
@@ -98,6 +106,43 @@ func ProcessWebhookMessage(appkey string, payload WebhookMessagePayload) errs.IM
 		log.Printf("[WebhookMsgs] skip: unsupported channel_type=%s appkey=%s inbox_id=%s ticket_id=%s msg_id=%s",
 			inbox.ChannelType, ticketAppKey, inbox.InboxId, ticket.TicketId, payload.MsgID)
 		return errs.IMErrorCode_SUCCESS
+	}
+}
+
+// processCsatReplyCustomMessage 路由 jgm:csatreply 入站消息到评分记录路径。
+//
+// 错误处理：除永久失败（工单不存在/字段不一致/超长）外，所有"瞬时失败"都返回
+// SUCCESS 让 webhook 不重投（IM server 反复重投会让客户重复扣分；UNIQUE 防重是
+// 兜底）。永久失败返回参数错误，前端视角等同于"消息被忽略"。
+func processCsatReplyCustomMessage(ctx context.Context, appkey string, payload WebhookMessagePayload) errs.IMErrorCode {
+	_, err := RecordFromCustomMessage(
+		ctx,
+		appkey,
+		payload.Receiver,
+		payload.MsgContent,
+		payload.Sender,
+		payload.MsgID,
+		payload.MsgType,
+		payload.MsgTime,
+	)
+	if err == nil {
+		return errs.IMErrorCode_SUCCESS
+	}
+	switch {
+	case errors.Is(err, ErrCsatAlreadyRated):
+		// 已评过：静默
+		return errs.IMErrorCode_SUCCESS
+	case errors.Is(err, ErrCsatTicketNotFound),
+		errors.Is(err, ErrCsatAppKeyMismatch),
+		errors.Is(err, ErrCsatTicketIdMismatch),
+		errors.Is(err, ErrCsatSenderNotCustomer),
+		errors.Is(err, ErrCsatRatingOutOfRange),
+		errors.Is(err, ErrCsatCommentTooLong):
+		log.Printf("[CsatReply] 参数错误忽略 msg_id=%s err=%v", payload.MsgID, err)
+		return errs.IMErrorCode_APP_ParamError
+	default:
+		log.Printf("[CsatReply] 内部错误 msg_id=%s err=%v", payload.MsgID, err)
+		return errs.IMErrorCode_SUCCESS // 不让 IM 重投；防重靠 UNIQUE
 	}
 }
 
