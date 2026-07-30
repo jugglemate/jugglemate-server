@@ -381,6 +381,7 @@ func ticketsToAPI(appkey string, tickets []*storageModels.Ticket) (*apiModels.Qr
 			HumanTakenOverBy: ticket.HumanTakenOverBy,
 			LastUserMsgAt:    ticket.LastUserMsgAt,
 			ClosedAt:         ticket.ClosedAt,
+			CsatNotifiedAt:   ticket.CsatNotifiedAt,
 			CreatedTime:      ticket.CreatedTime,
 			UpdatedTime:      ticket.UpdatedTime,
 		})

@@ -1279,6 +1279,7 @@ curl -G 'http://localhost:8050/jmate/tickets/ticket_xxx/rating' \
 |---|---|---|
 | `last_user_msg_at` | int64 | 最后坐席消息毫秒时间戳；0 表示无活跃坐席消息 |
 | `closed_at` | int64 | 工单关闭毫秒时间戳；0 表示未关闭 |
+| `csat_notified_at` | int64 | 评价邀请送达时间戳；0 表示还没发评价邀请（IM 临时失联场景下，后台 ticker 会补发） |
 
 ### 注意事项
 

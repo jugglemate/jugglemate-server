@@ -368,6 +368,12 @@ func (s *telegramFakeTicketStorage) UpdateLastUserMsgAt(appkey, ticketId string,
 func (s *telegramFakeTicketStorage) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
 	return false, nil
 }
+func (s *telegramFakeTicketStorage) MarkCsatNotifiedOnce(appkey, ticketId string, atMs int64) (bool, error) {
+	return false, nil
+}
+func (s *telegramFakeTicketStorage) QryTicketsNeedingCsatNotification(limit int64) ([]*storageModels.Ticket, error) {
+	return nil, nil
+}
 
 func (s *telegramFakeTicketStorage) String() string {
 	return fmt.Sprintf("created=%+v bySource=%+v", s.created, s.bySource)

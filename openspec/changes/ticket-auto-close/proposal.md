@@ -132,7 +132,7 @@ processing 推进到 closed。结果：
 
 ## Implementation Notes（落地补充）
 
-最终代码与原 plan 的 4 处细化：
+最终代码与原 plan 的 5 处细化：
 
 1. **CSAT 通知通过 `csatIMSender` 注入桥接**：services 包不持有 IM SDK 直接引用，
    由 main.go 注入闭包（闭包内调 `agentModule.BotConnections().SendCustomMessage`）。
@@ -145,6 +145,17 @@ processing 推进到 closed。结果：
 4. **handler ctx 读取 AppKey 的双路径**：`ctx.GetString(...)` 优先，
    `ctxs.GetAppKeyFromCtx(ctx)` 兜底。修复了 gin.Context.Value 不支持
    `type CtxKey string` 自定义 key 的已知问题（不依赖中间件时也工作）。
+5. **`csat_notified_at` 字段 + 重发 worker**（追加）：发现 IM 临时失联
+   时 jgm:csat 发送可能失败但工单已 status=2，**永远不会被重试**。
+   修复方案：
+   - `tickets` 加 `csat_notified_at TIMESTAMPTZ` 字段；
+   - 后台 ticker 单次扫描多加一段（阶段 5）：扫"已关闭但 csat_notified_at IS NULL"的工单，
+     调 NotifyCsatInvitation + MarkCsatNotifiedOnce（CAS 防并发）；
+   - CloseByIdle 不再写 csat_notified_at，留给阶段 5 补发路径标记；
+   - MarkCsatNotifiedOnce 用 SQL CAS 抢占：`WHERE csat_notified_at IS NULL AND status=2`，
+     多实例下只有一个 UPDATE RowsAffected==1，其余跳过；
+   - 客户 IM 失联时，1 ~ 5 分钟的恢复窗口内，下次 ticker 自动重发，
+     不需要单独的 cron worker。
 
 ## 风险与边界
 

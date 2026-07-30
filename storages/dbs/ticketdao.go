@@ -24,6 +24,7 @@ type TicketDao struct {
 	HumanTakenOverBy string    `gorm:"human_taken_over_by"`
 	LastUserMsgAt    *time.Time `gorm:"last_user_msg_at"`
 	ClosedAt         *time.Time `gorm:"closed_at"`
+	CsatNotifiedAt   *time.Time `gorm:"csat_notified_at"`
 	CreatedTime      time.Time `gorm:"created_time"`
 	UpdatedTime      time.Time `gorm:"updated_time"`
 	AppKey           string    `gorm:"app_key"`
@@ -61,6 +62,9 @@ func (d *TicketDao) toModel() *models.Ticket {
 	if d.ClosedAt != nil && !d.ClosedAt.IsZero() {
 		item.ClosedAt = d.ClosedAt.UnixMilli()
 	}
+	if d.CsatNotifiedAt != nil && !d.CsatNotifiedAt.IsZero() {
+		item.CsatNotifiedAt = d.CsatNotifiedAt.UnixMilli()
+	}
 	return item
 }
 
@@ -87,6 +91,10 @@ func newTicketDao(item models.Ticket) *TicketDao {
 	if item.ClosedAt > 0 {
 		t := time.UnixMilli(item.ClosedAt)
 		dao.ClosedAt = &t
+	}
+	if item.CsatNotifiedAt > 0 {
+		t := time.UnixMilli(item.CsatNotifiedAt)
+		dao.CsatNotifiedAt = &t
 	}
 	if item.CreatedTime > 0 {
 		dao.CreatedTime = time.UnixMilli(item.CreatedTime)
@@ -383,6 +391,47 @@ func (d *TicketDao) CloseByIdle(appkey, ticketId string, idleMs int64, atMs int6
 		return false, res.Error
 	}
 	return res.RowsAffected > 0, nil
+}
+
+// MarkCsatNotifiedOnce 在 csat_notified_at IS NULL 时置 csat_notified_at = atMs。
+// 仅 status=2 (Closed) 时才设置，避免给已重新打开的工单标错。
+//
+// 返回值：
+//   bool: 是否本调用真正置了字段（true=刚标记，false=已被其他实例标记）
+//   error: DB 错误
+func (d *TicketDao) MarkCsatNotifiedOnce(appkey, ticketId string, atMs int64) (bool, error) {
+	at := time.UnixMilli(atMs)
+	res := dbcommons.GetDb().Model(&TicketDao{}).
+		Where("app_key=? AND ticket_id=? AND status=? AND csat_notified_at IS NULL",
+			appkey, ticketId, int(models.TicketStatusClosed)).
+		Updates(map[string]interface{}{
+			"csat_notified_at": at,
+			"updated_time":     time.Now(),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+// QryTicketsNeedingCsatNotification 找出"已关闭但未发邀请"的工单，
+// ticker 用此补发 jgm:csat。limit 控制一次最多补多少（默认 50）。
+func (d *TicketDao) QryTicketsNeedingCsatNotification(limit int64) ([]*models.Ticket, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var rows []TicketDao
+	err := dbcommons.GetDb().
+		Where("status=? AND csat_notified_at IS NULL", int(models.TicketStatusClosed)).
+		Order("id desc").Limit(int(limit)).Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*models.Ticket, 0, len(rows))
+	for i := range rows {
+		out = append(out, rows[i].toModel())
+	}
+	return out, nil
 }
 
 func queryTickets(db *gorm.DB, limit int64) ([]*models.Ticket, error) {

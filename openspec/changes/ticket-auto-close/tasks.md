@@ -80,7 +80,32 @@
        解耦 agent 平台模块与客服域
 - [x] 10.2 **`source` 字段简化为 2 种枚举**：card_button / card_with_comment（不含
        reply/api）—— 评价只走 IM 通道
-- [x] 10.3 **comment 超长采用截断而非拒收**：避免前端 emoji 多字节字符数错漏评
+- [x] 10.3 **comment 超长采用截断而非拒收**：避免前端 emoji 多字节字符数错漏
 - [x] 10.4 **handler 双路径读 AppKey**：`ctx.GetString(...)` 优先 +
        `ctxs.GetAppKeyFromCtx(ctx)` 兜底；修复 gin.Context 自定义类型 key
        不被 ctx.Value 查到的已知坑
+- [x] 10.5 **`csat_notified_at` 字段 + 阶段 5 补发扫描**（追加）：解决 IM 临时失联
+       时 jgm:csat 失败不重试的隐患；ticker 单次扫"已关闭但未发邀请"工单
+       调 NotifyCsatInvitation + MarkCsatNotifiedOnce（CAS 防并发）。
+       配套新增 DB 迁移 000007 / 索引 `(app_key, status, csat_notified_at)`。
+
+# 11. 后续增量（追加的 csat_notified_at 落地的详细 tasks）
+
+- [x] 11.1 MySQL `commons/dbcommons/sqls/20260731.sql`：tickets 加 csat_notified_at
+       DATETIME(3) NULL + 索引 `(app_key, status, csat_notified_at)`
+- [x] 11.2 Postgres `agent/migrations/sql/000007_ticket_csat_notified_at.sql`：同步
+       字段与索引
+- [x] 11.3 `agent/migrations/migrator_test.go`：baseline 列表 6 → 7
+- [x] 11.4 `storages/models/ticket.go`：Ticket 加 CsatNotifiedAt；ITicketStorage 接口
+       加 MarkCsatNotifiedOnce + QryTicketsNeedingCsatNotification
+- [x] 11.5 `storages/dbs/ticketdao.go`：MarkCsatNotifiedOnce（CAS WHERE csat_notified_at IS NULL
+       AND status=2）+ QryTicketsNeedingCsatNotification
+- [x] 11.6 `apis/models/ticket.go`：TicketInfo 加 CsatNotifiedAt
+- [x] 11.7 `services/ticketservice.go`：ticketsToAPI 透出 CsatNotifiedAt
+- [x] 11.8 `services/ticketautocloseservice.go`：runAutoCloseOnce 阶段 5 调 runCsatRetryPass；
+       runCsatRetryPass 扫描未通知工单并发 jgm:csat
+- [x] 11.9 `services/csatretries_test.go`（新）：3 个补发场景测试（空候选、
+       正常发送+标记、IM 失败不标）
+- [x] 11.10 `docs/ticket-api.md`：TicketInfo 字段表加 csat_notified_at
+- [x] 11.11 `openspec/changes/ticket-auto-close/proposal.md`：Implementation Notes 加第 5 项
+       说明 csat_notified_at 重发设计

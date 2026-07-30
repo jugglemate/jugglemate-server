@@ -47,6 +47,7 @@ type Ticket struct {
 	HumanTakenOverBy string
 	LastUserMsgAt    int64
 	ClosedAt         int64
+	CsatNotifiedAt   int64
 	CreatedTime      int64
 	UpdatedTime      int64
 	AppKey           string
@@ -77,6 +78,10 @@ type ITicketStorage interface {
 	// CloseByIdle 抢占式关闭工单。仅在 status=1 且 last_user_msg_at 早于
 	// 给定阈值时返回 (true, nil)；已被其他实例处理或状态变更则返回 (false, nil)。
 	CloseByIdle(appkey, ticketId string, idleMs int64, atMs int64) (bool, error)
+	// MarkCsatNotifiedOnce 在 csat_notified_at IS NULL 时置 now（cas 防重并发）。
+	MarkCsatNotifiedOnce(appkey, ticketId string, atMs int64) (bool, error)
+	// QryTicketsNeedingCsatNotification 给后台 ticker 找出已关闭但未发邀请的工单。
+	QryTicketsNeedingCsatNotification(limit int64) ([]*Ticket, error)
 }
 
 // TicketEvent 记录工单生命周期中的事件事实。

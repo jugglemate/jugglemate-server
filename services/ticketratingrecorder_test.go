@@ -159,6 +159,12 @@ func (f *fakeTicketStorage) UpdateLastUserMsgAt(appkey, ticketId string, atMs in
 func (f *fakeTicketStorage) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
 	return false, nil
 }
+func (f *fakeTicketStorage) MarkCsatNotifiedOnce(appkey, ticketId string, atMs int64) (bool, error) {
+	return false, nil
+}
+func (f *fakeTicketStorage) QryTicketsNeedingCsatNotification(limit int64) ([]*storageModels.Ticket, error) {
+	return nil, nil
+}
 
 func makeReplyPayloadJSON(t *testing.T, appKey, ticketId string, rating int, comment string) string {
 	t.Helper()

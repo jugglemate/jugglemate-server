@@ -802,3 +802,11 @@ func (s *mockTicketStorage) UpdateLastUserMsgAt(appkey, ticketId string, atMs in
 func (s *mockTicketStorage) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
 	return false, nil
 }
+
+func (s *mockTicketStorage) MarkCsatNotifiedOnce(appkey, ticketId string, atMs int64) (bool, error) {
+	return false, nil
+}
+
+func (s *mockTicketStorage) QryTicketsNeedingCsatNotification(limit int64) ([]*storageModels.Ticket, error) {
+	return nil, nil
+}

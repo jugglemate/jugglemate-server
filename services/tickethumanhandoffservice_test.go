@@ -71,6 +71,12 @@ func (s *mockTicketStorageForHandoff) UpdateLastUserMsgAt(appkey, ticketId strin
 func (s *mockTicketStorageForHandoff) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
 	return false, nil
 }
+func (s *mockTicketStorageForHandoff) MarkCsatNotifiedOnce(appkey, ticketId string, atMs int64) (bool, error) {
+	return false, nil
+}
+func (s *mockTicketStorageForHandoff) QryTicketsNeedingCsatNotification(limit int64) ([]*storageModels.Ticket, error) {
+	return nil, nil
+}
 
 type mockTicketEventStorageForHandoff struct {
 	created    []storageModels.TicketEvent

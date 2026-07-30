@@ -71,6 +71,14 @@ func (m *mockTickerTicket) CloseByIdle(appkey, ticketId string, idleMs, atMs int
 	return true, nil
 }
 
+func (m *mockTickerTicket) MarkCsatNotifiedOnce(appkey, ticketId string, atMs int64) (bool, error) {
+	return true, nil
+}
+
+func (m *mockTickerTicket) QryTicketsNeedingCsatNotification(limit int64) ([]*storageModels.Ticket, error) {
+	return nil, nil
+}
+
 type mockTickerEvent struct {
 	created []storageModels.TicketEvent
 }
@@ -168,11 +176,24 @@ func TestRunAutoCloseOnceNoDB(t *testing.T) {
 	eventStore := &mockTickerEvent{}
 	oldTicket := newTicketStorageForAutoClose
 	oldEvent := newTicketEventStorageForAutoClose
+	oldFetch := fetchAutoCloseCandidates
+	oldCsatNotifyTicket := newTicketStorageForCsatNotify
+	csatIMSenderWas := csatIMSender
 	newTicketStorageForAutoClose = func() storageModels.ITicketStorage { return ticketStore }
 	newTicketEventStorageForAutoClose = func() storageModels.ITicketEventStorage { return eventStore }
+	newTicketStorageForCsatNotify = func() storageModels.ITicketStorage { return ticketStore }
+	fetchAutoCloseCandidates = func(ctx context.Context, cutoffMs int64) ([]autoCloseCandidate, error) {
+		return nil, nil // db==nil 路径等价：包级注入直接返回空
+	}
+	csatIMSender = func(ctx context.Context, appKey, botUserID, ticketId, msgType string, payload interface{}) error {
+		return nil
+	}
 	defer func() {
 		newTicketStorageForAutoClose = oldTicket
 		newTicketEventStorageForAutoClose = oldEvent
+		fetchAutoCloseCandidates = oldFetch
+		newTicketStorageForCsatNotify = oldCsatNotifyTicket
+		csatIMSender = csatIMSenderWas
 	}()
 
 	runAutoCloseOnce(context.Background(), 5*time.Minute, nowMs)
