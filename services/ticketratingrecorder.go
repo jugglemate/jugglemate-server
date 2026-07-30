@@ -128,6 +128,22 @@ func RecordFromCustomMessage(
 		Source:      source,
 		CreatedTime: nowMs,
 	}
+
+	// 7. 先写 ticket_messages 留痕（UpsertByMsgId 幂等；先写保证 retry 时也能补 messages）；
+	//    即使后续 rating 写失败，audit 数据已落库便于人工回查。
+	if err := newTicketMessageStorageForRating().UpsertByMsgId(storageModels.TicketMessage{
+		AppKey:      appKey,
+		TicketId:    receiverTicketId,
+		SenderId:    senderId,
+		SenderRole:  storageModels.TicketEventOperatorCustomer,
+		MsgId:       msgId,
+		MsgType:     msgType,
+		CreatedTime: msgTimeMs,
+	}); err != nil {
+		log.Printf("[CsatReply] ticket_messages 写库失败 msg_id=%s err=%v（继续）", msgId, err)
+	}
+
+	// 8. 写 ticket_ratings（UNIQUE 防重）。
 	err = newTicketRatingStorageForRating().Create(item)
 	if err != nil {
 		if errors.Is(err, dbs.ErrTicketRatingAlreadyExists) {
@@ -138,17 +154,6 @@ func RecordFromCustomMessage(
 		log.Printf("[CsatReply] 写库失败 msg_id=%s err=%v", msgId, err)
 		return nil, err
 	}
-
-	// 7. 留痕 ticket_messages（自定义 msg_type；记录"业务事件"，不被 index/timeline 算成纯聊天）
-	_ = newTicketMessageStorageForRating().UpsertByMsgId(storageModels.TicketMessage{
-		AppKey:      appKey,
-		TicketId:    receiverTicketId,
-		SenderId:    senderId,
-		SenderRole:  storageModels.TicketEventOperatorCustomer,
-		MsgId:       msgId,
-		MsgType:     msgType,
-		CreatedTime: msgTimeMs,
-	})
 
 	log.Printf("[CsatReply] OK ticket=%s rating=%d has_comment=%t customer=%s",
 		receiverTicketId, rating, comment != "", ticket.SourceId)

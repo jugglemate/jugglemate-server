@@ -17,7 +17,12 @@ var (
 	newTicketStorageForOutbound   = storages.NewTicketStorage
 	newInboxStorageForOutbound    = storages.NewInboxStorage
 	newCustomerStorageForOutbound = storages.NewCustomerStorage
-	sendTelegramOutboundMessage   = func(botToken, target, text string) error {
+	newMessageStorageForOutbound = storages.NewTicketMessageStorage
+	// updateLastUserMsgAtFn 是 last_user_msg_at 推进钩子，单测可替换。
+	updateLastUserMsgAtFn = func(appkey, ticketId string, atMs int64) error {
+		return newTicketStorageForOutbound().UpdateLastUserMsgAt(appkey, ticketId, atMs)
+	}
+	sendTelegramOutboundMessage = func(botToken, target, text string) error {
 		return telegram.NewClient().SendMessage(botToken, target, text)
 	}
 )
@@ -61,6 +66,15 @@ func ProcessWebhookMessage(appkey string, payload WebhookMessagePayload) errs.IM
 	// 由 RecordFromCustomMessage 落 ticket_ratings 并在 ticket_messages 留痕。
 	if payload.MsgType == "jgm:csatreply" {
 		return processCsatReplyCustomMessage(context.Background(), appkey, payload)
+	}
+
+	// 自动关闭 ticker 依赖 tickets.last_user_msg_at 推进；这里在 webhook 入站时把
+	// ticket_messages 写库（UpsertByMsgId 幂等）+ 仅对 sender_role=user（坐席）推进
+	// last_user_msg_at。客户消息不更新该字段，因为那是"坐席活跃"维度。
+	// TIPS: 客户 / Agent Bot 不在 webhook 推送范围（Bot 用长连接），所以这条主要覆盖
+	// Telegram 等 telegram 出站场景下"坐席在群内发文本"与"jgm:ticketassign"等业务消息。
+	if payload.MsgTime > 0 {
+		recordOutboundTicketMessage(appkey, payload)
 	}
 
 	ticket, err := newTicketStorageForOutbound().FindByTicketId(appkey, payload.Receiver)
@@ -177,6 +191,62 @@ func forwardTicketGroupMessageToTelegram(appkey string, ticket *storageModels.Ti
 	log.Printf("[WebhookMsgs] telegram forwarded appkey=%s inbox_id=%s ticket_id=%s target=%s msg_id=%s",
 		appkey, inbox.InboxId, ticket.TicketId, customer.Identifier, payload.MsgID)
 	return errs.IMErrorCode_SUCCESS
+}
+
+// recordOutboundTicketMessage 把 webhook 收到的群消息写入 ticket_messages 留痕；
+// 若 sender 是该工单的 assignee 则同步推进 last_user_msg_at。
+//
+// 字段语义：
+//   - ticket_messages：所有 webhook 入站消息均留痕（UpsertByMsgId 幂等）；
+//     sender_role 通过查 ticket 表判定（customer / user / bot）。
+//   - last_user_msg_at：仅"该工单的 assignee 向本工单群发送"时推进，customer / bot 自身不推进；
+//     用 GREATEST 防回退（DB 层）。
+//
+// TIPS: 该函数整体 best-effort —— 失败仅 slog，不阻断主流程；webhook 重投通过
+// UpsertByMsgId 幂等，已写过的行不会重复增长。
+//
+// ticket 找不到时直接 return——没有 ticket 的工单不该在 ticket_messages 留 orphan 行，
+// 否则后续 audit 查询会显示"幽灵消息"。这是与 webhook 主流程（"未关闭工单 → 静默丢"）
+// 保持一致的策略。
+func recordOutboundTicketMessage(appkey string, payload WebhookMessagePayload) {
+	if payload.MsgID == "" || payload.MsgTime == 0 {
+		return
+	}
+	ticket, err := newTicketStorageForOutbound().FindByTicketId(appkey, payload.Receiver)
+	if err != nil || ticket == nil {
+		// 工单不存在；不写 ticket_messages，避免"幽灵消息"。
+		return
+	}
+
+	role := storageModels.TicketEventOperatorUser
+	switch {
+	case ticket.SourceId == payload.Sender:
+		role = storageModels.TicketEventOperatorCustomer
+	case ticket.AssigneeId == payload.Sender:
+		role = storageModels.TicketEventOperatorUser
+	default:
+		// 兜底：bot 或未知身份都按 bot 处理，避免污染"坐席活跃"。
+		role = storageModels.TicketEventOperatorBot
+	}
+
+	if err := newMessageStorageForOutbound().UpsertByMsgId(storageModels.TicketMessage{
+		AppKey:      appkey,
+		TicketId:    payload.Receiver,
+		SenderId:    payload.Sender,
+		SenderRole:  role,
+		MsgId:       payload.MsgID,
+		MsgType:     payload.MsgType,
+		CreatedTime: payload.MsgTime,
+	}); err != nil {
+		log.Printf("[WebhookMsgRecorder] ticket_messages upsert 失败 msg_id=%s err=%v（继续）", payload.MsgID, err)
+	}
+
+	// 仅该工单 assignee 发消息时推进 last_user_msg_at
+	if ticket.AssigneeId != "" && ticket.AssigneeId == payload.Sender {
+		if err := updateLastUserMsgAtFn(appkey, payload.Receiver, payload.MsgTime); err != nil {
+			log.Printf("[WebhookMsgRecorder] updateLastUserMsgAt 失败 msg_id=%s err=%v（继续）", payload.MsgID, err)
+		}
+	}
 }
 
 func extractOutboundText(msgType, msgContent string) string {

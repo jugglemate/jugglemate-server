@@ -343,5 +343,133 @@ func TestProcessWebhookMessageCsatReplyInvalidJSON(t *testing.T) {
 	}
 }
 
+// ---- recordOutboundTicketMessage + webhook 重投 / 推进 last_user_msg_at ----
+
+type recordEnv struct {
+	ticket          *storageModels.Ticket
+	message         *mockMessageStorage
+	lastUserMsgAtMs []int64 // 记录每次推进的值
+}
+
+func setupRecordEnv(t *testing.T, ticket *storageModels.Ticket) *recordEnv {
+	t.Helper()
+	if ticket == nil {
+		ticket = &storageModels.Ticket{
+			AppKey:     "app_1",
+			TicketId:   "ticket_1",
+			SourceId:   "customer_1",
+			AssigneeId: "u_seat_1",
+		}
+	}
+	env := &recordEnv{
+		ticket:  ticket,
+		message: &mockMessageStorage{},
+	}
+	fk := &fakeTicketStorage{ticket: ticket}
+	oldTicket := newTicketStorageForOutbound
+	oldMsg := newMessageStorageForOutbound
+	oldUpdate := updateLastUserMsgAtFn
+	newTicketStorageForOutbound = func() storageModels.ITicketStorage { return fk }
+	newMessageStorageForOutbound = func() storageModels.ITicketMessageStorage { return env.message }
+	updateLastUserMsgAtFn = func(appkey, ticketId string, atMs int64) error {
+		env.lastUserMsgAtMs = append(env.lastUserMsgAtMs, atMs)
+		return nil
+	}
+	t.Cleanup(func() {
+		newTicketStorageForOutbound = oldTicket
+		newMessageStorageForOutbound = oldMsg
+		updateLastUserMsgAtFn = oldUpdate
+	})
+	return env
+}
+
+func TestRecordOutboundTicketMessageSeatMessageAdvancesLastUserMsgAt(t *testing.T) {
+	env := setupRecordEnv(t, nil)
+	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
+		Sender:     "u_seat_1",
+		Receiver:   "ticket_1",
+		MsgType:    "jg:text",
+		MsgID:      "msg_seat_1",
+		MsgTime:    1785300000000,
+	})
+	if env.message.last.MsgId != "msg_seat_1" {
+		t.Fatalf("ticket_messages 未写入：%+v", env.message.last)
+	}
+	if env.message.last.SenderRole != storageModels.TicketEventOperatorUser {
+		t.Fatalf("sender_role = %q, want user", env.message.last.SenderRole)
+	}
+	if len(env.lastUserMsgAtMs) != 1 || env.lastUserMsgAtMs[0] != 1785300000000 {
+		t.Fatalf("坐席消息应该推进 last_user_msg_at 一次：%v", env.lastUserMsgAtMs)
+	}
+}
+
+func TestRecordOutboundTicketMessageCustomerMessageDoesNotAdvance(t *testing.T) {
+	env := setupRecordEnv(t, nil)
+	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
+		Sender:     "customer_1", // 客户本人
+		Receiver:   "ticket_1",
+		MsgType:    "jg:text",
+		MsgID:      "msg_cust_1",
+		MsgTime:    1785300000000,
+	})
+	if env.message.last.SenderRole != storageModels.TicketEventOperatorCustomer {
+		t.Fatalf("sender_role = %q, want customer", env.message.last.SenderRole)
+	}
+	if len(env.lastUserMsgAtMs) != 0 {
+		t.Fatalf("客户消息不应推进 last_user_msg_at：%v", env.lastUserMsgAtMs)
+	}
+}
+
+func TestRecordOutboundTicketMessageBotMessageSkipsLastUserMsgAt(t *testing.T) {
+	env := setupRecordEnv(t, nil)
+	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
+		Sender:     "bot-xxx", // 不是 customer，也不是 assignee
+		Receiver:   "ticket_1",
+		MsgType:    "jgm:ticketassign",
+		MsgID:      "msg_bot_1",
+		MsgTime:    1785300000000,
+	})
+	if env.message.last.SenderRole != storageModels.TicketEventOperatorBot {
+		t.Fatalf("sender_role = %q, want bot", env.message.last.SenderRole)
+	}
+	if len(env.lastUserMsgAtMs) != 0 {
+		t.Fatalf("Bot 消息不应推进 last_user_msg_at：%v", env.lastUserMsgAtMs)
+	}
+}
+
+func TestRecordOutboundTicketMessageIdempotentByMsgID(t *testing.T) {
+	env := setupRecordEnv(t, nil)
+	// IM server 重投同一条消息两次；UpsertByMsgId 应被设计成幂等（DAO 层 ON CONFLICT）。
+	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
+		Sender: "u_seat_1", Receiver: "ticket_1", MsgType: "jg:text",
+		MsgID: "msg_retry", MsgTime: 1785300000000,
+	})
+	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
+		Sender: "u_seat_1", Receiver: "ticket_1", MsgType: "jg:text",
+		MsgID: "msg_retry", MsgTime: 1785300000000,
+	})
+	// mockMessageStorage 不去重（mock 简化），但 lastUserMsgAt 仍被调用两次 ——
+	// 这是 mock 行为；真实 DAO 走 ON CONFLICT 时 upsert 一次、UpdateLastUserMsgAt 也是
+	// GREATEST 语义重复调用是 no-op。我们只验证这里调用两次不 panic、字段正确。
+	if len(env.lastUserMsgAtMs) != 2 {
+		t.Fatalf("last_user_msg_at 应被调用 2 次（含重试），实际 %d", len(env.lastUserMsgAtMs))
+	}
+}
+
+func TestRecordOutboundTicketMessageEmptyMsgIDSkips(t *testing.T) {
+	env := setupRecordEnv(t, nil)
+	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
+		Sender: "u_seat_1", Receiver: "ticket_1", MsgType: "jg:text",
+		MsgID: "", // 空 msg_id 视为不可信，不留痕、不推进
+		MsgTime: 1785300000000,
+	})
+	if env.message.last.MsgId != "" {
+		t.Fatalf("空 msg_id 不应该留痕：%+v", env.message.last)
+	}
+	if len(env.lastUserMsgAtMs) != 0 {
+		t.Fatalf("空 msg_id 不应该推进 last_user_msg_at：%v", env.lastUserMsgAtMs)
+	}
+}
+
 // 防止 lint 报 context 未引用
 var _ = context.Background

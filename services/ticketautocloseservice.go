@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -153,7 +154,7 @@ func runAutoCloseOnce(ctx context.Context, idle time.Duration, nowMs int64) {
 			EventType:    storageModels.TicketEventTypeClose,
 			OperatorID:   "",
 			OperatorType: storageModels.TicketEventOperatorSystem,
-			Payload:      `{"reason":"idle_timeout","closed_at_ms":` + int64ToString(nowMs) + `}`,
+			Payload:      `{"reason":"idle_timeout","closed_at_ms":` + strconv.FormatInt(nowMs, 10) + `}`,
 			CreatedTime:  nowMs,
 		})
 
@@ -164,29 +165,6 @@ func runAutoCloseOnce(ctx context.Context, idle time.Duration, nowMs int64) {
 		}
 		log.Printf("[AutoClose] 关闭工单 ticket=%s closed_at=%d", r.TicketId, nowMs)
 	}
-}
-
-func int64ToString(v int64) string {
-	// 标准库 strconv.FormatInt(v, 10) 的最简实现；为避免再 import，写在小函数里。
-	if v == 0 {
-		return "0"
-	}
-	neg := v < 0
-	if neg {
-		v = -v
-	}
-	var buf [20]byte
-	i := len(buf)
-	for v > 0 {
-		i--
-		buf[i] = byte('0' + v%10)
-		v /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
 }
 
 // SetCsatNotifySender 已废弃：ticker 直接调 NotifyCsatInvitation，不再需要
