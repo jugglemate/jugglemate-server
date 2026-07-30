@@ -80,8 +80,10 @@ func ParseGranularity(g string) (string, error) {
 // GetStatsOverview 返回客服数据统计概览的全部数据。
 //
 // 三个子查询独立执行：totals / trend / channel_ranking；
-// 单独 GORM 子句处理"是否转过人工"在 Phase 1 固定返回 0，因为目前
-// tickets 表没有 handover_at 标记（见 SwitchTicketToHuman）。
+// 时间窗统一通过 tickets.created_time 过滤，转人工计数基于 is_human_taken_over 字段
+// —— 与 total_sessions / ai_resolved_sessions 保持同口径"时间窗内新建工单中…"。
+// 历史（此字段上线前的）工单 is_human_taken_over 默认为 false，因此上线后转人工数从 0
+// 开始累加是预期行为，不算回填。
 func GetStatsOverview(ctx context.Context, fromStr, toStr, granularity string) (errs.IMErrorCode, *apiModels.OverviewResp) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	if appkey == "" {
@@ -127,18 +129,22 @@ func GetStatsOverview(ctx context.Context, fromStr, toStr, granularity string) (
 // loadOverviewTotals 一次查询拉全部总量；用 FILTER 替代多条 SQL。
 func loadOverviewTotals(db *gorm.DB, appkey string, start, end time.Time) (apiModels.OverviewTotals, error) {
 	var row struct {
-		TotalSessions      int64
-		AIResolvedSessions int64
-		OpenSessions       int64
-		ClosedSessions     int64
+		TotalSessions       int64
+		AIResolvedSessions  int64
+		OpenSessions        int64
+		ClosedSessions      int64
+		TransferredToHuman  int64
 	}
 	// 注意：FILTER 语法是 PostgreSQL 特性。
+	// 转人工计数基于 is_human_taken_over 字段；与 total_sessions / ai_resolved 同口径
+	// （时间窗内新建工单中曾转人工的工单数）。
 	query := `
 		SELECT
 		  COUNT(*)                                                                  AS total_sessions,
 		  COUNT(*) FILTER (WHERE status=2 AND (assignee_id IS NULL OR assignee_id='')) AS ai_resolved_sessions,
 		  COUNT(*) FILTER (WHERE status IN (0,1,3))                                  AS open_sessions,
-		  COUNT(*) FILTER (WHERE status=2)                                           AS closed_sessions
+		  COUNT(*) FILTER (WHERE status=2)                                           AS closed_sessions,
+		  COUNT(*) FILTER (WHERE is_human_taken_over)                                AS transferred_to_human
 		FROM tickets
 		WHERE app_key=? AND created_time>=? AND created_time<?`
 	if err := db.Raw(query, appkey, start, end).Scan(&row).Error; err != nil {
@@ -149,8 +155,8 @@ func loadOverviewTotals(db *gorm.DB, appkey string, start, end time.Time) (apiMo
 		AIResolvedSessions:        row.AIResolvedSessions,
 		OpenSessions:              row.OpenSessions,
 		ClosedSessions:            row.ClosedSessions,
-		TransferredToHuman:        0,
-		TransferredToHumanPending: true,
+		TransferredToHuman:        row.TransferredToHuman,
+		TransferredToHumanPending: false,
 	}
 	if totals.TotalSessions > 0 {
 		totals.AIResolutionRate = float64(totals.AIResolvedSessions) * 100 / float64(totals.TotalSessions)
@@ -174,16 +180,19 @@ func loadOverviewTrend(db *gorm.DB, appkey string, start, end time.Time, granula
 		labelLayout = "2006-01-02 15"
 	}
 	type row struct {
-		Bucket     time.Time
-		Total      int64
-		AIResolved int64
+		Bucket            time.Time
+		Total             int64
+		AIResolved        int64
+		TransferredToHuman int64
 	}
 	var rows []row
+	// 转人工计数基于 is_human_taken_over，桶切分沿用 created_time（与 total / ai_resolved 同口径）。
 	query := fmt.Sprintf(`
 		SELECT
 		  date_trunc('%s', created_time) AS bucket,
 		  COUNT(*) AS total,
-		  COUNT(*) FILTER (WHERE status=2 AND (assignee_id IS NULL OR assignee_id='')) AS ai_resolved
+		  COUNT(*) FILTER (WHERE status=2 AND (assignee_id IS NULL OR assignee_id='')) AS ai_resolved,
+		  COUNT(*) FILTER (WHERE is_human_taken_over) AS transferred_to_human
 		FROM tickets
 		WHERE app_key=? AND created_time>=? AND created_time<?
 		GROUP BY bucket
@@ -197,7 +206,7 @@ func loadOverviewTrend(db *gorm.DB, appkey string, start, end time.Time, granula
 			Bucket:             r.Bucket.In(shanghaiLocation).Format(labelLayout),
 			Total:              r.Total,
 			AIResolved:         r.AIResolved,
-			TransferredToHuman: 0,
+			TransferredToHuman: r.TransferredToHuman,
 		})
 	}
 	return out, nil

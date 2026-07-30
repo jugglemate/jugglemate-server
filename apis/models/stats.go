@@ -2,8 +2,9 @@ package models
 
 // OverviewTotals 是客服数据统计概览的总量指标。
 //
-// 注意：TransferredToHuman 在 Phase 1 固定返回 0，配合 TransferredToHumanPending=true
-// 让前端可以先渲染 UI 骨架，等 Phase 2 加 tickets.handover_at 列后再切到真实值。
+// TransferredToHuman 自 2026-07-29 起接通真实数据（基于 tickets.is_human_taken_over 字段），
+// TransferredToHumanPending 始终为 false：字段上线前的历史工单 is_human_taken_over 默认为
+// false，因此上线后该指标从 0 开始累加是预期，不做历史回填。
 type OverviewTotals struct {
 	TotalSessions             int64   `json:"total_sessions"`
 	AIResolvedSessions        int64   `json:"ai_resolved_sessions"`
