@@ -351,6 +351,8 @@ type recordEnv struct {
 	lastUserMsgAtMs []int64 // 记录每次推进的值
 }
 
+// setupRecordEnv 用新重构的 InboundEventRecorder + GetInboundEventRecorder 钩子
+// 注入 mocks，模拟旧 recordOutboundTicketMessage 的行为。
 func setupRecordEnv(t *testing.T, ticket *storageModels.Ticket) *recordEnv {
 	t.Helper()
 	if ticket == nil {
@@ -366,32 +368,31 @@ func setupRecordEnv(t *testing.T, ticket *storageModels.Ticket) *recordEnv {
 		message: &mockMessageStorage{},
 	}
 	fk := &fakeTicketStorage{ticket: ticket}
-	oldTicket := newTicketStorageForOutbound
-	oldMsg := newMessageStorageForOutbound
-	oldUpdate := updateLastUserMsgAtFn
-	newTicketStorageForOutbound = func() storageModels.ITicketStorage { return fk }
-	newMessageStorageForOutbound = func() storageModels.ITicketMessageStorage { return env.message }
-	updateLastUserMsgAtFn = func(appkey, ticketId string, atMs int64) error {
-		env.lastUserMsgAtMs = append(env.lastUserMsgAtMs, atMs)
-		return nil
-	}
+	rec := NewInboundEventRecorder(
+		fk,
+		env.message,
+		func(appkey, ticketId string, atMs int64) error {
+			env.lastUserMsgAtMs = append(env.lastUserMsgAtMs, atMs)
+			return nil
+		},
+	)
+	oldRec := GetInboundEventRecorder()
+	SetInboundEventRecorderForTest(rec)
 	t.Cleanup(func() {
-		newTicketStorageForOutbound = oldTicket
-		newMessageStorageForOutbound = oldMsg
-		updateLastUserMsgAtFn = oldUpdate
+		SetInboundEventRecorderForTest(oldRec)
 	})
 	return env
 }
 
 func TestRecordOutboundTicketMessageSeatMessageAdvancesLastUserMsgAt(t *testing.T) {
 	env := setupRecordEnv(t, nil)
-	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
-		Sender:     "u_seat_1",
-		Receiver:   "ticket_1",
-		MsgType:    "jg:text",
-		MsgID:      "msg_seat_1",
-		MsgTime:    1785300000000,
-	})
+	GetInboundEventRecorder().RecordOnce(context.Background(), "app_1", WebhookMessagePayload{
+		Sender:   "u_seat_1",
+		Receiver: "ticket_1",
+		MsgType:  "jg:text",
+		MsgID:    "msg_seat_1",
+		MsgTime:  1785300000000,
+	}).Discard()
 	if env.message.last.MsgId != "msg_seat_1" {
 		t.Fatalf("ticket_messages 未写入：%+v", env.message.last)
 	}
@@ -405,13 +406,13 @@ func TestRecordOutboundTicketMessageSeatMessageAdvancesLastUserMsgAt(t *testing.
 
 func TestRecordOutboundTicketMessageCustomerMessageDoesNotAdvance(t *testing.T) {
 	env := setupRecordEnv(t, nil)
-	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
-		Sender:     "customer_1", // 客户本人
-		Receiver:   "ticket_1",
-		MsgType:    "jg:text",
-		MsgID:      "msg_cust_1",
-		MsgTime:    1785300000000,
-	})
+	GetInboundEventRecorder().RecordOnce(context.Background(), "app_1", WebhookMessagePayload{
+		Sender:   "customer_1", // 客户本人
+		Receiver: "ticket_1",
+		MsgType:  "jg:text",
+		MsgID:    "msg_cust_1",
+		MsgTime:  1785300000000,
+	}).Discard()
 	if env.message.last.SenderRole != storageModels.TicketEventOperatorCustomer {
 		t.Fatalf("sender_role = %q, want customer", env.message.last.SenderRole)
 	}
@@ -422,13 +423,13 @@ func TestRecordOutboundTicketMessageCustomerMessageDoesNotAdvance(t *testing.T) 
 
 func TestRecordOutboundTicketMessageBotMessageSkipsLastUserMsgAt(t *testing.T) {
 	env := setupRecordEnv(t, nil)
-	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
-		Sender:     "bot-xxx", // 不是 customer，也不是 assignee
-		Receiver:   "ticket_1",
-		MsgType:    "jgm:ticketassign",
-		MsgID:      "msg_bot_1",
-		MsgTime:    1785300000000,
-	})
+	GetInboundEventRecorder().RecordOnce(context.Background(), "app_1", WebhookMessagePayload{
+		Sender:   "bot-xxx", // 不是 customer，也不是 assignee
+		Receiver: "ticket_1",
+		MsgType:  "jgm:ticketassign",
+		MsgID:    "msg_bot_1",
+		MsgTime:  1785300000000,
+	}).Discard()
 	if env.message.last.SenderRole != storageModels.TicketEventOperatorBot {
 		t.Fatalf("sender_role = %q, want bot", env.message.last.SenderRole)
 	}
@@ -439,15 +440,16 @@ func TestRecordOutboundTicketMessageBotMessageSkipsLastUserMsgAt(t *testing.T) {
 
 func TestRecordOutboundTicketMessageIdempotentByMsgID(t *testing.T) {
 	env := setupRecordEnv(t, nil)
+	rec := GetInboundEventRecorder()
 	// IM server 重投同一条消息两次；UpsertByMsgId 应被设计成幂等（DAO 层 ON CONFLICT）。
-	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
+	rec.RecordOnce(context.Background(), "app_1", WebhookMessagePayload{
 		Sender: "u_seat_1", Receiver: "ticket_1", MsgType: "jg:text",
 		MsgID: "msg_retry", MsgTime: 1785300000000,
-	})
-	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
+	}).Discard()
+	rec.RecordOnce(context.Background(), "app_1", WebhookMessagePayload{
 		Sender: "u_seat_1", Receiver: "ticket_1", MsgType: "jg:text",
 		MsgID: "msg_retry", MsgTime: 1785300000000,
-	})
+	}).Discard()
 	// mockMessageStorage 不去重（mock 简化），但 lastUserMsgAt 仍被调用两次 ——
 	// 这是 mock 行为；真实 DAO 走 ON CONFLICT 时 upsert 一次、UpdateLastUserMsgAt 也是
 	// GREATEST 语义重复调用是 no-op。我们只验证这里调用两次不 panic、字段正确。
@@ -458,11 +460,11 @@ func TestRecordOutboundTicketMessageIdempotentByMsgID(t *testing.T) {
 
 func TestRecordOutboundTicketMessageEmptyMsgIDSkips(t *testing.T) {
 	env := setupRecordEnv(t, nil)
-	recordOutboundTicketMessage("app_1", WebhookMessagePayload{
+	GetInboundEventRecorder().RecordOnce(context.Background(), "app_1", WebhookMessagePayload{
 		Sender: "u_seat_1", Receiver: "ticket_1", MsgType: "jg:text",
 		MsgID: "", // 空 msg_id 视为不可信，不留痕、不推进
 		MsgTime: 1785300000000,
-	})
+	}).Discard()
 	if env.message.last.MsgId != "" {
 		t.Fatalf("空 msg_id 不应该留痕：%+v", env.message.last)
 	}
