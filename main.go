@@ -19,10 +19,6 @@ import (
 	"github.com/juggleim/jugglemate-server/services"
 )
 
-const (
-	csatInvitationMsgType = "jgm:csat"
-)
-
 func main() {
 	// init configure
 	if err := configures.InitConfigures(); err != nil {
@@ -58,20 +54,26 @@ func main() {
 
 	// TIPS: 自动关闭工单后发评价邀请卡（jgm:csat）。需要 IM Bot 长连接，但 services
 	// 不持有 IM SDK 直接引用，所以通过 services.SetCsatIMSender 注入一个桥接闭包。
-	botConn, botErr := agentModule.BotConnections()
-	if botErr != nil {
-		logs.Error("Get agent bot connections failed.", botErr)
-		os.Exit(1)
+	// 仅当 agent 模块启用时组装 csat IMSender 与后台 ticker；disabled 模式跳过。
+	tickerStopCtx, tickerCancel := context.WithCancel(context.Background())
+	if agentModule.Enabled() {
+		botConn, botErr := agentModule.BotConnections()
+		if botErr != nil {
+			logs.Error("Get agent bot connections failed.", botErr)
+			os.Exit(1)
+		}
+		services.SetCsatIMSender(func(ctx context.Context, appKey, botUserID, ticketId string, msgType string, payload interface{}) error {
+			// channelType 固定用群消息（telegram / widget / juggleim 都对应 group）。
+			_, err := botConn.SendCustomMessage(ctx, appKey, botUserID, ticketId,
+				pbobjs.ChannelType_Group, msgType, payload)
+			return err
+		})
+		// TIPS: 启动后台 ticker，按 last_user_msg_at 阈值关闭 + 发评价邀请卡。
+		// Shutdown 时显式 StopAutoCloseTicker 让 ticker goroutine 在 httpServer 关闭后能退出。
+		go services.StartAutoCloseTicker(tickerStopCtx, services.ConfigFromAppConfig(configures.Config.Agent))
+	} else {
+		tickerCancel() // 不启时也立刻释放 ctx，避免泄漏资源
 	}
-	services.SetCsatIMSender(func(ctx context.Context, appKey, botUserID, ticketId string, msgType string, payload interface{}) error {
-		// channelType 固定用群消息（telegram / widget / juggleim 都对应 group）。
-		_, err := botConn.SendCustomMessage(ctx, appKey, botUserID, ticketId,
-			pbobjs.ChannelType_Group, msgType, payload)
-		return err
-	})
-	// TIPS: 启动后台 ticker，按 last_user_msg_at 阈值关闭 + 发评价邀请卡。仅在
-	// agent 模块已 enabled（已启动）时跑。
-	go services.StartAutoCloseTicker(context.Background(), services.ConfigFromAppConfig(configures.Config.Agent))
 
 	httpServer := gin.Default()
 	agentModule.RegisterNativeRoutes(httpServer)
@@ -93,6 +95,10 @@ func main() {
 	}()
 
 	<-closeChan
+	// 停后台 ticker —— 必须在 agentModule.Stop 之前，避免 ticker 在 IM/DB 关闭后
+	// 还在跑导致 panic。
+	tickerCancel()
+	services.StopAutoCloseTicker()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	if err := agentModule.Stop(shutdownCtx); err != nil {
