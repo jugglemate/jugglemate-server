@@ -30,12 +30,12 @@ func MatchHandoffKeyword(text string) bool {
 	return ok
 }
 
-// handoffToHuman 由客户在 Ticket 群触发转人工：拉入坐席、广播通知并把 Agent Bot 移出群。
+// handoffToHuman 由客户在 Ticket 群触发转人工：拉入坐席、广播通知并视渠道决定是否移出 Bot。
 //
-// TIPS: 转人工是一次性的、不可逆的解绑动作 —— Bot 被移出群之后，IM 不再向它投递该群的
-// 任何消息，本服务也就彻底看不到这个工单了。后续的人工接待完全由坐席在 IM 群内自行完成，
-// 与 Agent 无关，因此这里不需要维护任何"人工态"标志：没有 Bot 在群里，也就没有需要静默的
-// 对象。这正是人工介入的 Redis 会话机制被整体移除的原因。
+// 非 Widget 渠道：Bot 被移出群后 IM 不再投递消息，后端不再感知该工单。
+// Widget 渠道：Bot 保留在群内以维持 WS 长连接，用于推进 last_user_msg_at
+// （5 分钟自动关闭依赖此字段）。此时 Bot 进入"旁观"模式——不再调用 LLM 推理，
+// 仅追踪坐席消息时间戳。
 func (service *Service) handoffToHuman(ctx context.Context, appKey, ticketID, botUserID string) error {
 	if service.humanHandoff == nil {
 		return messageError(500, "500_HUMAN_HANDOFF_NOT_CONFIGURED", "转人工能力未装配")

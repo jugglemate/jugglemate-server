@@ -45,9 +45,10 @@ type Ticket struct {
 	IsHumanTakenOver bool
 	HumanTakenOverAt int64
 	HumanTakenOverBy string
-	LastUserMsgAt    int64
-	ClosedAt         int64
-	CsatNotifiedAt   int64
+	LastUserMsgAt     int64
+	LastCustomerMsgAt int64
+	ClosedAt          int64
+	CsatNotifiedAt    int64
 	CreatedTime      int64
 	UpdatedTime      int64
 	AppKey           string
@@ -75,6 +76,9 @@ type ITicketStorage interface {
 	// UpdateLastUserMsgAt 只在 msg_time > 现有值时更新"坐席最后消息时间"，
 	// 防止历史消息回灌覆盖最新活跃时间。
 	UpdateLastUserMsgAt(appkey, ticketId string, atMs int64) error
+	// UpdateLastCustomerMsgAt 只在 msg_time > 现有值时更新"客户最后消息时间"，
+	// 用于判断"最后一句是谁说的"，防止客户发言后被误关。
+	UpdateLastCustomerMsgAt(appkey, ticketId string, atMs int64) error
 	// CloseByIdle 抢占式关闭工单。仅在 status=1 且 last_user_msg_at 早于
 	// 给定阈值时返回 (true, nil)；已被其他实例处理或状态变更则返回 (false, nil)。
 	CloseByIdle(appkey, ticketId string, idleMs int64, atMs int64) (bool, error)

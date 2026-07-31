@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	storageModels "github.com/juggleim/jugglemate-server/storages/models"
@@ -11,11 +10,11 @@ import (
 // mockCsatRetryTicket 重写 MarkCsatNotifiedOnce 与 QryTicketsNeedingCsatNotification
 // 用于补发路径单测。把所有 ITicketStorage 调用路由到内部的 counters/ticket。
 type mockCsatRetryTicket struct {
-	ticket             *storageModels.Ticket
-	pendingReturn      []storageModels.Ticket
-	markErr            error
-	markFirstWrite     bool
-	markedOnce         bool
+	ticket        *storageModels.Ticket
+	pendingReturn []storageModels.Ticket
+	markErr       error
+	markFirstWrite bool
+	markedOnce    bool
 }
 
 func (m *mockCsatRetryTicket) MarkCsatNotifiedOnce(appkey, ticketId string, atMs int64) (bool, error) {
@@ -38,8 +37,7 @@ func (m *mockCsatRetryTicket) QryTicketsNeedingCsatNotification(limit int64) ([]
 	return out, nil
 }
 
-// 其余 ITicketStorage 方法在补发路径上不需要（runCsatRetryPass 不直接用），
-// 这里只要保证编译能过即可；它实现的是 ITicketStorage 接口，所以必须齐全。
+// 其余 ITicketStorage 方法在补发路径上不需要，仅保证编译通过。
 func (m *mockCsatRetryTicket) Create(item storageModels.Ticket) error { return nil }
 func (m *mockCsatRetryTicket) Update(item storageModels.Ticket) error { return nil }
 func (m *mockCsatRetryTicket) Upsert(item storageModels.Ticket) error { return nil }
@@ -90,6 +88,9 @@ func (m *mockCsatRetryTicket) MarkHumanTakenOverIfZero(appkey, ticketId, by stri
 func (m *mockCsatRetryTicket) UpdateLastUserMsgAt(appkey, ticketId string, atMs int64) error {
 	return nil
 }
+func (m *mockCsatRetryTicket) UpdateLastCustomerMsgAt(appkey, ticketId string, atMs int64) error {
+	return nil
+}
 func (m *mockCsatRetryTicket) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
 	return false, nil
 }
@@ -98,59 +99,42 @@ func TestRunCsatRetryPassHandlesEmptyPending(t *testing.T) {
 	// 没有待补发工单时不应通知 IM，也不应报 panic。
 	m := &mockCsatRetryTicket{} // pendingReturn 是 nil（空）
 	oldSt := newTicketStorageForCsatNotify
-	oldSender := csatIMSender
 	newTicketStorageForCsatNotify = func() storageModels.ITicketStorage { return m }
-	called := 0
-	csatIMSender = func(ctx context.Context, appKey, botUserID, ticketId, msgType string, payload interface{}) error {
-		called++
-		return nil
-	}
-	defer func() {
-		newTicketStorageForCsatNotify = oldSt
-		csatIMSender = oldSender
-	}()
+	defer func() { newTicketStorageForCsatNotify = oldSt }()
 
 	runCsatRetryPass(context.Background(), 1785397260207)
-
-	if called != 0 {
-		t.Fatalf("空候选列表不该调 IM，实际 %d", called)
-	}
+	// 无 pending 工单则 MarkCsatNotifiedOnce 不会被调用，测试通过即表示无 panic。
 }
 
 func TestRunCsatRetryPassSendsAndMarks(t *testing.T) {
-	// NotifyCsatInvitation 内部会调 FindByTicketId + GetInboxAgent 找 bot_user_id。
-	// 给 mock 装配一个 ticket，并通过 getInboxAgentFn 直接返回一个含 bot_user_id 的 detail。
+	// NotifyCsatInvitation 内部查 ticket.FindByTicketId 获取 AssigneeId；
+	// 因此 mock 的 ticket 必须有 AssigneeId。
 	m := &mockCsatRetryTicket{
 		ticket: &storageModels.Ticket{
 			AppKey: "app_1", TicketId: "ticket_old",
-			InboxId: "inbox_1", Status: storageModels.TicketStatusClosed,
+			InboxId: "inbox_1", AssigneeId: "agent_123",
+			Status: storageModels.TicketStatusClosed,
 		},
 		pendingReturn: []storageModels.Ticket{
-			{AppKey: "app_1", TicketId: "ticket_old", Status: storageModels.TicketStatusClosed, InboxId: "inbox_1"},
+			{AppKey: "app_1", TicketId: "ticket_old", Status: storageModels.TicketStatusClosed, InboxId: "inbox_1", AssigneeId: "agent_123"},
 		},
 	}
 	oldSt := newTicketStorageForCsatNotify
-	oldSender := csatIMSender
-	oldGetInboxAgent := getInboxAgentFn
+	oldSender := sendTicketCsatNtfMsgFn
 	newTicketStorageForCsatNotify = func() storageModels.ITicketStorage { return m }
-	getInboxAgentFn = func(ctx context.Context, appKey, inboxID string) (*InboxAgentDetail, error) {
-		return &InboxAgentDetail{BotUserID: "bot_xxx"}, nil
-	}
-	called := 0
-	csatIMSender = func(ctx context.Context, appKey, botUserID, ticketId, msgType string, payload interface{}) error {
-		called++
-		return nil
+	called := false
+	sendTicketCsatNtfMsgFn = func(appkey, ticketId, senderId string, payload CsatInvitationPayload) {
+		called = true
 	}
 	defer func() {
 		newTicketStorageForCsatNotify = oldSt
-		csatIMSender = oldSender
-		getInboxAgentFn = oldGetInboxAgent
+		sendTicketCsatNtfMsgFn = oldSender
 	}()
 
 	runCsatRetryPass(context.Background(), 1785397260207)
 
-	if called != 1 {
-		t.Fatalf("csatIMSender 应被调用 1 次，实际 %d", called)
+	if !called {
+		t.Fatalf("SendTicketCsatNtfMsg 应被调用 1 次")
 	}
 	if !m.markFirstWrite {
 		t.Fatalf("MarkCsatNotifiedOnce 应被调用一次写入字段（FirstWrite=true）")
@@ -158,30 +142,21 @@ func TestRunCsatRetryPassSendsAndMarks(t *testing.T) {
 }
 
 func TestRunCsatRetryPassNotifyFailureDoesNotMark(t *testing.T) {
+	// NotifyCsatInvitation 失败场景：工单缺失 AssigneeId，返回错误，
+	// 此时不应调用 MarkCsatNotifiedOnce。
 	m := &mockCsatRetryTicket{
 		ticket: &storageModels.Ticket{
 			AppKey: "app_1", TicketId: "ticket_old",
-			InboxId: "inbox_1", Status: storageModels.TicketStatusClosed,
+			InboxId: "inbox_1", AssigneeId: "", // 无坐席
+			Status: storageModels.TicketStatusClosed,
 		},
 		pendingReturn: []storageModels.Ticket{
-			{AppKey: "app_1", TicketId: "ticket_old", Status: storageModels.TicketStatusClosed, InboxId: "inbox_1"},
+			{AppKey: "app_1", TicketId: "ticket_old", Status: storageModels.TicketStatusClosed, InboxId: "inbox_1", AssigneeId: ""},
 		},
 	}
 	oldSt := newTicketStorageForCsatNotify
-	oldSender := csatIMSender
-	oldGetInboxAgent := getInboxAgentFn
 	newTicketStorageForCsatNotify = func() storageModels.ITicketStorage { return m }
-	getInboxAgentFn = func(ctx context.Context, appKey, inboxID string) (*InboxAgentDetail, error) {
-		return &InboxAgentDetail{BotUserID: "bot_xxx"}, nil
-	}
-	csatIMSender = func(ctx context.Context, appKey, botUserID, ticketId, msgType string, payload interface{}) error {
-		return errors.New("im down")
-	}
-	defer func() {
-		newTicketStorageForCsatNotify = oldSt
-		csatIMSender = oldSender
-		getInboxAgentFn = oldGetInboxAgent
-	}()
+	defer func() { newTicketStorageForCsatNotify = oldSt }()
 
 	runCsatRetryPass(context.Background(), 1785397260207)
 

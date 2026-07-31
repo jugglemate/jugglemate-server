@@ -68,6 +68,10 @@ func (s *mockTicketStorageForHandoff) UpdateLastUserMsgAt(appkey, ticketId strin
 	return nil
 }
 
+func (s *mockTicketStorageForHandoff) UpdateLastCustomerMsgAt(appkey, ticketId string, atMs int64) error {
+	return nil
+}
+
 func (s *mockTicketStorageForHandoff) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
 	return false, nil
 }

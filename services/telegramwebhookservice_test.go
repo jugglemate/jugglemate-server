@@ -365,6 +365,9 @@ func (s *telegramFakeTicketStorage) MarkHumanTakenOverIfZero(appkey, ticketId, b
 func (s *telegramFakeTicketStorage) UpdateLastUserMsgAt(appkey, ticketId string, atMs int64) error {
 	return nil
 }
+func (s *telegramFakeTicketStorage) UpdateLastCustomerMsgAt(appkey, ticketId string, atMs int64) error {
+	return nil
+}
 func (s *telegramFakeTicketStorage) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
 	return false, nil
 }

@@ -16,10 +16,14 @@ import (
 
 var (
 	// 注入点：单测可替换
-	newTicketStorageForAutoClose     = storages.NewTicketStorage
-	newTicketEventStorageForAutoClose = storages.NewTicketEventStorage
+	newTicketStorageForAutoClose                 = storages.NewTicketStorage
+	newTicketEventStorageForAutoClose            = storages.NewTicketEventStorage
+	syncTicketGlobalConversationTagsForAutoClose = SyncTicketGlobalConversationTags
 	// fetchAutoCloseCandidates 注入"扫描候选"逻辑；
 	// 默认实现走 dbcommons.GetDb() + GORM raw SQL，单测可替换为内存 mock。
+	//
+	// 关闭条件：status=1 且坐席最后发言超过 idle 且客户最后发言不晚于坐席最后发言
+	// （即坐席说了最后一句）。客户说了最后一句的工单永不自动关闭。
 	fetchAutoCloseCandidates = func(ctx context.Context, cutoffMs int64) ([]autoCloseCandidate, error) {
 		db := dbcommons.GetDb()
 		if db == nil {
@@ -31,7 +35,8 @@ var (
 			FROM tickets
 			WHERE status = 1
 			  AND last_user_msg_at IS NOT NULL
-			  AND last_user_msg_at < ?
+			  AND last_user_msg_at < to_timestamp(?::bigint / 1000.0)
+			  AND (last_customer_msg_at IS NULL OR last_customer_msg_at < last_user_msg_at)
 			LIMIT 500`, cutoffMs).Scan(&rows).Error
 		return rows, err
 	}
@@ -110,11 +115,11 @@ func StopAutoCloseTicker() {
 }
 
 // runAutoCloseOnce 一次扫描：
-//   1. 查所有 last_user_msg_at 早于 (now - idle) 的工单（候选关闭）；
-//   2. 抢占式关闭（带 WHERE 条件）；
-//   3. 对抢到的工单发 jgm:csat 邀请卡；
-//   4. 扫"已关闭但 csat_notified_at IS NULL"的工单补发 jgm:csat
-//      （IM 暂时失联 / 上次发送失败场景下的补救），CAS 字段防并发重复发送。
+//  1. 查所有 坐席说了最后一句 且 last_user_msg_at 早于 (now - idle) 的工单；
+//  2. 抢占式关闭（带 WHERE 条件，含 last_customer_msg_at 判定）；
+//  3. 对抢到的工单发 jgm:csat 邀请卡；
+//  4. 扫"已关闭但 csat_notified_at IS NULL"的工单补发 jgm:csat
+//     （IM 暂时失联 / 上次发送失败场景下的补救），CAS 字段防并发重复发送。
 func runAutoCloseOnce(ctx context.Context, idle time.Duration, nowMs int64) {
 	db := dbcommons.GetDb()
 	if db == nil {
@@ -125,27 +130,49 @@ func runAutoCloseOnce(ctx context.Context, idle time.Duration, nowMs int64) {
 	idleMs := idle.Milliseconds()
 	cutoffMs := nowMs - idleMs
 
+	log.Printf("[AutoClose] 开始扫描 idle=%s cutoffMs=%d nowMs=%d", idle, cutoffMs, nowMs)
+
 	// 阶段 1：找出 candidates（最多 500 条，循环处理；超出下次 ticker 再扫）
 	rows, err := fetchAutoCloseCandidates(ctx, cutoffMs)
 	if err != nil {
 		log.Printf("[AutoClose] 扫描候选失败: %v", err)
-	} else {
+		return
+	}
+	log.Printf("[AutoClose] 扫描到 %d 个候选工单 cutoffMs=%d", len(rows), cutoffMs)
+	if len(rows) > 0 {
 		ticketStore := newTicketStorageForAutoClose()
+		closedCount := 0
+		skippedCount := 0
 		for _, r := range rows {
+			log.Printf("[AutoClose] 处理候选 ticket=%s appkey=%s", r.TicketId, r.AppKey)
+
 			// 阶段 2：抢占式关闭
 			closed, err := ticketStore.CloseByIdle(r.AppKey, r.TicketId, idleMs, nowMs)
 			if err != nil {
-				log.Printf("[AutoClose] CloseByIdle 失败 ticket=%s err=%v", r.TicketId, err)
+				log.Printf("[AutoClose] CloseByIdle 异常 ticket=%s err=%v", r.TicketId, err)
 				continue
 			}
 			if !closed {
-				// 已被其他实例/状态变更处理，跳过
+				log.Printf("[AutoClose] 未抢到关闭权 ticket=%s（已被其他实例处理或状态已变更）", r.TicketId)
+				skippedCount++
 				continue
+			}
+
+			log.Printf("[AutoClose] 关闭成功 ticket=%s idleMs=%d cutoffMs=%d", r.TicketId, idleMs, cutoffMs)
+
+			// 阶段 2.5：验证 DB 中的工单状态确实已变为 closed。
+			// 用于调试 tag 同步失败问题——如果 CloseByIdle 返回 true 但 DB 未落盘，
+			// 后续的 SyncTicketGlobalConversationTags 会读到旧状态。
+			if verifyTicket, verifyErr := ticketStore.FindByTicketId(r.AppKey, r.TicketId); verifyErr != nil {
+				log.Printf("[AutoClose] 关闭后验证 ticket 失败 ticket=%s err=%v", r.TicketId, verifyErr)
+			} else if verifyTicket != nil {
+				log.Printf("[AutoClose] 关闭后 ticket 状态 ticket=%s status=%d closed_at=%d",
+					r.TicketId, verifyTicket.Status, verifyTicket.ClosedAt)
 			}
 
 			// 阶段 3：ticket_events 写 close 事件
 			eventStore := newTicketEventStorageForAutoClose()
-			_ = eventStore.Create(storageModels.TicketEvent{
+			if err := eventStore.Create(storageModels.TicketEvent{
 				AppKey:       r.AppKey,
 				TicketId:     r.TicketId,
 				EventType:    storageModels.TicketEventTypeClose,
@@ -153,15 +180,40 @@ func runAutoCloseOnce(ctx context.Context, idle time.Duration, nowMs int64) {
 				OperatorType: storageModels.TicketEventOperatorSystem,
 				Payload:      `{"reason":"idle_timeout","closed_at_ms":` + strconv.FormatInt(nowMs, 10) + `}`,
 				CreatedTime:  nowMs,
-			})
+			}); err != nil {
+				log.Printf("[AutoClose] 写 close 事件失败 ticket=%s err=%v", r.TicketId, err)
+			} else {
+				log.Printf("[AutoClose] 写 close 事件成功 ticket=%s", r.TicketId)
+			}
 
-			// 阶段 4：发 jgm:csat 邀请卡；通知失败时 csat_notified_at 仍保持 NULL，
-			// 下次 ticker 自动重试。
+			// 阶段 4：同步关闭标签
+			log.Printf("[AutoClose] 开始同步关闭标签 ticket=%s", r.TicketId)
+			if code := syncTicketGlobalConversationTagsForAutoClose(r.AppKey, r.TicketId); code != 0 {
+				log.Printf("[AutoClose] 同步关闭标签失败 ticket=%s code=%d", r.TicketId, code)
+			} else {
+				log.Printf("[AutoClose] 同步关闭标签成功 ticket=%s", r.TicketId)
+			}
+
+			// 阶段 5：发 jgm:csat 邀请卡；通知失败时 csat_notified_at 仍保持 NULL，
+			// 下次 ticker 自动重试。成功后立即标记 csat_notified_at，避免
+			// runCsatRetryPass 在同一轮扫描中重复发送。
+			log.Printf("[AutoClose] 开始发送 csat 邀请 ticket=%s", r.TicketId)
 			if err := NotifyCsatInvitation(ctx, r.AppKey, r.TicketId, nowMs); err != nil {
 				log.Printf("[AutoClose] 发 csat 邀请失败 ticket=%s err=%v（下次 ticker 重试）", r.TicketId, err)
+			} else {
+				marked, markErr := ticketStore.MarkCsatNotifiedOnce(r.AppKey, r.TicketId, nowMs)
+				if markErr != nil {
+					log.Printf("[AutoClose] 标记 csat_notified_at 失败 ticket=%s err=%v", r.TicketId, markErr)
+				} else if !marked {
+					log.Printf("[AutoClose] 标记 csat_notified_at 跳过 ticket=%s（已被标记）", r.TicketId)
+				} else {
+					log.Printf("[AutoClose] 标记 csat_notified_at 成功 ticket=%s", r.TicketId)
+				}
 			}
-			log.Printf("[AutoClose] 关闭工单 ticket=%s closed_at=%d", r.TicketId, nowMs)
+			closedCount++
+			log.Printf("[AutoClose] 工单关闭完成 ticket=%s closed_at=%d", r.TicketId, nowMs)
 		}
+		log.Printf("[AutoClose] 本轮扫描完成 closed=%d skipped=%d idleMs=%d", closedCount, skippedCount, idleMs)
 	}
 
 	// 阶段 5：csat 补发扫描 —— 已关闭但 csat_notified_at IS NULL 的工单
@@ -181,17 +233,25 @@ func runCsatRetryPass(ctx context.Context, nowMs int64) {
 	ticketStore := newTicketStorageForCsatNotify()
 	pending, err := ticketStore.QryTicketsNeedingCsatNotification(50)
 	if err != nil {
-		log.Printf("[AutoClose] 扫描未发邀请工单失败: %v", err)
+		log.Printf("[AutoClose][CsatRetry] 扫描未发邀请工单失败: %v", err)
 		return
 	}
+	log.Printf("[AutoClose][CsatRetry] 扫描到 %d 个 csat 未通知工单", len(pending))
 	for _, t := range pending {
+		log.Printf("[AutoClose][CsatRetry] 重发 csat ticket=%s appkey=%s status=%d closed_at=%d csat_notified_at=%d",
+			t.TicketId, t.AppKey, t.Status, t.ClosedAt, t.CsatNotifiedAt)
 		if err := NotifyCsatInvitation(ctx, t.AppKey, t.TicketId, nowMs); err != nil {
-			log.Printf("[AutoClose] 重发 csat 邀请失败 ticket=%s err=%v（下次 ticker 再试）", t.TicketId, err)
+			log.Printf("[AutoClose][CsatRetry] 重发 csat 邀请失败 ticket=%s err=%v（下次 ticker 再试）", t.TicketId, err)
 			continue
 		}
 		// 标记已发。CAS 字段，多实例下只会有一个成功；其余不会有并发问题。
-		if _, err := ticketStore.MarkCsatNotifiedOnce(t.AppKey, t.TicketId, nowMs); err != nil {
-			log.Printf("[AutoClose] MarkCsatNotifiedOnce 失败 ticket=%s err=%v（下次 ticker 再发一次）", t.TicketId, err)
+		marked, err := ticketStore.MarkCsatNotifiedOnce(t.AppKey, t.TicketId, nowMs)
+		if err != nil {
+			log.Printf("[AutoClose][CsatRetry] MarkCsatNotifiedOnce 失败 ticket=%s err=%v", t.TicketId, err)
+		} else if !marked {
+			log.Printf("[AutoClose][CsatRetry] MarkCsatNotifiedOnce 跳过 ticket=%s（已被标记）", t.TicketId)
+		} else {
+			log.Printf("[AutoClose][CsatRetry] csat 重发成功 ticket=%s", t.TicketId)
 		}
 	}
 }

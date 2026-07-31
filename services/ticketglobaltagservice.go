@@ -1,6 +1,7 @@
 package services
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -47,36 +48,49 @@ func SyncTicketGlobalConversationTags(appkey, ticketId string) errs.IMErrorCode 
 	appkey = strings.TrimSpace(appkey)
 	ticketId = strings.TrimSpace(ticketId)
 	if appkey == "" || ticketId == "" {
+		log.Printf("[TagSync] 参数错误 appkey=%s ticket=%s", appkey, ticketId)
 		return errs.IMErrorCode_APP_ParamError
 	}
 
 	ticket, err := newTicketStorageForGlobalTags().FindByTicketId(appkey, ticketId)
 	if err != nil {
+		log.Printf("[TagSync] ticket 查询失败 ticket=%s err=%v", ticketId, err)
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
 	}
 	if ticket == nil {
+		log.Printf("[TagSync] ticket 不存在 ticket=%s", ticketId)
 		return errs.IMErrorCode_APP_ParamError
 	}
+	log.Printf("[TagSync] ticket 信息 ticket=%s status=%d assignee=%s source=%s",
+		ticketId, ticket.Status, ticket.AssigneeId, ticket.SourceId)
 	tags, ok := ticketGlobalConversationTags(ticket)
 	if !ok {
+		log.Printf("[TagSync] 标签生成失败 ticket=%s status=%d", ticketId, ticket.Status)
 		return errs.IMErrorCode_APP_ParamError
 	}
+	log.Printf("[TagSync] 标签内容 ticket=%s tags=%v", ticketId, tags)
 
 	sdk := getImSdkForTicketGlobalTags(appkey)
 	if sdk == nil {
+		log.Printf("[TagSync] IM SDK 不可用 ticket=%s appkey=%s", ticketId, appkey)
 		return errs.IMErrorCode_APP_NOT_EXISTED
 	}
+	log.Printf("[TagSync] 请求 IM Server: ticket=%s conver_id=%s channel_type=%d tags=%v",
+		ticketId, ticket.TicketId, int(juggleimsdk.ChannelType_Group), tags)
 	code, _, err := setGlobalConverTagsForTicket(sdk, globalConverTagsRequest{
 		ConverID:         ticket.TicketId,
 		ChannelType:      int(juggleimsdk.ChannelType_Group),
 		GlobalConverTags: &tags,
 	})
 	if err != nil {
+		log.Printf("[TagSync] 设置标签失败 ticket=%s err=%v", ticketId, err)
 		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
 	}
 	if code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
+		log.Printf("[TagSync] 设置标签非成功码 ticket=%s code=%d", ticketId, code)
 		return errs.IMErrorCode(code)
 	}
+	log.Printf("[TagSync] 标签同步成功 ticket=%s", ticketId)
 	return errs.IMErrorCode_SUCCESS
 }
 

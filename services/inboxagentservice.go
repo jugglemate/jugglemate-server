@@ -286,6 +286,13 @@ func SwitchTicketToHuman(ctx context.Context, appKey, ticketID, botUserID string
 		Where("app_key=? AND ticket_id=?", appKey, ticketID).Take(&inboxID).Error; err != nil {
 		return fmt.Errorf("查询 Ticket 所属 Inbox 失败 ticket=%s: %w", ticketID, err)
 	}
+	// Widget 渠道保持 Bot 在群内：WS 长连接需要持续收到坐席消息以推进 last_user_msg_at，
+	// 用于 5 分钟自动关闭 ticker。非 Widget 渠道保持原有"Bot 退群"行为不变。
+	var channelType string
+	if err := db.WithContext(ctx).Table("inboxes").Select("channel_type").
+		Where("app_key=? AND inbox_id=?", appKey, inboxID).Take(&channelType).Error; err != nil {
+		log.Printf("[AgentHandoff] 查询 inbox channel_type 失败 inbox=%s err=%v（非 fatal，按非 Widget 处理）", inboxID, err)
+	}
 	sdk := getImSdkForInboxAgent(appKey)
 	if sdk == nil {
 		return fmt.Errorf("无法使用 AppKey %s 初始化 IM SDK", appKey)
@@ -303,14 +310,18 @@ func SwitchTicketToHuman(ctx context.Context, appKey, ticketID, botUserID string
 		}
 	}
 	SendTicketHumanTakeoverNtfMsg(appKey, ticketID, botUserID)
-	if botUserID != "" {
+	// Widget 渠道：Bot 不退群，保持 WS 长连接以推进 last_user_msg_at（5 分钟自动关闭依赖此字段）
+	if channelType == "widget" {
+		log.Printf("[AgentHandoff] Widget 渠道 Bot 不退群 appkey=%s ticket_id=%s bot=%s（保持 last_user_msg_at 更新链路）",
+			appKey, ticketID, botUserID)
+	} else if botUserID != "" {
 		code, _, delErr := removeInboxAgentFromGroup(sdk, juggleimsdk.GroupMembersReq{GroupId: ticketID, MemberIds: []string{botUserID}})
 		if delErr != nil || code != juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS) {
 			return ticketGroupSyncError("转人工时从 Ticket 群移除 Agent Bot 失败", ticketID, code, delErr)
 		}
 	}
-	log.Printf("[AgentHandoff] 转人工完成 appkey=%s ticket_id=%s seats=%d bot_removed=%t",
-		appKey, ticketID, len(seatIDs), botUserID != "")
+	log.Printf("[AgentHandoff] 转人工完成 appkey=%s ticket_id=%s seats=%d bot_removed=%t channel_type=%s",
+		appKey, ticketID, len(seatIDs), channelType != "widget" && botUserID != "", channelType)
 	return nil
 }
 

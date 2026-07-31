@@ -799,6 +799,10 @@ func (s *mockTicketStorage) UpdateLastUserMsgAt(appkey, ticketId string, atMs in
 	return nil
 }
 
+func (s *mockTicketStorage) UpdateLastCustomerMsgAt(appkey, ticketId string, atMs int64) error {
+	return nil
+}
+
 func (s *mockTicketStorage) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
 	return false, nil
 }

@@ -105,18 +105,30 @@ func DefaultAdvanceLastUserMsgAt(appkey, ticketId string, atMs int64) error {
 // 业务层做语义判断（"是否为坐席"），storage 层做并发安全（GREATEST）。
 func (r *InboundEventRecorder) RecordOnce(_ context.Context, appkey string, payload WebhookMessagePayload) UnreliableOp {
 	if payload.MsgID == "" || payload.MsgTime == 0 {
+		log.Printf("[WebhookRecord] 跳过：msg_id 或 msg_time 缺失 appkey=%s ticket=%s sender=%s msg_id=%s msg_time=%d",
+			appkey, payload.Receiver, payload.Sender, payload.MsgID, payload.MsgTime)
 		return UnreliableOp{desc: "msg_id_or_time_missing"}
 	}
 	ticket, err := r.tickets.FindByTicketId(appkey, payload.Receiver)
 	if err != nil {
+		log.Printf("[WebhookRecord] ticket 查询失败 appkey=%s ticket=%s msg_id=%s err=%v",
+			appkey, payload.Receiver, payload.MsgID, err)
 		return UnreliableOp{err: err, msgId: payload.MsgID, desc: "ticket_find"}
 	}
 	if ticket == nil {
 		// 工单不存在；不写 ticket_messages，避免"幽灵消息"。
+		log.Printf("[WebhookRecord] 跳过：工单不存在 appkey=%s ticket=%s msg_id=%s sender=%s",
+			appkey, payload.Receiver, payload.MsgID, payload.Sender)
 		return UnreliableOp{desc: "ticket_not_found"}
 	}
 
+	log.Printf("[WebhookRecord] ticket 信息 appkey=%s ticket=%s status=%d assignee=%s source=%s msg_type=%s",
+		appkey, ticket.TicketId, ticket.Status, ticket.AssigneeId, ticket.SourceId, payload.MsgType)
+
 	role := ClassifySenderRole(ticket, payload.Sender)
+	log.Printf("[WebhookRecord] 角色判定 ticket=%s sender=%s role=%s assignee_id=%s source_id=%s",
+		ticket.TicketId, payload.Sender, role, ticket.AssigneeId, ticket.SourceId)
+
 	if err := r.messages.UpsertByMsgId(storageModels.TicketMessage{
 		AppKey:      appkey,
 		TicketId:    payload.Receiver,
@@ -126,14 +138,34 @@ func (r *InboundEventRecorder) RecordOnce(_ context.Context, appkey string, payl
 		MsgType:     payload.MsgType,
 		CreatedTime: payload.MsgTime,
 	}); err != nil {
+		log.Printf("[WebhookRecord] ticket_messages 写入失败 ticket=%s msg_id=%s err=%v",
+			ticket.TicketId, payload.MsgID, err)
 		return UnreliableOp{err: err, msgId: payload.MsgID, desc: "ticket_messages_upsert"}
 	}
 
-	// 仅坐席消息推进 last_user_msg_at（保持"坐席活跃"语义）
-	if ticket.AssigneeId != "" && ticket.AssigneeId == payload.Sender {
+	// 按角色推进对应的时间戳：
+	//   - 坐席 → last_user_msg_at（5 分钟空闲判断基准）
+	//   - 客户 → last_customer_msg_at（判断"最后一句是谁说的"）
+	switch role {
+	case storageModels.TicketEventOperatorUser:
+		log.Printf("[WebhookRecord] 推进 last_user_msg_at ticket=%s assignee=%s msg_time=%d ms",
+			ticket.TicketId, ticket.AssigneeId, payload.MsgTime)
 		if err := r.advanceOp(appkey, payload.Receiver, payload.MsgTime); err != nil {
+			log.Printf("[WebhookRecord] 推进 last_user_msg_at 失败 ticket=%s msg_id=%s msg_time=%d err=%v",
+				ticket.TicketId, payload.MsgID, payload.MsgTime, err)
 			return UnreliableOp{err: err, msgId: payload.MsgID, desc: "update_last_user_msg_at"}
 		}
+	case storageModels.TicketEventOperatorCustomer:
+		log.Printf("[WebhookRecord] 推进 last_customer_msg_at ticket=%s source=%s msg_time=%d ms",
+			ticket.TicketId, ticket.SourceId, payload.MsgTime)
+		if err := r.tickets.UpdateLastCustomerMsgAt(appkey, payload.Receiver, payload.MsgTime); err != nil {
+			log.Printf("[WebhookRecord] 推进 last_customer_msg_at 失败 ticket=%s msg_id=%s msg_time=%d err=%v",
+				ticket.TicketId, payload.MsgID, payload.MsgTime, err)
+			// 客户时间戳写入失败不阻断主流程——降级为"可能误关"而非"webhook 报错"
+		}
+	default:
+		log.Printf("[WebhookRecord] 不推进时间戳 ticket=%s sender=%s role=%s（bot/系统消息）",
+			ticket.TicketId, payload.Sender, role)
 	}
 	return UnreliableOp{desc: "ok"}
 }

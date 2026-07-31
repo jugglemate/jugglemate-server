@@ -6,8 +6,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/juggleim/jugglemate-server/commons/errs"
 	storageModels "github.com/juggleim/jugglemate-server/storages/models"
 )
+
+func TestAutoCloseCutoffUsesTimeValue(t *testing.T) {
+	cutoffMs := int64(1785401409116)
+	cutoffAt := time.UnixMilli(cutoffMs)
+	if cutoffAt.UnixMilli() != cutoffMs {
+		t.Fatalf("UnixMilli roundtrip = %d, want %d", cutoffAt.UnixMilli(), cutoffMs)
+	}
+}
 
 type mockTickerTicket struct {
 	tickets        map[string]*storageModels.Ticket
@@ -65,6 +74,9 @@ func (m *mockTickerTicket) MarkHumanTakenOverIfZero(appkey, ticketId, by string,
 func (m *mockTickerTicket) UpdateLastUserMsgAt(appkey, ticketId string, atMs int64) error {
 	return nil
 }
+func (m *mockTickerTicket) UpdateLastCustomerMsgAt(appkey, ticketId string, atMs int64) error {
+	return nil
+}
 func (m *mockTickerTicket) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
 	atomic.AddInt32(&m.closeCallCount, 1)
 	m.closedByIdle = append(m.closedByIdle, ticketId)
@@ -111,11 +123,17 @@ func TestRunAutoCloseOnceClosesStaleTickets(t *testing.T) {
 
 	oldTicket := newTicketStorageForAutoClose
 	oldEvent := newTicketEventStorageForAutoClose
+	oldSyncTags := syncTicketGlobalConversationTagsForAutoClose
 	oldFetch := fetchAutoCloseCandidates
 	oldCsatNotifyTicket := newTicketStorageForCsatNotify
-	oldGetInboxAgent := getInboxAgentFn
 	newTicketStorageForAutoClose = func() storageModels.ITicketStorage { return ticketStore }
 	newTicketEventStorageForAutoClose = func() storageModels.ITicketEventStorage { return eventStore }
+	syncTicketGlobalConversationTagsForAutoClose = func(appkey, ticketId string) errs.IMErrorCode {
+		if appkey == "app_1" && ticketId == "ticket_old" {
+			return errs.IMErrorCode_SUCCESS
+		}
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
+	}
 	newTicketStorageForCsatNotify = func() storageModels.ITicketStorage { return ticketStore }
 	fetchAutoCloseCandidates = func(ctx context.Context, cutoffMs int64) ([]autoCloseCandidate, error) {
 		out := []autoCloseCandidate{}
@@ -126,22 +144,20 @@ func TestRunAutoCloseOnceClosesStaleTickets(t *testing.T) {
 		}
 		return out, nil
 	}
+	oldCsatSender := sendTicketCsatNtfMsgFn
+	sendTicketCsatNtfMsgFn = func(appkey, ticketId, senderId string, payload CsatInvitationPayload) {}
 	defer func() {
 		newTicketStorageForAutoClose = oldTicket
 		newTicketEventStorageForAutoClose = oldEvent
+		syncTicketGlobalConversationTagsForAutoClose = oldSyncTags
 		fetchAutoCloseCandidates = oldFetch
 		newTicketStorageForCsatNotify = oldCsatNotifyTicket
-		getInboxAgentFn = oldGetInboxAgent
+		sendTicketCsatNtfMsgFn = oldCsatSender
 	}()
 
-	// stub csatIMSender —— 走 NotifyCsatInvitation 但 inbox/bot 找不到，
-	// 应被吞掉、关闭不影响。
-	csatIMSenderWas := csatIMSender
-	csatIMSender = func(ctx context.Context, appKey, botUserID, ticketId, msgType string, payload interface{}) error {
-		return nil
-	}
-	defer func() { csatIMSender = csatIMSenderWas }()
-
+	// jgm:csat 现已通过 IM REST API 发送（SendTicketCsatNtfMsg），
+	// 测试中 stubbed 为空操作。NotifyCsatInvitation 需要 ticket 有 AssigneeId
+	// 才能成功；测试数据无 assignee → 返回错误 → 不会误标记 csat_notified_at。
 	runAutoCloseOnce(context.Background(), 5*time.Minute, nowMs)
 
 	if atomic.LoadInt32(&ticketStore.closeCallCount) != 1 {
@@ -178,22 +194,20 @@ func TestRunAutoCloseOnceNoDB(t *testing.T) {
 	oldEvent := newTicketEventStorageForAutoClose
 	oldFetch := fetchAutoCloseCandidates
 	oldCsatNotifyTicket := newTicketStorageForCsatNotify
-	csatIMSenderWas := csatIMSender
 	newTicketStorageForAutoClose = func() storageModels.ITicketStorage { return ticketStore }
 	newTicketEventStorageForAutoClose = func() storageModels.ITicketEventStorage { return eventStore }
 	newTicketStorageForCsatNotify = func() storageModels.ITicketStorage { return ticketStore }
 	fetchAutoCloseCandidates = func(ctx context.Context, cutoffMs int64) ([]autoCloseCandidate, error) {
 		return nil, nil // db==nil 路径等价：包级注入直接返回空
 	}
-	csatIMSender = func(ctx context.Context, appKey, botUserID, ticketId, msgType string, payload interface{}) error {
-		return nil
-	}
+	oldCsatSender := sendTicketCsatNtfMsgFn
+	sendTicketCsatNtfMsgFn = func(appkey, ticketId, senderId string, payload CsatInvitationPayload) {}
 	defer func() {
 		newTicketStorageForAutoClose = oldTicket
 		newTicketEventStorageForAutoClose = oldEvent
 		fetchAutoCloseCandidates = oldFetch
 		newTicketStorageForCsatNotify = oldCsatNotifyTicket
-		csatIMSender = csatIMSenderWas
+		sendTicketCsatNtfMsgFn = oldCsatSender
 	}()
 
 	runAutoCloseOnce(context.Background(), 5*time.Minute, nowMs)

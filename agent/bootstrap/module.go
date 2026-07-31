@@ -293,8 +293,7 @@ func (module *Module) Redis() (*redis.Client, error) {
 	return module.redis, nil
 }
 
-// BotConnections 返回 IM Bot 长连接管理器，供 main.go 在装配 csatIMSender
-// 时调用 SendCustomMessage。
+// BotConnections 返回 IM Bot 长连接管理器。供 handleInbound 等内部模块使用。
 func (module *Module) BotConnections() (*messageimbot.Manager, error) {
 	module.mu.RLock()
 	defer module.mu.RUnlock()

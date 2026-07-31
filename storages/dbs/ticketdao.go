@@ -2,6 +2,7 @@ package dbs
 
 import (
 	"errors"
+	"log"
 	"time"
 
 	"github.com/juggleim/jugglemate-server/commons/dbcommons"
@@ -22,8 +23,9 @@ type TicketDao struct {
 	IsHumanTakenOver bool      `gorm:"is_human_taken_over"`
 	HumanTakenOverAt time.Time `gorm:"human_taken_over_at"`
 	HumanTakenOverBy string    `gorm:"human_taken_over_by"`
-	LastUserMsgAt    *time.Time `gorm:"last_user_msg_at"`
-	ClosedAt         *time.Time `gorm:"closed_at"`
+	LastUserMsgAt     *time.Time `gorm:"last_user_msg_at"`
+	LastCustomerMsgAt *time.Time `gorm:"last_customer_msg_at"`
+	ClosedAt          *time.Time `gorm:"closed_at"`
 	CsatNotifiedAt   *time.Time `gorm:"csat_notified_at"`
 	CreatedTime      time.Time `gorm:"created_time"`
 	UpdatedTime      time.Time `gorm:"updated_time"`
@@ -58,6 +60,9 @@ func (d *TicketDao) toModel() *models.Ticket {
 	}
 	if d.LastUserMsgAt != nil && !d.LastUserMsgAt.IsZero() {
 		item.LastUserMsgAt = d.LastUserMsgAt.UnixMilli()
+	}
+	if d.LastCustomerMsgAt != nil && !d.LastCustomerMsgAt.IsZero() {
+		item.LastCustomerMsgAt = d.LastCustomerMsgAt.UnixMilli()
 	}
 	if d.ClosedAt != nil && !d.ClosedAt.IsZero() {
 		item.ClosedAt = d.ClosedAt.UnixMilli()
@@ -350,6 +355,18 @@ func (d *TicketDao) UpdateLastUserMsgAt(appkey, ticketId string, atMs int64) err
 	at := time.UnixMilli(atMs)
 	db := dbcommons.GetDb()
 	dialect := db.Dialector.Name()
+
+	// 查询当前 last_user_msg_at 用于日志对比
+	var oldTicket TicketDao
+	oldVal := "NULL"
+	if err := db.Where("app_key=? AND ticket_id=?", appkey, ticketId).First(&oldTicket).Error; err == nil {
+		if oldTicket.LastUserMsgAt != nil {
+			oldVal = oldTicket.LastUserMsgAt.Format(time.RFC3339)
+		}
+	} else {
+		oldVal = "ERR:" + err.Error()
+	}
+
 	var query string
 	var args []interface{}
 	switch dialect {
@@ -370,18 +387,69 @@ func (d *TicketDao) UpdateLastUserMsgAt(appkey, ticketId string, atMs int64) err
 			WHERE app_key=? AND ticket_id=?`
 		args = []interface{}{at, at, at, appkey, ticketId}
 	}
-	return db.Exec(query, args...).Error
+	err := db.Exec(query, args...).Error
+
+	log.Printf("[DB][UpdateLastUserMsgAt] ticket=%s old_last_user_msg_at=%s input_atMs=%d input_time=%s dialect=%s err=%v",
+		ticketId, oldVal, atMs, at.Format(time.RFC3339), dialect, err)
+
+	return err
 }
 
-// CloseByIdle 抢占式关闭：仅在 status=1 且 last_user_msg_at < cutoff 时执行；
+// UpdateLastCustomerMsgAt 在 atMs 大于当前 last_customer_msg_at 时才覆盖。
+// 与 UpdateLastUserMsgAt 同语义：GREATEST 防历史消息回灌倒退。
+func (d *TicketDao) UpdateLastCustomerMsgAt(appkey, ticketId string, atMs int64) error {
+	at := time.UnixMilli(atMs)
+	db := dbcommons.GetDb()
+	dialect := db.Dialector.Name()
+
+	// 查询当前 last_customer_msg_at 用于日志对比
+	var oldTicket TicketDao
+	oldVal := "NULL"
+	if err := db.Where("app_key=? AND ticket_id=?", appkey, ticketId).First(&oldTicket).Error; err == nil {
+		if oldTicket.LastCustomerMsgAt != nil {
+			oldVal = oldTicket.LastCustomerMsgAt.Format(time.RFC3339)
+		}
+	} else {
+		oldVal = "ERR:" + err.Error()
+	}
+
+	var query string
+	var args []interface{}
+	switch dialect {
+	case "postgres":
+		query = `UPDATE tickets
+			SET last_customer_msg_at = GREATEST(COALESCE(last_customer_msg_at, $1::timestamptz), $2::timestamptz),
+			    updated_time = now()
+			WHERE app_key=$3 AND ticket_id=$4`
+		args = []interface{}{at, at, appkey, ticketId}
+	default:
+		query = `UPDATE tickets
+			SET last_customer_msg_at = CASE
+			    WHEN last_customer_msg_at IS NULL THEN ?
+			    WHEN last_customer_msg_at < ? THEN ?
+			    ELSE last_customer_msg_at
+			END,
+			updated_time = NOW()
+			WHERE app_key=? AND ticket_id=?`
+		args = []interface{}{at, at, at, appkey, ticketId}
+	}
+	err := db.Exec(query, args...).Error
+
+	log.Printf("[DB][UpdateLastCustomerMsgAt] ticket=%s old_last_customer_msg_at=%s input_atMs=%d input_time=%s dialect=%s err=%v",
+		ticketId, oldVal, atMs, at.Format(time.RFC3339), dialect, err)
+
+	return err
+}
+
+// CloseByIdle 抢占式关闭：仅在 status=1 且 last_user_msg_at < cutoff 且
+// 客户最后发言时间不晚于坐席最后发言时间（即坐席说了最后一句）时执行；
 // 其他实例已处理则 RowsAffected=0，返回 (false, nil)。
 func (d *TicketDao) CloseByIdle(appkey, ticketId string, idleMs int64, atMs int64) (bool, error) {
 	now := time.UnixMilli(atMs)
 	cutoffMs := atMs - idleMs
-	cutoff := time.UnixMilli(cutoffMs)
 	res := dbcommons.GetDb().Model(&TicketDao{}).
-		Where("app_key=? AND ticket_id=? AND status=? AND last_user_msg_at IS NOT NULL AND last_user_msg_at < ?",
-			appkey, ticketId, int(models.TicketStatusProcessing), cutoff).
+		Where("app_key=? AND ticket_id=? AND status=? AND last_user_msg_at IS NOT NULL AND last_user_msg_at < to_timestamp(?::bigint / 1000.0) AND (last_customer_msg_at IS NULL OR last_customer_msg_at < last_user_msg_at)",
+			appkey, ticketId, int(models.TicketStatusProcessing), cutoffMs).
 		Updates(map[string]interface{}{
 			"status":       int(models.TicketStatusClosed),
 			"closed_at":    now,

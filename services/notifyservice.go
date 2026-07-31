@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"log"
 
 	juggleimsdk "github.com/juggleim/imserver-sdk-go"
 	apiModels "github.com/juggleim/jugglemate-server/apis/models"
@@ -11,6 +12,7 @@ import (
 )
 
 var TicketAssignedNtfMsgType string = "jgm:ticketassign"
+var TicketCsatNtfMsgType string = "jgm:csat"
 
 type AssignType int
 
@@ -51,6 +53,36 @@ func SendTicketHumanTakeoverNtfMsg(appkey, ticketId, senderId string) {
 		TargetIds:  []string{ticketId},
 		MsgType:    TicketAssignedNtfMsgType,
 		MsgContent: tools.ToJson(&TicketAssignedNtfMsg{TicketId: ticketId, AssignType: AssignType_HumanTakeover}),
+		IsStorage:  tools.BoolPtr(true),
+		IsCount:    tools.BoolPtr(false),
+	})
+}
+
+// sendTicketCsatNtfMsgFn 是 SendTicketCsatNtfMsg 的可替换实现，供单测注入。
+// 生产环境默认指向真实实现；test 中可替换为空操作以避免 imsdk.GetImSdk 依赖 DB。
+var sendTicketCsatNtfMsgFn = SendTicketCsatNtfMsg
+
+// SendTicketCsatNtfMsg 向 Ticket 群发送 jgm:csat 评价邀请卡片。
+//
+// 与 SendTicketAssignedNtfMsg 一致：走 IM REST API（imsdk.SendGroupMsg），
+// 以指定 senderId（坐席）身份发送，IsStorage:true 由 IM Server 写入 ticket_messages。
+// 由此 csat 消息不再依赖 Bot 长连接。
+//
+// @param appkey 应用 AppKey
+// @param ticketId 目标 Ticket 群 ID
+// @param senderId 发送者 IM 身份（应当是工单的 assignee 坐席 ID，不是 Bot）
+// @param payload 评价邀请卡片内容
+func SendTicketCsatNtfMsg(appkey, ticketId, senderId string, payload CsatInvitationPayload) {
+	sdk := imsdk.GetImSdk(appkey)
+	if sdk == nil {
+		log.Printf("[CsatNtf] imsdk 未就绪 appkey=%s ticket=%s", appkey, ticketId)
+		return
+	}
+	sdk.SendGroupMsg(juggleimsdk.Message{
+		SenderId:   senderId,
+		TargetIds:  []string{ticketId},
+		MsgType:    TicketCsatNtfMsgType,
+		MsgContent: tools.ToJson(payload),
 		IsStorage:  tools.BoolPtr(true),
 		IsCount:    tools.BoolPtr(false),
 	})

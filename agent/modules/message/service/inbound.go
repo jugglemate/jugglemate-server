@@ -28,6 +28,12 @@ func (service *Service) HandleInbound(ctx context.Context, inbound imbot.Inbound
 		slog.InfoContext(ctx, "[Inbound] 跳过：非群会话或 target 为空", "channel_type", int(inbound.ChannelType), "target_id", inbound.TargetID, "msg_id", inbound.MessageID)
 		return
 	}
+	// 双重保险：人工接管后不走大模型推理。
+	// OnMessageReceive 处已有拦截，此处防止未来任何调用链路绕过去。
+	if service.isTicketHumanTakenOver(ctx, inbound.AppKey, inbound.TargetID) {
+		slog.InfoContext(ctx, "[Inbound] 跳过：工单已人工接管（双重保险）", "ticket_id", inbound.TargetID, "msg_id", inbound.MessageID)
+		return
+	}
 	if inbound.MessageID != "" {
 		var count int64
 		if service.db.WithContext(ctx).Model(&reasoningmodel.Message{}).Where("message_id = ?", inbound.MessageID).Count(&count).Error == nil && count > 0 {
@@ -42,8 +48,8 @@ func (service *Service) HandleInbound(ctx context.Context, inbound imbot.Inbound
 		return
 	}
 	slog.InfoContext(ctx, "[Inbound] 路由命中 Agent", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "msg_id", inbound.MessageID)
-	// TIPS: 转人工是终态 —— 切换成功后 Bot 已被移出群，IM 不会再向本服务投递该群的任何
-	// 消息，因此不需要维护"人工态"标志来静默 Agent，直接返回即可。
+	// TIPS: 转人工后非 Widget 渠道 Bot 已被移出群，IM 不再投递消息；
+	// Widget 渠道 Bot 保留在群内但 OnMessageReceive 处已拦截，此处作为双重保险。
 	if MatchHandoffKeyword(inbound.Text) {
 		slog.InfoContext(ctx, "[Inbound] 客户触发转人工", "agent_id", agent.ID, "ticket_id", inbound.TargetID,
 			"sender_id", inbound.SenderID, "msg_id", inbound.MessageID)
@@ -150,6 +156,25 @@ func (service *Service) logInboundRouteMiss(ctx context.Context, inbound imbot.I
 		Where("bot_id=? AND agent_id=? AND status='active'", binding.BotID, binding.AgentID).Count(&botAgentCount)
 	slog.WarnContext(ctx, "[Inbound] 路由未命中：Bot-Agent 绑定现状",
 		"bot_id", binding.BotID, "agent_id", binding.AgentID, "active_bindings", botAgentCount)
+}
+
+// isTicketHumanTakenOver 检查工单是否已进入人工接管状态。
+// 用于"Bot 不退群"场景的双重保险：HandleInbound 入口处直接拦截，防止 LLM 被调用。
+//
+// 重要：DB 查询失败时宁可误拦（返回 true）也不放任消息穿透到 LLM ——
+// 一次 DB 抖动不应导致大量不必要的 LLM 调用。
+func (service *Service) isTicketHumanTakenOver(ctx context.Context, appKey, ticketID string) bool {
+	var ticket struct{ IsHumanTakenOver bool }
+	err := service.db.WithContext(ctx).Table("tickets").
+		Select("is_human_taken_over").
+		Where("app_key=? AND ticket_id=?", appKey, ticketID).
+		Take(&ticket).Error
+	if err != nil {
+		slog.WarnContext(ctx, "[Inbound] isTicketHumanTakenOver DB 查询失败，保守拦截",
+			"ticket_id", ticketID, "error", err)
+		return true // 保守策略：DB 异常时宁可误拦，不走 LLM
+	}
+	return ticket.IsHumanTakenOver
 }
 
 func (service *Service) resolveInboundAgent(ctx context.Context, inbound imbot.InboundMessage) (agentmodel.Agent, string, error) {

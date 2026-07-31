@@ -15,7 +15,39 @@ import (
 	"github.com/juggleim/imbot-sdk-go/models/messages"
 	"github.com/juggleim/imbot-sdk-go/utils"
 	"github.com/juggleim/jugglemate-server/commons/configures"
+	"github.com/juggleim/jugglemate-server/storages"
+	storageModels "github.com/juggleim/jugglemate-server/storages/models"
 	"gorm.io/gorm"
+)
+
+var (
+	findTicketForIMBot = func(appKey, ticketID string) (*storageModels.Ticket, error) {
+		return storages.NewTicketStorage().FindByTicketId(appKey, ticketID)
+	}
+	updateLastUserMsgAtForIMBot = func(appKey, ticketID string, atMs int64) error {
+		return storages.NewTicketStorage().UpdateLastUserMsgAt(appKey, ticketID, atMs)
+	}
+	updateLastCustomerMsgAtForIMBot = func(appKey, ticketID string, atMs int64) error {
+		return storages.NewTicketStorage().UpdateLastCustomerMsgAt(appKey, ticketID, atMs)
+	}
+	// isTicketHumanTakenOverForIMBot 检查工单是否已人工接管，用于在 Bot 不退群时跳过 LLM 推理。
+	// 仅在 Widget 渠道转人工后 Bot 不退群的场景下被调用。
+	//
+	// 重要：DB 查询失败时保守返回 true（宁可误拦，不走 LLM），避免 DB 抖动导致 LLM 被无效调用。
+	isTicketHumanTakenOverForIMBot = func(appKey, ticketID string) bool {
+		ticket, err := storages.NewTicketStorage().FindByTicketId(appKey, ticketID)
+		if err != nil {
+			slog.Warn("[IMBot] isTicketHumanTakenOver DB 查询失败，保守拦截",
+				"app_key", appKey, "ticket_id", ticketID, "error", err)
+			return true
+		}
+		if ticket == nil {
+			slog.Warn("[IMBot] isTicketHumanTakenOver ticket 不存在",
+				"app_key", appKey, "ticket_id", ticketID)
+			return true
+		}
+		return ticket.IsHumanTakenOver
+	}
 )
 
 // Manager 为每个 active Bot 维护一个支持自动重连的 SDK 客户端。
@@ -289,7 +321,15 @@ func (manager *Manager) SendCustomMessage(ctx context.Context, appKey, botUserID
 		if response.code != utils.ClientErrorCode_Success || response.ack == nil {
 			return "", fmt.Errorf("发送自定义 IM 消息失败 msg_type=%s code=%d", msgType, response.code)
 		}
-		return response.ack.GetMsgId(), nil
+		msgID := response.ack.GetMsgId()
+		if msgID == "" {
+			// IM Server 的 ack.MsgId 可能为空（取决于 SDK 版本和 IM Server 行为），
+			// 此时用 ClientUid 作为 fallback，确保 ticket_messages 能正常留痕。
+			msgID = up.ClientUid
+			slog.Warn("[IMBot] SendCustomMessage ack.MsgId 为空，降级使用 ClientUid",
+				"msg_type", msgType, "client_uid", msgID)
+		}
+		return msgID, nil
 	}
 }
 
@@ -394,6 +434,20 @@ func (listener *messageListener) OnMessageReceive(message *sdkmodels.Message) {
 		slog.Info("[IMBot] 跳过：文本内容为空", "bot_user_id", listener.botUserID, "msg_id", message.MsgId)
 		return
 	}
+	slog.Info("[IMBot] 尝试推进 last_user_msg_at",
+		"appkey", listener.appKey, "sender", message.SenderId, "target", targetLog, "msg_id", message.MsgId)
+	listener.advanceTicketLastUserMsgAt(message)
+
+	// 人工接管后 Bot 不退群（Widget 渠道），仍需推进 last_user_msg_at，
+	// 但不能再走大模型推理——坐席已在处理，Bot 应该"旁听"而非介入。
+	if message.Conversation != nil && message.Conversation.ConversationType == pbobjs.ChannelType_Group {
+		ticketID := strings.TrimSpace(message.Conversation.ConversationId)
+		if ticketID != "" && isTicketHumanTakenOverForIMBot(listener.appKey, ticketID) {
+			slog.Info("[IMBot] 跳过入站处理：工单已人工接管（Bot 保持旁观）", "ticket_id", ticketID, "msg_id", message.MsgId)
+			return
+		}
+	}
+
 	listener.manager.mu.RLock()
 	handler := listener.manager.handler
 	listener.manager.mu.RUnlock()
@@ -409,6 +463,77 @@ func (listener *messageListener) OnMessageReceive(message *sdkmodels.Message) {
 		}
 		go handler(context.Background(), InboundMessage{AppKey: listener.appKey, BotUserID: listener.botUserID, SenderID: message.SenderId, MessageID: message.MsgId, Text: textContent.Content, TargetID: targetID, ChannelType: channel})
 	}
+}
+
+func (listener *messageListener) advanceTicketLastUserMsgAt(message *sdkmodels.Message) {
+	if listener == nil || message == nil || message.Conversation == nil {
+		slog.Debug("[IMBot][LastMsgAt] 跳过：listener/message/conversation 为空")
+		return
+	}
+	if message.Conversation.ConversationType != pbobjs.ChannelType_Group {
+		slog.Debug("[IMBot][LastMsgAt] 跳过：非群消息",
+			"channel_type", int(message.Conversation.ConversationType),
+			"ticket", message.Conversation.ConversationId)
+		return
+	}
+	if message.MsgTime <= 0 || strings.TrimSpace(message.SenderId) == "" {
+		slog.Debug("[IMBot][LastMsgAt] 跳过：MsgTime 无效或 SenderId 为空",
+			"msg_time", message.MsgTime, "sender", message.SenderId)
+		return
+	}
+	ticketID := strings.TrimSpace(message.Conversation.ConversationId)
+	if ticketID == "" {
+		slog.Debug("[IMBot][LastMsgAt] 跳过：ticketID 为空")
+		return
+	}
+	ticket, err := findTicketForIMBot(listener.appKey, ticketID)
+	if err != nil {
+		slog.Warn("[IMBot][LastMsgAt] ticket 查询失败 appkey=%s ticket=%s msg_id=%s err=%v",
+			listener.appKey, ticketID, message.MsgId, err)
+		return
+	}
+	if ticket == nil {
+		slog.Debug("[IMBot][LastMsgAt] 跳过：工单不存在 appkey=%s ticket=%s msg_id=%s sender=%s",
+			listener.appKey, ticketID, message.MsgId, message.SenderId)
+		return
+	}
+	sender := strings.TrimSpace(message.SenderId)
+	assignee := strings.TrimSpace(ticket.AssigneeId)
+	sourceId := strings.TrimSpace(ticket.SourceId)
+	slog.Info("[IMBot][LastMsgAt] 判定",
+		"ticket", ticketID, "status", ticket.Status,
+		"sender", sender, "assignee", assignee, "source_id", sourceId,
+		"msg_time", message.MsgTime)
+
+	if assignee == sender {
+		// 坐席发言 → 推进 last_user_msg_at（用于 5 分钟空闲判断）
+		if err := updateLastUserMsgAtForIMBot(listener.appKey, ticketID, message.MsgTime); err != nil {
+			slog.Warn("[IMBot][LastMsgAt] 更新 last_user_msg_at 失败",
+				"appkey", listener.appKey, "ticket", ticketID, "msg_id", message.MsgId,
+				"msg_time", message.MsgTime, "err", err)
+		} else {
+			slog.Info("[IMBot][LastMsgAt] 更新 last_user_msg_at 成功",
+				"ticket", ticketID, "msg_time", message.MsgTime)
+		}
+		return
+	}
+
+	if sourceId == sender {
+		// 客户发言 → 推进 last_customer_msg_at（用于判断"最后一句是谁说的"）
+		if err := updateLastCustomerMsgAtForIMBot(listener.appKey, ticketID, message.MsgTime); err != nil {
+			slog.Warn("[IMBot][LastMsgAt] 更新 last_customer_msg_at 失败",
+				"appkey", listener.appKey, "ticket", ticketID, "msg_id", message.MsgId,
+				"msg_time", message.MsgTime, "err", err)
+		} else {
+			slog.Info("[IMBot][LastMsgAt] 更新 last_customer_msg_at 成功",
+				"ticket", ticketID, "msg_time", message.MsgTime)
+		}
+		return
+	}
+
+	// Bot 自身或未知系统消息，不更新任何时间戳
+	slog.Info("[IMBot][LastMsgAt] 跳过：发送者既非坐席也非客户",
+		"ticket", ticketID, "sender", sender, "msg_id", message.MsgId)
 }
 
 // validateWSAddress 校验 wsAddress 是否符合 SDK 要求；合法返回空串，否则返回问题描述。

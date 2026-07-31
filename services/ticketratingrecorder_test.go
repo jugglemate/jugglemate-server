@@ -156,6 +156,9 @@ func (f *fakeTicketStorage) MarkHumanTakenOverIfZero(appkey, ticketId, by string
 func (f *fakeTicketStorage) UpdateLastUserMsgAt(appkey, ticketId string, atMs int64) error {
 	return nil
 }
+func (f *fakeTicketStorage) UpdateLastCustomerMsgAt(appkey, ticketId string, atMs int64) error {
+	return nil
+}
 func (f *fakeTicketStorage) CloseByIdle(appkey, ticketId string, idleMs, atMs int64) (bool, error) {
 	return false, nil
 }
