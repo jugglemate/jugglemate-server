@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/juggleim/imbot-sdk-go/imbotclients/pbdefines/pbobjs"
 	agentmodel "github.com/juggleim/jugglemate-server/agent/modules/agent/model"
@@ -83,6 +84,10 @@ func (service *Service) HandleInbound(ctx context.Context, inbound imbot.Inbound
 		slog.ErrorContext(ctx, "[Inbound] IM 入站推理失败", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "msg_id", inbound.MessageID, "error", err)
 		if _, sendErr := service.connections.SendText(context.WithoutCancel(ctx), inbound.AppKey, inbound.BotUserID, inbound.TargetID, inbound.ChannelType, fallbackReply); sendErr != nil {
 			slog.ErrorContext(ctx, "[Inbound] 兜底文案发送失败", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "error", sendErr)
+		} else {
+			// Bot 回复后推进 last_user_msg_at，使纯 Bot 对话工单能被自动关闭 ticker 识别。
+			// advanceTicketLastUserMsgAt 只把人工坐席(assignee)当"坐席"，纯 Bot 场景 assignee 为空。
+			service.advanceBotLastUserMsgAt(ctx, inbound.AppKey, inbound.TargetID)
 		}
 		return
 	}
@@ -96,6 +101,8 @@ func (service *Service) HandleInbound(ctx context.Context, inbound imbot.Inbound
 		slog.ErrorContext(ctx, "[Inbound] IM 回复发送失败", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "msg_id", inbound.MessageID, "error", err)
 		return
 	}
+	// Bot 回复后推进 last_user_msg_at，使纯 Bot 对话工单能被自动关闭 ticker 识别。
+	service.advanceBotLastUserMsgAt(ctx, inbound.AppKey, inbound.TargetID)
 	slog.InfoContext(ctx, "[Inbound] 回复已发送", "agent_id", agent.ID, "ticket_id", inbound.TargetID, "in_msg_id", inbound.MessageID, "out_msg_id", messageID, "answer_len", len([]rune(answer)))
 }
 
@@ -208,4 +215,28 @@ func (service *Service) resolveInboundAgent(ctx context.Context, inbound imbot.I
 		return agentmodel.Agent{}, "", err
 	}
 	return agent, row.InviteCode, nil
+}
+
+// advanceBotLastUserMsgAt 在 Bot 成功发送回复后推进 tickets.last_user_msg_at，
+// 使纯 Bot 对话工单（无人工坐席 assignee）也能被自动关闭 ticker 识别。
+//
+// 背景：manager.go 的 advanceTicketLastUserMsgAt 只把 assignee（人工坐席）当作"坐席"来
+// 推进 last_user_msg_at。纯 Bot 对话工单 assignee 为空，Bot 自己的消息又在
+// OnMessageReceive 入口被 sender==botUserID 过滤掉，导致 last_user_msg_at 永远是 NULL，
+// 自动关闭 SQL 的 WHERE last_user_msg_at IS NOT NULL 直接排除了这类工单。
+//
+// 本方法在 HandleInbound / Bot 回复成功路径上直接写库，是唯一可靠的推进触发点——
+// Bot 消息走 IM SDK 直发，既不经过 webhook 回调，也不会触发 WS OnMessageReceive。
+func (service *Service) advanceBotLastUserMsgAt(ctx context.Context, appKey, ticketID string) {
+	nowMs := time.Now().UnixMilli()
+	err := service.db.WithContext(ctx).Table("tickets").
+		Where("app_key=? AND ticket_id=?", appKey, ticketID).
+		Update("last_user_msg_at", nowMs).Error
+	if err != nil {
+		slog.WarnContext(ctx, "[Inbound] 推进 last_user_msg_at 失败",
+			"ticket_id", ticketID, "msg_time", nowMs, "error", err)
+	} else {
+		slog.DebugContext(ctx, "[Inbound] 推进 last_user_msg_at 成功",
+			"ticket_id", ticketID, "msg_time", nowMs)
+	}
 }

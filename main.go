@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/juggleim/imbot-sdk-go/imbotclients/pbdefines/pbobjs"
 	agentbootstrap "github.com/juggleim/jugglemate-server/agent/bootstrap"
 	"github.com/juggleim/jugglemate-server/commons/configures"
 	"github.com/juggleim/jugglemate-server/commons/dbcommons"
@@ -52,22 +51,11 @@ func main() {
 	// 直接依赖客服域 services 包。
 	agentModule.SetMarkHumanTakeover(services.MarkHumanTakeover)
 
-	// TIPS: 自动关闭工单后发评价邀请卡（jgm:csat）。需要 IM Bot 长连接，但 services
-	// 不持有 IM SDK 直接引用，所以通过 services.SetCsatIMSender 注入一个桥接闭包。
-	// 仅当 agent 模块启用时组装 csat IMSender 与后台 ticker；disabled 模式跳过。
+	// TIPS: 自动关闭工单后发评价邀请卡（jgm:csat）。已改为走 IM REST API
+	// （imsdk.SendGroupMsg），不再依赖 Bot 长连接。
 	tickerStopCtx, tickerCancel := context.WithCancel(context.Background())
 	if agentModule.Enabled() {
-		botConn, botErr := agentModule.BotConnections()
-		if botErr != nil {
-			logs.Error("Get agent bot connections failed.", botErr)
-			os.Exit(1)
-		}
-		services.SetCsatIMSender(func(ctx context.Context, appKey, botUserID, ticketId string, msgType string, payload interface{}) (string, error) {
-			// channelType 固定用群消息（telegram / widget / juggleim 都对应 group）。
-			return botConn.SendCustomMessage(ctx, appKey, botUserID, ticketId,
-				pbobjs.ChannelType_Group, msgType, payload)
-		})
-		// TIPS: 启动后台 ticker，按 last_user_msg_at 阈值关闭 + 发评价邀请卡。
+		// TIPS: 启动后台 ticker，按 last_user_msg_at 阈值关闭 + 发 jgm:csat 评价邀请卡。
 		// Shutdown 时显式 StopAutoCloseTicker 让 ticker goroutine 在 httpServer 关闭后能退出。
 		go services.StartAutoCloseTicker(tickerStopCtx, services.ConfigFromAppConfig(configures.Config.Agent))
 	} else {
