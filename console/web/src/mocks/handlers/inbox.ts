@@ -73,6 +73,29 @@ export const inboxHandlers = [
     return successWithSchema(InboxSchema, inbox);
   }),
 
+  http.post("/jmate/console/inboxes/whatsapp", async ({ request }) => {
+    await withDelay(200);
+    const body = (await request.json()) as Record<string, unknown>;
+    const id = `inbox_whatsapp_${Date.now()}`;
+    const inbox = {
+      id,
+      name: stringField(body, "name"),
+      channel_type: "whatsapp" as const,
+      channel_conf: {
+        phone_number_id: stringField(body, "phone_number_id"),
+        display_phone_number: "+15551234567",
+        verified_name: "Demo WhatsApp",
+        api_version: "v24.0",
+      },
+      member_count: 0,
+      created_time: Date.now(),
+      updated_time: Date.now(),
+    };
+    inboxes = [inbox, ...inboxes];
+    inboxMemberIds[id] = [];
+    return successWithSchema(InboxSchema, inbox);
+  }),
+
   http.post("/jmate/console/inboxes/widget", async ({ request }) => {
     await withDelay(200);
     const body = (await request.json()) as Record<string, unknown>;

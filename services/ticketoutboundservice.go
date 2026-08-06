@@ -9,6 +9,7 @@ import (
 
 	"github.com/juggleim/jugglemate-server/commons/errs"
 	"github.com/juggleim/jugglemate-server/commons/telegram"
+	whatsappapi "github.com/juggleim/jugglemate-server/commons/whatsapp"
 	"github.com/juggleim/jugglemate-server/storages"
 	storageModels "github.com/juggleim/jugglemate-server/storages/models"
 )
@@ -19,6 +20,11 @@ var (
 	newCustomerStorageForOutbound = storages.NewCustomerStorage
 	sendTelegramOutboundMessage   = func(botToken, target, text string) error {
 		return telegram.NewClient().SendMessage(botToken, target, text)
+	}
+	sendWhatsAppOutboundMessage = func(conf WhatsAppChannelConf, target, text string) error {
+		_, err := whatsappapi.NewClient(conf.AccessToken, conf.PhoneNumberID, conf.APIBaseURL, conf.APIVersion).
+			SendText(context.Background(), target, text)
+		return err
 	}
 )
 
@@ -107,6 +113,8 @@ func ProcessWebhookMessage(appkey string, payload WebhookMessagePayload) errs.IM
 	switch inbox.ChannelType {
 	case string(ChannelType_Telegram):
 		return forwardTicketGroupMessageToTelegram(ticketAppKey, ticket, inbox, payload)
+	case string(ChannelType_WhatsApp):
+		return forwardTicketGroupMessageToWhatsApp(ticketAppKey, ticket, inbox, payload)
 	case string(ChannelType_Widget), string(ChannelType_JuggleIM):
 		// TIPS: 客户本身就是 Ticket 群成员，IM 会直接投递群消息，无需二次出站转发。
 		// 这两类渠道走到这里属于正常路径，不打日志——否则 Agent 和坐席的每一条回复
@@ -117,6 +125,34 @@ func ProcessWebhookMessage(appkey string, payload WebhookMessagePayload) errs.IM
 			inbox.ChannelType, ticketAppKey, inbox.InboxId, ticket.TicketId, payload.MsgID)
 		return errs.IMErrorCode_SUCCESS
 	}
+}
+
+func forwardTicketGroupMessageToWhatsApp(appkey string, ticket *storageModels.Ticket, inbox *storageModels.Inbox, payload WebhookMessagePayload) errs.IMErrorCode {
+	conf := ParseWhatsAppChannelConf(inbox.ChannelConf)
+	if strings.TrimSpace(conf.AccessToken) == "" || strings.TrimSpace(conf.PhoneNumberID) == "" {
+		log.Printf("[WebhookMsgs] skip: whatsapp credentials missing appkey=%s inbox_id=%s ticket_id=%s msg_id=%s",
+			appkey, inbox.InboxId, ticket.TicketId, payload.MsgID)
+		return errs.IMErrorCode_SUCCESS
+	}
+	customer, err := newCustomerStorageForOutbound().FindByCustomerId(appkey, ticket.CustomerId)
+	if err != nil {
+		log.Printf("[WebhookMsgs] whatsapp customer lookup failed appkey=%s customer_id=%s ticket_id=%s err=%v",
+			appkey, ticket.CustomerId, ticket.TicketId, err)
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
+	}
+	if customer == nil || strings.TrimSpace(customer.Identifier) == "" {
+		return errs.IMErrorCode_SUCCESS
+	}
+	text := extractOutboundText(payload.MsgType, payload.MsgContent)
+	if text == "" {
+		return errs.IMErrorCode_SUCCESS
+	}
+	if err := sendWhatsAppOutboundMessage(conf, strings.TrimSpace(customer.Identifier), text); err != nil {
+		log.Printf("[WebhookMsgs] whatsapp send failed appkey=%s inbox_id=%s ticket_id=%s target=%s msg_id=%s err=%v",
+			appkey, inbox.InboxId, ticket.TicketId, customer.Identifier, payload.MsgID, err)
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT
+	}
+	return errs.IMErrorCode_SUCCESS
 }
 
 // processCsatReplyCustomMessage 路由 jgm:csatreply 入站消息到评分记录路径。

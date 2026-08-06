@@ -30,6 +30,29 @@ func TestProcessWebhookMessageForwardsTelegramTicketGroupMessage(t *testing.T) {
 	}
 }
 
+func TestProcessWebhookMessageForwardsWhatsAppTicketGroupMessage(t *testing.T) {
+	env := newOutboundTestEnv(t)
+	inbox := env.inboxes.byId["inbox_tg"]
+	inbox.ChannelType = string(ChannelType_WhatsApp)
+	inbox.ChannelConf = `{"access_token":"wa-token","phone_number_id":"phone_1"}`
+	var gotConf WhatsAppChannelConf
+	var gotTarget, gotText string
+	oldSend := sendWhatsAppOutboundMessage
+	sendWhatsAppOutboundMessage = func(conf WhatsAppChannelConf, target, text string) error {
+		gotConf, gotTarget, gotText = conf, target, text
+		return nil
+	}
+	t.Cleanup(func() { sendWhatsAppOutboundMessage = oldSend })
+
+	code := ProcessWebhookMessage("app_1", env.payload)
+	if code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code = %d", code)
+	}
+	if gotConf.AccessToken != "wa-token" || gotConf.PhoneNumberID != "phone_1" || gotTarget != "998877" || gotText != "hello telegram" {
+		t.Fatalf("outbound conf=%+v target=%q text=%q", gotConf, gotTarget, gotText)
+	}
+}
+
 func TestProcessWebhookMessageSkipsIneligibleTicketMessages(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -462,7 +485,7 @@ func TestRecordOutboundTicketMessageEmptyMsgIDSkips(t *testing.T) {
 	env := setupRecordEnv(t, nil)
 	GetInboundEventRecorder().RecordOnce(context.Background(), "app_1", WebhookMessagePayload{
 		Sender: "u_seat_1", Receiver: "ticket_1", MsgType: "jg:text",
-		MsgID: "", // 空 msg_id 视为不可信，不留痕、不推进
+		MsgID:   "", // 空 msg_id 视为不可信，不留痕、不推进
 		MsgTime: 1785300000000,
 	}).Discard()
 	if env.message.last.MsgId != "" {

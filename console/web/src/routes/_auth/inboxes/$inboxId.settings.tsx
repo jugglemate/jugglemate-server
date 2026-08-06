@@ -22,6 +22,7 @@ import {
   Globe,
   Headphones,
   MessageSquare,
+  Phone,
   Send,
   ShieldCheck,
   Trash2,
@@ -67,6 +68,7 @@ const CHANNEL_VISUAL: Record<Inbox["channel_type"], { icon: LucideIcon; bg: stri
     widget: { icon: Globe, bg: BRAND.primarySoft, fg: BRAND.primary },
     telegram: { icon: Send, bg: BRAND.tertiarySoft, fg: BRAND.tertiary },
     juggleim: { icon: MessageSquare, bg: BRAND.aiAccentSoft, fg: BRAND.aiAccent },
+    whatsapp: { icon: Phone, bg: "#E9F8EF", fg: "#168B4B" },
   };
 
 function SettingsCard({ children }: { children: React.ReactNode }) {
@@ -229,6 +231,10 @@ function GeneralTab({ inbox }: { inbox: Inbox }) {
     inbox.channel_type === "telegram" || inbox.channel_type === "juggleim"
       ? inbox.channel_conf.bot_name
       : "";
+  const whatsappNumber =
+    inbox.channel_type === "whatsapp"
+      ? inbox.channel_conf.display_phone_number || inbox.channel_conf.phone_number_id
+      : "";
 
   return (
     <Flex vertical gap={token.marginLG} style={{ maxWidth: 720 }}>
@@ -258,6 +264,10 @@ function GeneralTab({ inbox }: { inbox: Inbox }) {
               extra={t("inboxes.welcomeMessageExtra")}
             >
               <TextArea rows={3} maxLength={500} showCount />
+            </Form.Item>
+          ) : inbox.channel_type === "whatsapp" ? (
+            <Form.Item label={t("inboxes.whatsappPhoneNumber")} extra={t("inboxes.botSettingsReadonly")}>
+              <Input value={whatsappNumber} disabled />
             </Form.Item>
           ) : (
             <Form.Item label={t("inboxes.botName")} extra={t("inboxes.botSettingsReadonly")}>

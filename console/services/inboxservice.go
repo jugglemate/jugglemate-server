@@ -13,6 +13,7 @@ import (
 	juggleimapi "github.com/juggleim/jugglemate-server/commons/juggleim"
 	telegramapi "github.com/juggleim/jugglemate-server/commons/telegram"
 	"github.com/juggleim/jugglemate-server/commons/tools"
+	whatsappapi "github.com/juggleim/jugglemate-server/commons/whatsapp"
 	consoleModels "github.com/juggleim/jugglemate-server/console/apis/models"
 	appServices "github.com/juggleim/jugglemate-server/services"
 	"github.com/juggleim/jugglemate-server/storages"
@@ -36,6 +37,9 @@ var (
 	}
 	juggleIMSetupBotForConsole = func(botName, botToken, callbackURL string) (*juggleimapi.BotInfo, error) {
 		return juggleimapi.NewClient().SetupBot(botName, botToken, callbackURL)
+	}
+	whatsappGetPhoneInfoForConsole = func(accessToken, phoneNumberID, apiBaseURL, apiVersion string) (*whatsappapi.PhoneInfo, error) {
+		return whatsappapi.NewClient(accessToken, phoneNumberID, apiBaseURL, apiVersion).GetPhoneInfo(context.Background())
 	}
 )
 
@@ -185,6 +189,63 @@ func CreateJuggleIMInbox(ctx context.Context, req *consoleModels.CreateJuggleIMI
 	return errs.IMErrorCode_SUCCESS, &item
 }
 
+func CreateWhatsAppInbox(ctx context.Context, req *consoleModels.CreateWhatsAppInboxReq) (errs.IMErrorCode, *consoleModels.InboxItem) {
+	appkey := ctxs.GetAppKeyFromCtx(ctx)
+	if appkey == "" {
+		return errs.IMErrorCode_APP_NOT_EXISTED, nil
+	}
+	if req == nil {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+	name := strings.TrimSpace(req.Name)
+	phoneNumberID := strings.TrimSpace(req.PhoneNumberID)
+	accessToken := strings.TrimSpace(req.AccessToken)
+	verifyToken := strings.TrimSpace(req.WebhookVerifyToken)
+	appSecret := strings.TrimSpace(req.AppSecret)
+	apiBaseURL := strings.TrimRight(strings.TrimSpace(req.APIBaseURL), "/")
+	apiVersion := strings.Trim(strings.TrimSpace(req.APIVersion), "/")
+	if name == "" || phoneNumberID == "" || accessToken == "" || verifyToken == "" {
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+	if apiBaseURL == "" {
+		apiBaseURL = whatsappapi.DefaultAPIBaseURL
+	}
+	if apiVersion == "" {
+		apiVersion = whatsappapi.DefaultAPIVersion
+	}
+	phoneInfo, err := whatsappGetPhoneInfoForConsole(accessToken, phoneNumberID, apiBaseURL, apiVersion)
+	if err != nil {
+		log.Printf("[ConsoleInbox] whatsapp phone validation failed phone_number_id=%s err=%v", phoneNumberID, err)
+		return errs.IMErrorCode_APP_REQ_BODY_ILLEGAL, nil
+	}
+	inboxID := tools.GenerateUUIDShort22()
+	channelConf, err := json.Marshal(appServices.WhatsAppChannelConf{
+		AccessToken:        accessToken,
+		PhoneNumberID:      phoneNumberID,
+		WebhookVerifyToken: verifyToken,
+		AppSecret:          appSecret,
+		DisplayPhoneNumber: phoneInfo.DisplayPhoneNumber,
+		VerifiedName:       phoneInfo.VerifiedName,
+		APIBaseURL:         apiBaseURL,
+		APIVersion:         apiVersion,
+	})
+	if err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	inbox := storageModels.Inbox{
+		InboxId:     inboxID,
+		ChannelType: string(appServices.ChannelType_WhatsApp),
+		ChannelConf: string(channelConf),
+		Name:        name,
+		AppKey:      appkey,
+	}
+	if err := newInboxStorageForConsole().Create(inbox); err != nil {
+		return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+	}
+	item := ToInboxItem(&inbox, 0)
+	return errs.IMErrorCode_SUCCESS, &item
+}
+
 func juggleIMWebhookCallbackURL(baseURL, inboxId string) string {
 	return strings.TrimRight(baseURL, "/") + "/jmate/webhooks/juggleim/" + inboxId
 }
@@ -305,7 +366,7 @@ func GetInbox(ctx context.Context, inboxId string) (errs.IMErrorCode, *consoleMo
 }
 
 // UpdateInbox 更新收件箱名称；对网站挂件渠道同时更新欢迎语。
-// TIPS: 机器人渠道（telegram/juggleim）仅更新名称，保留原有 bot 配置，避免误触发 webhook 重新注册。
+// TIPS: 外部机器人渠道仅更新名称，保留原有配置，避免误触发 webhook 重新注册。
 func UpdateInbox(ctx context.Context, inboxId string, req *consoleModels.UpdateInboxReq) (errs.IMErrorCode, *consoleModels.InboxItem) {
 	appkey := ctxs.GetAppKeyFromCtx(ctx)
 	if appkey == "" {
@@ -467,6 +528,14 @@ func ToInboxItem(inbox *storageModels.Inbox, memberCount int64) consoleModels.In
 			conf.BotName = stored.BotName
 		}
 		item.ChannelConf = conf
+	case string(appServices.ChannelType_WhatsApp):
+		stored := appServices.ParseWhatsAppChannelConf(inbox.ChannelConf)
+		item.ChannelConf = consoleModels.WhatsAppConfigItem{
+			PhoneNumberID:      stored.PhoneNumberID,
+			DisplayPhoneNumber: stored.DisplayPhoneNumber,
+			VerifiedName:       stored.VerifiedName,
+			APIVersion:         stored.APIVersion,
+		}
 	case string(appServices.ChannelType_Widget):
 		conf := appServices.ParseWebWidgetChannelConf(inbox.ChannelConf)
 		item.ChannelConf = consoleModels.WidgetConfigItem{
@@ -487,7 +556,7 @@ func inboxExists(appkey, inboxId string) (bool, errs.IMErrorCode) {
 		return false, errs.IMErrorCode_APP_ParamError
 	}
 	switch inbox.ChannelType {
-	case string(appServices.ChannelType_Telegram), string(appServices.ChannelType_Widget), string(appServices.ChannelType_JuggleIM):
+	case string(appServices.ChannelType_Telegram), string(appServices.ChannelType_Widget), string(appServices.ChannelType_JuggleIM), string(appServices.ChannelType_WhatsApp):
 		return true, errs.IMErrorCode_SUCCESS
 	default:
 		return false, errs.IMErrorCode_APP_ParamError

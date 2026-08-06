@@ -133,7 +133,7 @@ func (d *InboxDao) QryByApp(appkey, channelType string, limit, offset int64) (*m
 	if channelType != "" {
 		db = db.Where("channel_type=?", channelType)
 	} else {
-		db = db.Where("channel_type IN ?", []string{"widget", "telegram", "juggleim"})
+		db = db.Where("channel_type IN ?", []string{"widget", "telegram", "juggleim", "whatsapp"})
 	}
 
 	var total int64

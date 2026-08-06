@@ -10,6 +10,13 @@ type JuggleIMConfigItem struct {
 	BotToken string `json:"bot_token,omitempty"`
 }
 
+type WhatsAppConfigItem struct {
+	PhoneNumberID      string `json:"phone_number_id"`
+	DisplayPhoneNumber string `json:"display_phone_number,omitempty"`
+	VerifiedName       string `json:"verified_name,omitempty"`
+	APIVersion         string `json:"api_version,omitempty"`
+}
+
 type WidgetConfigItem struct {
 	WelcomeMessage string `json:"welcome_message"`
 }
@@ -39,6 +46,16 @@ type CreateJuggleIMInboxReq struct {
 	Name     string `json:"name"`
 	BotName  string `json:"bot_name"`
 	BotToken string `json:"bot_token"`
+}
+
+type CreateWhatsAppInboxReq struct {
+	Name               string `json:"name"`
+	PhoneNumberID      string `json:"phone_number_id"`
+	AccessToken        string `json:"access_token"`
+	WebhookVerifyToken string `json:"webhook_verify_token"`
+	AppSecret          string `json:"app_secret"`
+	APIBaseURL         string `json:"api_base_url"`
+	APIVersion         string `json:"api_version"`
 }
 
 type CreateWidgetInboxReq struct {

@@ -3,12 +3,14 @@ import i18n from "@/i18n";
 import {
   CreateJuggleIMInboxRequestSchema,
   CreateTelegramInboxRequestSchema,
+  CreateWhatsAppInboxRequestSchema,
   CreateWidgetInboxRequestSchema,
   InboxMembersResponseSchema,
   InboxSchema,
   PaginatedResponseSchema,
   type CreateJuggleIMInboxRequest,
   type CreateTelegramInboxRequest,
+  type CreateWhatsAppInboxRequest,
   type CreateWidgetInboxRequest,
   type Inbox,
   type InboxMember,
@@ -18,6 +20,7 @@ export const INBOX_ENDPOINTS = {
   list: "/jmate/console/inboxes",
   createTelegram: "/jmate/console/inboxes/telegram",
   createJuggleIM: "/jmate/console/inboxes/juggleim",
+  createWhatsApp: "/jmate/console/inboxes/whatsapp",
   createWidget: "/jmate/console/inboxes/widget",
   detail: (id: string) => `/jmate/console/inboxes/${id}`,
   update: (id: string) => `/jmate/console/inboxes/${id}`,
@@ -58,6 +61,12 @@ export async function createTelegramInbox(values: CreateTelegramInboxRequest): P
 export async function createJuggleIMInbox(values: CreateJuggleIMInboxRequest): Promise<Inbox> {
   const body = CreateJuggleIMInboxRequestSchema.parse(values);
   const raw = await httpClient.post(INBOX_ENDPOINTS.createJuggleIM, body);
+  return InboxSchema.parse(raw);
+}
+
+export async function createWhatsAppInbox(values: CreateWhatsAppInboxRequest): Promise<Inbox> {
+  const body = CreateWhatsAppInboxRequestSchema.parse(values);
+  const raw = await httpClient.post(INBOX_ENDPOINTS.createWhatsApp, body);
   return InboxSchema.parse(raw);
 }
 
@@ -108,6 +117,7 @@ export async function unbindInboxAgent(inboxId: string): Promise<void> {
 export function inboxChannelLabel(channelType: Inbox["channel_type"]): string {
   if (channelType === "widget") return i18n.t("inboxes.channelWidget");
   if (channelType === "juggleim") return i18n.t("inboxes.channelJuggleIM");
+  if (channelType === "whatsapp") return i18n.t("inboxes.channelWhatsApp");
   return i18n.t("inboxes.channelTelegram");
 }
 
@@ -118,6 +128,9 @@ export function inboxSubtitle(inbox: Inbox): string {
   if (inbox.channel_type === "juggleim") {
     return inbox.channel_conf.bot_name || i18n.t("inboxes.channelJuggleIM");
   }
+  if (inbox.channel_type === "whatsapp") {
+    return inbox.channel_conf.display_phone_number || inbox.channel_conf.phone_number_id;
+  }
   return inbox.channel_conf.welcome_message || i18n.t("inboxes.widgetSubtitle");
 }
 
@@ -125,6 +138,7 @@ export type {
   CreateJuggleIMInboxRequest,
   CreateTelegramInboxRequest,
   CreateWidgetInboxRequest,
+  CreateWhatsAppInboxRequest,
   Inbox,
   InboxMember,
 };

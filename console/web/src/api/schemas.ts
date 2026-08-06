@@ -263,10 +263,21 @@ export const JuggleIMInboxSchema = InboxBaseSchema.extend({
   channel_conf: JuggleIMChannelConfigSchema,
 });
 
+export const WhatsAppInboxSchema = InboxBaseSchema.extend({
+  channel_type: z.literal("whatsapp"),
+  channel_conf: z.object({
+    phone_number_id: z.string(),
+    display_phone_number: z.string().optional().default(""),
+    verified_name: z.string().optional().default(""),
+    api_version: z.string().optional().default(""),
+  }),
+});
+
 export const InboxSchema = z.discriminatedUnion("channel_type", [
   TelegramInboxSchema,
   WidgetInboxSchema,
   JuggleIMInboxSchema,
+  WhatsAppInboxSchema,
 ]);
 
 export type Inbox = z.infer<typeof InboxSchema>;
@@ -286,6 +297,18 @@ export const CreateJuggleIMInboxRequestSchema = z.object({
 });
 
 export type CreateJuggleIMInboxRequest = z.infer<typeof CreateJuggleIMInboxRequestSchema>;
+
+export const CreateWhatsAppInboxRequestSchema = z.object({
+  name: z.string().trim().min(1, "Please enter inbox name"),
+  phone_number_id: z.string().trim().min(1, "Please enter phone number ID"),
+  access_token: z.string().trim().min(1, "Please enter access token"),
+  webhook_verify_token: z.string().trim().min(1, "Please enter webhook verify token"),
+  app_secret: z.string().trim().optional().default(""),
+  api_base_url: z.string().trim().optional().default(""),
+  api_version: z.string().trim().optional().default(""),
+});
+
+export type CreateWhatsAppInboxRequest = z.infer<typeof CreateWhatsAppInboxRequestSchema>;
 
 export const CreateWidgetInboxRequestSchema = z.object({
   name: z.string().trim().min(1, "Please enter inbox name"),

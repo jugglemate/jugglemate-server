@@ -10,6 +10,7 @@ import {
   Info,
   Lightbulb,
   MessageSquare,
+  Phone,
   Plus,
   Search,
   Send,
@@ -28,6 +29,7 @@ import {
   bindInboxAgent,
   createJuggleIMInbox,
   createTelegramInbox,
+  createWhatsAppInbox,
   createWidgetInbox,
   replaceInboxMembers,
   type Inbox,
@@ -35,6 +37,7 @@ import {
 import {
   CreateJuggleIMInboxRequestSchema,
   CreateTelegramInboxRequestSchema,
+  CreateWhatsAppInboxRequestSchema,
   CreateWidgetInboxRequestSchema,
   PaginatedResponseSchema,
   UserSchema,
@@ -48,7 +51,7 @@ export const Route = createFileRoute("/_auth/inboxes/new")({
   staticData: { hideBreadcrumb: true },
 });
 
-type WizardChannel = "widget" | "telegram" | "juggleim";
+type WizardChannel = "widget" | "telegram" | "juggleim" | "whatsapp";
 type WizardStep = 0 | 1 | 2 | 3;
 
 const UsersListResponseSchema = PaginatedResponseSchema(UserSchema);
@@ -182,6 +185,15 @@ const CHANNEL_CARDS: Array<{
     ctaKey: "inboxes.createAndContinue",
   },
   {
+    key: "whatsapp",
+    icon: Phone,
+    bg: "#E9F8EF",
+    fg: "#168B4B",
+    titleKey: "inboxes.whatsappTitle",
+    descKey: "inboxes.whatsappDesc",
+    ctaKey: "inboxes.createAndContinue",
+  },
+  {
     key: "telegram",
     icon: Send,
     bg: BRAND.tertiarySoft,
@@ -244,6 +256,9 @@ function NewInboxWizard() {
       }
       if (channel === "telegram") {
         return createTelegramInbox(CreateTelegramInboxRequestSchema.parse(values));
+      }
+      if (channel === "whatsapp") {
+        return createWhatsAppInbox(CreateWhatsAppInboxRequestSchema.parse(values));
       }
       return createJuggleIMInbox(CreateJuggleIMInboxRequestSchema.parse(values));
     },
@@ -472,7 +487,9 @@ function ConfigureStep({
       ? { icon: Globe, bg: BRAND.primarySoft, fg: BRAND.primary }
       : channel === "telegram"
         ? { icon: Send, bg: BRAND.tertiarySoft, fg: BRAND.tertiary }
-        : { icon: MessageSquare, bg: BRAND.aiAccentSoft, fg: BRAND.aiAccent };
+        : channel === "juggleim"
+          ? { icon: MessageSquare, bg: BRAND.aiAccentSoft, fg: BRAND.aiAccent }
+          : { icon: Phone, bg: "#E9F8EF", fg: "#168B4B" };
   const Icon = visual.icon;
 
   return (
@@ -532,6 +549,41 @@ function ConfigureStep({
                   placeholder={t("inboxes.welcomePlaceholder")}
                 />
               </Form.Item>
+            ) : channel === "whatsapp" ? (
+              <>
+                <Form.Item
+                  name="phone_number_id"
+                  label={t("inboxes.whatsappPhoneNumberId")}
+                  rules={[{ required: true, message: t("inboxes.whatsappPhoneNumberIdRequired") }]}
+                >
+                  <Input placeholder="123456789012345" />
+                </Form.Item>
+                <Form.Item
+                  name="access_token"
+                  label={t("inboxes.whatsappAccessToken")}
+                  rules={[{ required: true, message: t("inboxes.whatsappAccessTokenRequired") }]}
+                >
+                  <Input.Password />
+                </Form.Item>
+                <Form.Item
+                  name="webhook_verify_token"
+                  label={t("inboxes.whatsappVerifyToken")}
+                  rules={[{ required: true, message: t("inboxes.whatsappVerifyTokenRequired") }]}
+                >
+                  <Input.Password />
+                </Form.Item>
+                <Form.Item name="app_secret" label={t("inboxes.whatsappAppSecret")}>
+                  <Input.Password />
+                </Form.Item>
+                <Flex gap={token.marginSM} wrap="wrap">
+                  <Form.Item name="api_base_url" label={t("inboxes.whatsappApiBaseUrl")} style={{ flex: 1, minWidth: 220 }}>
+                    <Input placeholder="https://graph.facebook.com" />
+                  </Form.Item>
+                  <Form.Item name="api_version" label={t("inboxes.whatsappApiVersion")} style={{ width: 150 }}>
+                    <Input placeholder="v24.0" />
+                  </Form.Item>
+                </Flex>
+              </>
             ) : (
               <>
                 <Form.Item

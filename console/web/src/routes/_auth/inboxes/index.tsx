@@ -19,6 +19,7 @@ import {
   ChevronRight,
   Globe,
   MessageSquare,
+  Phone,
   Plus,
   Send,
   Settings,
@@ -56,6 +57,7 @@ const CHANNEL_VISUAL: Record<Inbox["channel_type"], { icon: LucideIcon; bg: stri
     widget: { icon: Globe, bg: BRAND.primarySoft, fg: BRAND.primary },
     telegram: { icon: Send, bg: BRAND.tertiarySoft, fg: BRAND.tertiary },
     juggleim: { icon: MessageSquare, bg: BRAND.aiAccentSoft, fg: BRAND.aiAccent },
+    whatsapp: { icon: Phone, bg: "#E9F8EF", fg: "#168B4B" },
   };
 
 /**
@@ -93,6 +95,12 @@ function InboxesPage() {
       if (inbox.name.toLowerCase().includes(q)) return true;
       if (inbox.channel_type === "widget") {
         return inbox.channel_conf.welcome_message.toLowerCase().includes(q);
+      }
+      if (inbox.channel_type === "whatsapp") {
+        return (
+          inbox.channel_conf.display_phone_number.toLowerCase().includes(q) ||
+          inbox.channel_conf.phone_number_id.toLowerCase().includes(q)
+        );
       }
       return inbox.channel_conf.bot_name.toLowerCase().includes(q);
     });
@@ -155,7 +163,15 @@ function InboxesPage() {
       width: 160,
       render: (channelType: Inbox["channel_type"]) => (
         <Tag
-          color={channelType === "widget" ? "blue" : channelType === "juggleim" ? "purple" : "cyan"}
+          color={
+            channelType === "widget"
+              ? "blue"
+              : channelType === "juggleim"
+                ? "purple"
+                : channelType === "whatsapp"
+                  ? "green"
+                  : "cyan"
+          }
           style={{ borderRadius: 9999, paddingInline: 10 }}
         >
           {inboxChannelLabel(channelType)}

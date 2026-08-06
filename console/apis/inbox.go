@@ -10,6 +10,7 @@ import (
 )
 
 var createJuggleIMInboxForAPI = consoleServices.CreateJuggleIMInbox
+var createWhatsAppInboxForAPI = consoleServices.CreateWhatsAppInbox
 
 func QryInboxes(ctx *gin.Context) {
 	limit, offset, ok := parsePagination(ctx)
@@ -53,6 +54,19 @@ func CreateJuggleIMInbox(ctx *gin.Context) {
 	responses.SuccessHttpResp(ctx, resp)
 }
 
+func CreateWhatsAppInbox(ctx *gin.Context) {
+	var req consoleModels.CreateWhatsAppInboxReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		responses.ErrorHttpResp(ctx, errs.IMErrorCode_APP_REQ_BODY_ILLEGAL)
+		return
+	}
+	code, resp := createWhatsAppInboxForAPI(ctxs.ToCtx(ctx), &req)
+	if code != errs.IMErrorCode_SUCCESS {
+		responses.ErrorHttpResp(ctx, code)
+		return
+	}
+	responses.SuccessHttpResp(ctx, resp)
+}
 func CreateWidgetInbox(ctx *gin.Context) {
 	var req consoleModels.CreateWidgetInboxReq
 	if err := ctx.ShouldBindJSON(&req); err != nil {
