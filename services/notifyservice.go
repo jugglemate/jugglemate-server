@@ -54,7 +54,7 @@ func SendTicketHumanTakeoverNtfMsg(appkey, ticketId, senderId string) {
 		MsgType:    TicketAssignedNtfMsgType,
 		MsgContent: tools.ToJson(&TicketAssignedNtfMsg{TicketId: ticketId, AssignType: AssignType_HumanTakeover}),
 		IsStorage:  tools.BoolPtr(true),
-		IsCount:    tools.BoolPtr(false),
+		IsCount:    tools.BoolPtr(true),
 	})
 }
 
@@ -84,7 +84,7 @@ func SendTicketCsatNtfMsg(appkey, ticketId, senderId string, payload CsatInvitat
 		MsgType:    TicketCsatNtfMsgType,
 		MsgContent: tools.ToJson(payload),
 		IsStorage:  tools.BoolPtr(true),
-		IsCount:    tools.BoolPtr(false),
+		IsCount:    tools.BoolPtr(true),
 	})
 }
 
@@ -99,7 +99,7 @@ func SendTicketAssignedNtfMsg(ctx context.Context, msg *TicketAssignedNtfMsg) {
 			MsgType:    TicketAssignedNtfMsgType,
 			MsgContent: tools.ToJson(msg),
 			IsStorage:  tools.BoolPtr(true),
-			IsCount:    tools.BoolPtr(false),
+			IsCount:    tools.BoolPtr(true),
 		})
 	}
 }

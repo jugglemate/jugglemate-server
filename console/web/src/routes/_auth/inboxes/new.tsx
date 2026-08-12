@@ -384,7 +384,6 @@ function NewInboxWizard() {
           selectedAgentId={selectedAgentId}
           onSelect={setSelectedAgentId}
           onCreateNew={() => void navigate({ to: "/agents/new" })}
-          onSkip={finishSetup}
           onComplete={() => agentMutation.mutate()}
           submitting={agentMutation.isPending}
         />
@@ -795,7 +794,6 @@ function AgentStep({
   selectedAgentId,
   onSelect,
   onCreateNew,
-  onSkip,
   onComplete,
   submitting,
 }: {
@@ -804,7 +802,6 @@ function AgentStep({
   selectedAgentId: string | null;
   onSelect: (id: string) => void;
   onCreateNew: () => void;
-  onSkip: () => void;
   onComplete: () => void;
   submitting: boolean;
 }) {
@@ -921,15 +918,7 @@ function AgentStep({
           ) : null}
         </Flex>
 
-        <Flex
-          align="center"
-          justify="flex-end"
-          gap={token.margin}
-          style={{ marginTop: token.marginXL }}
-        >
-          <Button type="text" onClick={onSkip}>
-            {t("inboxes.skip")}
-          </Button>
+        <Flex align="center" justify="flex-end" style={{ marginTop: token.marginXL }}>
           <Button
             type="primary"
             size="large"
