@@ -12,24 +12,24 @@ import (
 )
 
 type TicketDao struct {
-	ID               int64     `gorm:"primary_key"`
-	TicketId         string    `gorm:"ticket_id"`
-	SourceId         string    `gorm:"source_id"`
-	CustomerId       string    `gorm:"customer_id"`
-	InboxId          string    `gorm:"inbox_id"`
-	ChannelType      string    `gorm:"channel_type"`
-	AssigneeId       string    `gorm:"assignee_id"`
-	Status           int       `gorm:"status"`
-	IsHumanTakenOver bool      `gorm:"is_human_taken_over"`
-	HumanTakenOverAt time.Time `gorm:"human_taken_over_at"`
-	HumanTakenOverBy string    `gorm:"human_taken_over_by"`
+	ID                int64      `gorm:"primary_key"`
+	TicketId          string     `gorm:"ticket_id"`
+	SourceId          string     `gorm:"source_id"`
+	CustomerId        string     `gorm:"customer_id"`
+	InboxId           string     `gorm:"inbox_id"`
+	ChannelType       string     `gorm:"channel_type"`
+	AssigneeId        string     `gorm:"assignee_id"`
+	Status            int        `gorm:"status"`
+	IsHumanTakenOver  bool       `gorm:"is_human_taken_over"`
+	HumanTakenOverAt  time.Time  `gorm:"human_taken_over_at"`
+	HumanTakenOverBy  string     `gorm:"human_taken_over_by"`
 	LastUserMsgAt     *time.Time `gorm:"last_user_msg_at"`
 	LastCustomerMsgAt *time.Time `gorm:"last_customer_msg_at"`
 	ClosedAt          *time.Time `gorm:"closed_at"`
-	CsatNotifiedAt   *time.Time `gorm:"csat_notified_at"`
-	CreatedTime      time.Time `gorm:"created_time"`
-	UpdatedTime      time.Time `gorm:"updated_time"`
-	AppKey           string    `gorm:"app_key"`
+	CsatNotifiedAt    *time.Time `gorm:"csat_notified_at"`
+	CreatedTime       time.Time  `gorm:"created_time"`
+	UpdatedTime       time.Time  `gorm:"updated_time"`
+	AppKey            string     `gorm:"app_key"`
 }
 
 func (TicketDao) TableName() string {
@@ -280,12 +280,17 @@ func (d *TicketDao) QryBySource(appkey, sourceId string, status int, startId, li
 }
 
 func (d *TicketDao) UpdateStatus(appkey, ticketId string, status models.TicketStatus) error {
+	updates := map[string]interface{}{
+		"status":       int(status),
+		"updated_time": time.Now(),
+	}
+	// 重开后 closed_at 必须清空，否则 API 会同时返回“已重开”和旧关闭时间。
+	if status == models.TicketStatusReOpen {
+		updates["closed_at"] = nil
+	}
 	return dbcommons.GetDb().Model(&TicketDao{}).
 		Where("app_key=? and ticket_id=?", appkey, ticketId).
-		Updates(map[string]interface{}{
-			"status":       int(status),
-			"updated_time": time.Now(),
-		}).Error
+		Updates(updates).Error
 }
 
 func (d *TicketDao) ClaimIfPending(appkey, ticketId, assigneeId string) (*models.Ticket, error) {
@@ -441,15 +446,16 @@ func (d *TicketDao) UpdateLastCustomerMsgAt(appkey, ticketId string, atMs int64)
 	return err
 }
 
-// CloseByIdle 抢占式关闭：仅在 status=1 且 last_user_msg_at < cutoff 且
+// CloseByIdle 抢占式关闭：仅在 status=1（处理中）或 status=3（重新打开），
+// 且 last_user_msg_at < cutoff 且
 // 客户最后发言时间不晚于坐席最后发言时间（即坐席说了最后一句）时执行；
 // 其他实例已处理则 RowsAffected=0，返回 (false, nil)。
 func (d *TicketDao) CloseByIdle(appkey, ticketId string, idleMs int64, atMs int64) (bool, error) {
 	now := time.UnixMilli(atMs)
 	cutoffMs := atMs - idleMs
 	res := dbcommons.GetDb().Model(&TicketDao{}).
-		Where("app_key=? AND ticket_id=? AND status=? AND last_user_msg_at IS NOT NULL AND last_user_msg_at < to_timestamp(?::bigint / 1000.0) AND (last_customer_msg_at IS NULL OR last_customer_msg_at < last_user_msg_at)",
-			appkey, ticketId, int(models.TicketStatusProcessing), cutoffMs).
+		Where("app_key=? AND ticket_id=? AND status IN (?, ?) AND last_user_msg_at IS NOT NULL AND last_user_msg_at < to_timestamp(?::bigint / 1000.0) AND (last_customer_msg_at IS NULL OR last_customer_msg_at < last_user_msg_at)",
+			appkey, ticketId, int(models.TicketStatusProcessing), int(models.TicketStatusReOpen), cutoffMs).
 		Updates(map[string]interface{}{
 			"status":       int(models.TicketStatusClosed),
 			"closed_at":    now,
@@ -465,8 +471,9 @@ func (d *TicketDao) CloseByIdle(appkey, ticketId string, idleMs int64, atMs int6
 // 仅 status=2 (Closed) 时才设置，避免给已重新打开的工单标错。
 //
 // 返回值：
-//   bool: 是否本调用真正置了字段（true=刚标记，false=已被其他实例标记）
-//   error: DB 错误
+//
+//	bool: 是否本调用真正置了字段（true=刚标记，false=已被其他实例标记）
+//	error: DB 错误
 func (d *TicketDao) MarkCsatNotifiedOnce(appkey, ticketId string, atMs int64) (bool, error) {
 	at := time.UnixMilli(atMs)
 	res := dbcommons.GetDb().Model(&TicketDao{}).

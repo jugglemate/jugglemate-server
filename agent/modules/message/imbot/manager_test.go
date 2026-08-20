@@ -2,6 +2,7 @@ package imbot
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/juggleim/imbot-sdk-go/imbotclients/pbdefines/pbobjs"
@@ -73,6 +74,131 @@ func TestMessageListenerSkipsCustomerGroupMessage(t *testing.T) {
 
 	if called {
 		t.Fatalf("customer message should not advance last_user_msg_at")
+	}
+}
+
+func TestMessageListenerReopensClosedTicketForCustomerGroupMessage(t *testing.T) {
+	oldFind := findTicketForIMBot
+	oldUpdateCustomer := updateLastCustomerMsgAtForIMBot
+	oldReopen := reopenTicketForIMBot
+	defer func() {
+		findTicketForIMBot = oldFind
+		updateLastCustomerMsgAtForIMBot = oldUpdateCustomer
+		reopenTicketForIMBot = oldReopen
+	}()
+
+	var updatedCustomerAt int64
+	var reopenedTicketID string
+	var syncedTicketID string
+	findTicketForIMBot = func(appKey, ticketID string) (*storageModels.Ticket, error) {
+		return &storageModels.Ticket{
+			AppKey: appKey, TicketId: ticketID, SourceId: "customer_1",
+			Status: storageModels.TicketStatusClosed,
+		}, nil
+	}
+	updateLastCustomerMsgAtForIMBot = func(appKey, ticketID string, atMs int64) error {
+		updatedCustomerAt = atMs
+		return nil
+	}
+	reopenTicketForIMBot = func(appKey, ticketID string) error {
+		reopenedTicketID = ticketID
+		return nil
+	}
+
+	manager := &Manager{}
+	manager.SetTicketTagSync(func(appKey, ticketID string) error {
+		syncedTicketID = ticketID
+		return nil
+	})
+	listener := &messageListener{appKey: "app_1", botUserID: "bot_1", manager: manager}
+	msg := &sdkmodels.Message{
+		Conversation: &sdkmodels.Conversation{ConversationId: "ticket_1", ConversationType: pbobjs.ChannelType_Group},
+		SenderId:     "customer_1",
+		MsgId:        "msg_1",
+		MsgTime:      1785300000000,
+		MsgContent:   messages.NewTextMessage("hello again"),
+	}
+
+	listener.advanceTicketLastUserMsgAt(msg)
+
+	if updatedCustomerAt != msg.MsgTime {
+		t.Fatalf("updatedCustomerAt = %d, want %d", updatedCustomerAt, msg.MsgTime)
+	}
+	if reopenedTicketID != "ticket_1" {
+		t.Fatalf("reopenedTicketID = %q, want ticket_1", reopenedTicketID)
+	}
+	if syncedTicketID != "ticket_1" {
+		t.Fatalf("syncedTicketID = %q, want ticket_1", syncedTicketID)
+	}
+}
+
+func TestMessageListenerDoesNotReopenActiveTicketForCustomerMessage(t *testing.T) {
+	oldFind := findTicketForIMBot
+	oldUpdateCustomer := updateLastCustomerMsgAtForIMBot
+	oldReopen := reopenTicketForIMBot
+	defer func() {
+		findTicketForIMBot = oldFind
+		updateLastCustomerMsgAtForIMBot = oldUpdateCustomer
+		reopenTicketForIMBot = oldReopen
+	}()
+
+	findTicketForIMBot = func(appKey, ticketID string) (*storageModels.Ticket, error) {
+		return &storageModels.Ticket{AppKey: appKey, TicketId: ticketID, SourceId: "customer_1", Status: storageModels.TicketStatusProcessing}, nil
+	}
+	updateLastCustomerMsgAtForIMBot = func(appKey, ticketID string, atMs int64) error { return nil }
+	reopened := false
+	reopenTicketForIMBot = func(appKey, ticketID string) error {
+		reopened = true
+		return nil
+	}
+
+	listener := &messageListener{appKey: "app_1", botUserID: "bot_1", manager: &Manager{}}
+	listener.advanceTicketLastUserMsgAt(&sdkmodels.Message{
+		Conversation: &sdkmodels.Conversation{ConversationId: "ticket_1", ConversationType: pbobjs.ChannelType_Group},
+		SenderId:     "customer_1",
+		MsgId:        "msg_1",
+		MsgTime:      1785300000000,
+		MsgContent:   messages.NewTextMessage("hello"),
+	})
+
+	if reopened {
+		t.Fatal("active ticket should not be reopened")
+	}
+}
+
+func TestMessageListenerDoesNotSyncTagsWhenReopenFails(t *testing.T) {
+	oldFind := findTicketForIMBot
+	oldUpdateCustomer := updateLastCustomerMsgAtForIMBot
+	oldReopen := reopenTicketForIMBot
+	defer func() {
+		findTicketForIMBot = oldFind
+		updateLastCustomerMsgAtForIMBot = oldUpdateCustomer
+		reopenTicketForIMBot = oldReopen
+	}()
+
+	findTicketForIMBot = func(appKey, ticketID string) (*storageModels.Ticket, error) {
+		return &storageModels.Ticket{AppKey: appKey, TicketId: ticketID, SourceId: "customer_1", Status: storageModels.TicketStatusClosed}, nil
+	}
+	updateLastCustomerMsgAtForIMBot = func(appKey, ticketID string, atMs int64) error { return nil }
+	reopenTicketForIMBot = func(appKey, ticketID string) error { return errors.New("update failed") }
+
+	synced := false
+	manager := &Manager{}
+	manager.SetTicketTagSync(func(appKey, ticketID string) error {
+		synced = true
+		return nil
+	})
+	listener := &messageListener{appKey: "app_1", botUserID: "bot_1", manager: manager}
+	listener.advanceTicketLastUserMsgAt(&sdkmodels.Message{
+		Conversation: &sdkmodels.Conversation{ConversationId: "ticket_1", ConversationType: pbobjs.ChannelType_Group},
+		SenderId:     "customer_1",
+		MsgId:        "msg_1",
+		MsgTime:      1785300000000,
+		MsgContent:   messages.NewTextMessage("hello"),
+	})
+
+	if synced {
+		t.Fatal("tags should not be synced when reopening fails")
 	}
 }
 

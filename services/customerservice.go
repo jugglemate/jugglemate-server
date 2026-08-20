@@ -262,6 +262,15 @@ func startCustomerTicket(req customerTicketStartReq) (errs.IMErrorCode, *custome
 	if code != errs.IMErrorCode_SUCCESS {
 		return code, nil
 	}
+	if ticket != nil && ticket.Status == storageModels.TicketStatusClosed {
+		if err := ticketStorage.UpdateStatus(appkey, ticket.TicketId, storageModels.TicketStatusReOpen); err != nil {
+			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
+		}
+		ticket.Status = storageModels.TicketStatusReOpen
+		if code := syncTicketGlobalConversationTagsForCustomer(appkey, ticket.TicketId); code != errs.IMErrorCode_SUCCESS {
+			return code, nil
+		}
+	}
 
 	if ticket == nil {
 		ticketId := generateTicketId()

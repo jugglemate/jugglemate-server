@@ -112,7 +112,7 @@ func TestProcessTelegramWebhookReusesCustomerAndTicket(t *testing.T) {
 	env := newTelegramWebhookTestEnv(t)
 	env.customers.byIdentifier["123456"] = &storageModels.Customer{CustomerId: "c_existing", Nickname: "Existing", Identifier: "123456", AppKey: "app_1"}
 	env.rels.byCustomerInbox["c_existing|inbox_tg"] = &storageModels.CustomerInboxRel{CustomerId: "c_existing", InboxId: "inbox_tg", SourceId: "customer_existing", AppKey: "app_1"}
-	env.tickets.bySource["customer_existing"] = &storageModels.Ticket{TicketId: "ticket_existing", SourceId: "customer_existing", InboxId: "inbox_tg", AppKey: "app_1"}
+	env.tickets.bySource["customer_existing"] = &storageModels.Ticket{TicketId: "ticket_existing", SourceId: "customer_existing", InboxId: "inbox_tg", Status: storageModels.TicketStatusClosed, AppKey: "app_1"}
 
 	body := []byte(`{"message":{"message_id":77,"from":{"id":123456,"username":"ada"},"chat":{"id":123456,"type":"private"},"text":"hello"}}`)
 	code := ProcessTelegramWebhook("inbox_tg", body)
@@ -124,6 +124,33 @@ func TestProcessTelegramWebhookReusesCustomerAndTicket(t *testing.T) {
 	}
 	if env.sentMsg.TargetId != "ticket_existing" {
 		t.Fatalf("target = %q, want ticket_existing", env.sentMsg.TargetId)
+	}
+	if env.tickets.updatedTicketId != "ticket_existing" || env.tickets.updatedStatus != storageModels.TicketStatusReOpen || env.tickets.updateStatusCalls != 1 {
+		t.Fatalf("status update ticket=%q status=%d calls=%d", env.tickets.updatedTicketId, env.tickets.updatedStatus, env.tickets.updateStatusCalls)
+	}
+	if env.tickets.bySource["customer_existing"].Status != storageModels.TicketStatusReOpen {
+		t.Fatalf("ticket status = %d, want reopened", env.tickets.bySource["customer_existing"].Status)
+	}
+	if env.globalTagAppKey != "app_1" || env.globalTagTicketId != "ticket_existing" {
+		t.Fatalf("global tag sync app=%q ticket=%q", env.globalTagAppKey, env.globalTagTicketId)
+	}
+}
+
+func TestProcessTelegramWebhookDoesNotUpdateActiveTicketStatus(t *testing.T) {
+	env := newTelegramWebhookTestEnv(t)
+	env.customers.byIdentifier["123456"] = &storageModels.Customer{CustomerId: "c_existing", Nickname: "Existing", Identifier: "123456", AppKey: "app_1"}
+	env.rels.byCustomerInbox["c_existing|inbox_tg"] = &storageModels.CustomerInboxRel{CustomerId: "c_existing", InboxId: "inbox_tg", SourceId: "customer_existing", AppKey: "app_1"}
+	env.tickets.bySource["customer_existing"] = &storageModels.Ticket{TicketId: "ticket_existing", SourceId: "customer_existing", InboxId: "inbox_tg", Status: storageModels.TicketStatusProcessing, AppKey: "app_1"}
+
+	body := []byte(`{"message":{"message_id":77,"from":{"id":123456,"username":"ada"},"chat":{"id":123456,"type":"private"},"text":"hello"}}`)
+	if code := ProcessTelegramWebhook("inbox_tg", body); code != errs.IMErrorCode_SUCCESS {
+		t.Fatalf("code = %d", code)
+	}
+	if env.tickets.updateStatusCalls != 0 {
+		t.Fatalf("status update calls = %d, want 0", env.tickets.updateStatusCalls)
+	}
+	if env.globalTagTicketId != "" {
+		t.Fatalf("unexpected global tag sync for ticket %q", env.globalTagTicketId)
 	}
 }
 
@@ -304,9 +331,12 @@ func (s *telegramFakeRelStorage) QryByInbox(appkey, inboxId string, startId, lim
 }
 
 type telegramFakeTicketStorage struct {
-	bySource map[string]*storageModels.Ticket
-	byTicket map[string]*storageModels.Ticket
-	created  *storageModels.Ticket
+	bySource          map[string]*storageModels.Ticket
+	byTicket          map[string]*storageModels.Ticket
+	created           *storageModels.Ticket
+	updatedTicketId   string
+	updatedStatus     storageModels.TicketStatus
+	updateStatusCalls int
 }
 
 func (s *telegramFakeTicketStorage) Create(item storageModels.Ticket) error {
@@ -348,6 +378,9 @@ func (s *telegramFakeTicketStorage) QryBySource(appkey, sourceId string, status 
 	return nil, nil
 }
 func (s *telegramFakeTicketStorage) UpdateStatus(appkey, ticketId string, status storageModels.TicketStatus) error {
+	s.updatedTicketId = ticketId
+	s.updatedStatus = status
+	s.updateStatusCalls++
 	return nil
 }
 func (s *telegramFakeTicketStorage) ClaimIfPending(appkey, ticketId, assigneeId string) (*storageModels.Ticket, error) {

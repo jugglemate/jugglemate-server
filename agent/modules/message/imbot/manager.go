@@ -30,6 +30,9 @@ var (
 	updateLastCustomerMsgAtForIMBot = func(appKey, ticketID string, atMs int64) error {
 		return storages.NewTicketStorage().UpdateLastCustomerMsgAt(appKey, ticketID, atMs)
 	}
+	reopenTicketForIMBot = func(appKey, ticketID string) error {
+		return storages.NewTicketStorage().UpdateStatus(appKey, ticketID, storageModels.TicketStatusReOpen)
+	}
 	// isTicketHumanTakenOverForIMBot 检查工单是否已人工接管，用于在 Bot 不退群时跳过 LLM 推理。
 	// 仅在 Widget 渠道转人工后 Bot 不退群的场景下被调用。
 	//
@@ -57,7 +60,10 @@ type Manager struct {
 	mu      sync.RWMutex
 	clients map[string]*imbotclients.ImBotClient
 	handler func(context.Context, InboundMessage)
-	stop    chan struct{}
+	// syncTicketTags 在工单状态变化后同步 IM 群会话标签，由 bootstrap 注入，
+	// 避免 imbot 包反向依赖 services 包。
+	syncTicketTags func(appKey, ticketID string) error
+	stop           chan struct{}
 	// stopOnce 保证 Stop 可重入：模块关闭与测试清理都可能调用它。
 	stopOnce sync.Once
 }
@@ -251,6 +257,13 @@ func (manager *Manager) EnsureBot(ctx context.Context, appKey, token, expectedUs
 func (manager *Manager) SetInboundHandler(handler func(context.Context, InboundMessage)) {
 	manager.mu.Lock()
 	manager.handler = handler
+	manager.mu.Unlock()
+}
+
+// SetTicketTagSync 设置工单全局会话标签同步器。
+func (manager *Manager) SetTicketTagSync(syncer func(appKey, ticketID string) error) {
+	manager.mu.Lock()
+	manager.syncTicketTags = syncer
 	manager.mu.Unlock()
 }
 
@@ -527,6 +540,31 @@ func (listener *messageListener) advanceTicketLastUserMsgAt(message *sdkmodels.M
 		} else {
 			slog.Info("[IMBot][LastMsgAt] 更新 last_customer_msg_at 成功",
 				"ticket", ticketID, "msg_time", message.MsgTime)
+		}
+		// Widget 客户后续发消息直接走 IM Bot 长连接，不会再次调用
+		// /customers/start。因此关闭工单必须在真实消息入口重新开启，且要在
+		// HandleInbound 查询 status<>Closed 之前同步完成。
+		if ticket.Status == storageModels.TicketStatusClosed {
+			if err := reopenTicketForIMBot(listener.appKey, ticketID); err != nil {
+				slog.Warn("[IMBot][LastMsgAt] 客户消息重新开启工单失败",
+					"appkey", listener.appKey, "ticket", ticketID, "msg_id", message.MsgId, "err", err)
+			} else {
+				slog.Info("[IMBot][LastMsgAt] 客户消息已重新开启工单",
+					"ticket", ticketID, "msg_id", message.MsgId)
+				listener.manager.mu.RLock()
+				syncTicketTags := listener.manager.syncTicketTags
+				listener.manager.mu.RUnlock()
+				if syncTicketTags == nil {
+					slog.Warn("[IMBot][LastMsgAt] 工单已重开但标签同步器未注册",
+						"appkey", listener.appKey, "ticket", ticketID, "msg_id", message.MsgId)
+				} else if err := syncTicketTags(listener.appKey, ticketID); err != nil {
+					slog.Warn("[IMBot][LastMsgAt] 工单已重开但会话标签同步失败",
+						"appkey", listener.appKey, "ticket", ticketID, "msg_id", message.MsgId, "err", err)
+				} else {
+					slog.Info("[IMBot][LastMsgAt] 工单重开会话标签同步成功",
+						"ticket", ticketID, "msg_id", message.MsgId)
+				}
+			}
 		}
 		return
 	}

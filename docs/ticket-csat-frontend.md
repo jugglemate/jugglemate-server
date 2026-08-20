@@ -121,7 +121,7 @@ TIPS: 服务端对 `comment` 超 500 字符做**截断**而非拒收，所以前
 | Web widget | ✅ JuggleIM 客户端原生支持 | 调 imSdk 发自定义消息 |
 | JuggleIM（同源群） | ✅ | 同 widget |
 | Telegram | ❌ Telegram Bot 不能解析自定义 type | 让客户**回群**说"5"，由 JuggleIM 直接透传 tg:text；服务端的 jgm:csatreply 入口**不会**匹配 — 评分走另开 change |
-| WhatsApp | ❌ 未实现 | — |
+| WhatsApp | ❌ WhatsApp 原生消息不能解析 `jgm:csatreply` | 评分消息适配仍需单独设计；普通文本已通过 WhatsApp Cloud API 接入 |
 
 如果需要支持 TG 评分，下一个 change 在 WebhookMsgs 增加 `tg:text` 评分文本解析（`^[1-5]$`），并手动 review 是否破坏现有逻辑。
 

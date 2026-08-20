@@ -22,7 +22,8 @@ var (
 	// fetchAutoCloseCandidates 注入"扫描候选"逻辑；
 	// 默认实现走 dbcommons.GetDb() + GORM raw SQL，单测可替换为内存 mock。
 	//
-	// 关闭条件：status=1 且坐席最后发言超过 idle 且客户最后发言不晚于坐席最后发言
+	// 关闭条件：status 为处理中(1)或重新打开(3)，且坐席最后发言超过 idle，
+	// 客户最后发言不晚于坐席最后发言
 	// （即坐席说了最后一句）。客户说了最后一句的工单永不自动关闭。
 	fetchAutoCloseCandidates = func(ctx context.Context, cutoffMs int64) ([]autoCloseCandidate, error) {
 		db := dbcommons.GetDb()
@@ -33,7 +34,7 @@ var (
 		err := db.WithContext(ctx).Raw(`
 			SELECT app_key, ticket_id
 			FROM tickets
-			WHERE status = 1
+			WHERE status IN (1, 3)
 			  AND last_user_msg_at IS NOT NULL
 			  AND last_user_msg_at < to_timestamp(?::bigint / 1000.0)
 			  AND (last_customer_msg_at IS NULL OR last_customer_msg_at < last_user_msg_at)

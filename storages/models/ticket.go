@@ -29,29 +29,29 @@ type TicketEventOperator string
 const (
 	TicketEventOperatorCustomer TicketEventOperator = "customer"
 	TicketEventOperatorUser     TicketEventOperator = "user"
-	TicketEventOperatorBot     TicketEventOperator = "bot"
+	TicketEventOperatorBot      TicketEventOperator = "bot"
 	TicketEventOperatorSystem   TicketEventOperator = "system"
 )
 
 type Ticket struct {
-	ID               int64
-	TicketId         string
-	SourceId         string
-	CustomerId       string
-	InboxId          string
-	ChannelType      string
-	AssigneeId       string
-	Status           TicketStatus
-	IsHumanTakenOver bool
-	HumanTakenOverAt int64
-	HumanTakenOverBy string
+	ID                int64
+	TicketId          string
+	SourceId          string
+	CustomerId        string
+	InboxId           string
+	ChannelType       string
+	AssigneeId        string
+	Status            TicketStatus
+	IsHumanTakenOver  bool
+	HumanTakenOverAt  int64
+	HumanTakenOverBy  string
 	LastUserMsgAt     int64
 	LastCustomerMsgAt int64
 	ClosedAt          int64
 	CsatNotifiedAt    int64
-	CreatedTime      int64
-	UpdatedTime      int64
-	AppKey           string
+	CreatedTime       int64
+	UpdatedTime       int64
+	AppKey            string
 }
 
 type ITicketStorage interface {
@@ -79,8 +79,9 @@ type ITicketStorage interface {
 	// UpdateLastCustomerMsgAt 只在 msg_time > 现有值时更新"客户最后消息时间"，
 	// 用于判断"最后一句是谁说的"，防止客户发言后被误关。
 	UpdateLastCustomerMsgAt(appkey, ticketId string, atMs int64) error
-	// CloseByIdle 抢占式关闭工单。仅在 status=1 且 last_user_msg_at 早于
-	// 给定阈值时返回 (true, nil)；已被其他实例处理或状态变更则返回 (false, nil)。
+	// CloseByIdle 抢占式关闭工单。仅在 status=1（处理中）或 status=3（重新打开），
+	// 且 last_user_msg_at 早于给定阈值时返回 (true, nil)；已被其他实例处理或状态变更
+	// 则返回 (false, nil)。
 	CloseByIdle(appkey, ticketId string, idleMs int64, atMs int64) (bool, error)
 	// MarkCsatNotifiedOnce 在 csat_notified_at IS NULL 时置 now（cas 防重并发）。
 	MarkCsatNotifiedOnce(appkey, ticketId string, atMs int64) (bool, error)

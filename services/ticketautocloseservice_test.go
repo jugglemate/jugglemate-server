@@ -177,6 +177,65 @@ func TestRunAutoCloseOnceClosesStaleTickets(t *testing.T) {
 	}
 }
 
+func TestRunAutoCloseOnceClosesStaleReopenedTicket(t *testing.T) {
+	nowMs := time.Now().UnixMilli()
+	tickets := map[string]*storageModels.Ticket{
+		"ticket_reopened": {
+			AppKey:            "app_1",
+			TicketId:          "ticket_reopened",
+			Status:            storageModels.TicketStatusReOpen,
+			AssigneeId:        "agent_1",
+			LastUserMsgAt:     nowMs - 10*60*1000,
+			LastCustomerMsgAt: nowMs - 11*60*1000,
+		},
+	}
+	ticketStore := &mockTickerTicket{tickets: tickets}
+	eventStore := &mockTickerEvent{}
+
+	oldTicket := newTicketStorageForAutoClose
+	oldEvent := newTicketEventStorageForAutoClose
+	oldSyncTags := syncTicketGlobalConversationTagsForAutoClose
+	oldFetch := fetchAutoCloseCandidates
+	oldCsatNotifyTicket := newTicketStorageForCsatNotify
+	oldCsatSender := sendTicketCsatNtfMsgFn
+	defer func() {
+		newTicketStorageForAutoClose = oldTicket
+		newTicketEventStorageForAutoClose = oldEvent
+		syncTicketGlobalConversationTagsForAutoClose = oldSyncTags
+		fetchAutoCloseCandidates = oldFetch
+		newTicketStorageForCsatNotify = oldCsatNotifyTicket
+		sendTicketCsatNtfMsgFn = oldCsatSender
+	}()
+
+	newTicketStorageForAutoClose = func() storageModels.ITicketStorage { return ticketStore }
+	newTicketEventStorageForAutoClose = func() storageModels.ITicketEventStorage { return eventStore }
+	newTicketStorageForCsatNotify = func() storageModels.ITicketStorage { return ticketStore }
+	syncTicketGlobalConversationTagsForAutoClose = func(appkey, ticketId string) errs.IMErrorCode {
+		return errs.IMErrorCode_SUCCESS
+	}
+	fetchAutoCloseCandidates = func(ctx context.Context, cutoffMs int64) ([]autoCloseCandidate, error) {
+		ticket := tickets["ticket_reopened"]
+		if ticket.Status == storageModels.TicketStatusReOpen &&
+			ticket.LastUserMsgAt < cutoffMs && ticket.LastCustomerMsgAt < ticket.LastUserMsgAt {
+			return []autoCloseCandidate{{AppKey: ticket.AppKey, TicketId: ticket.TicketId}}, nil
+		}
+		return nil, nil
+	}
+	sendTicketCsatNtfMsgFn = func(appkey, ticketId, senderId string, payload CsatInvitationPayload) {}
+
+	runAutoCloseOnce(context.Background(), 5*time.Minute, nowMs)
+
+	if atomic.LoadInt32(&ticketStore.closeCallCount) != 1 {
+		t.Fatalf("closeCallCount = %d, want 1", ticketStore.closeCallCount)
+	}
+	if len(ticketStore.closedByIdle) != 1 || ticketStore.closedByIdle[0] != "ticket_reopened" {
+		t.Fatalf("closed = %v, want ticket_reopened", ticketStore.closedByIdle)
+	}
+	if len(eventStore.created) != 1 || eventStore.created[0].EventType != storageModels.TicketEventTypeClose {
+		t.Fatalf("events = %+v, want one close event", eventStore.created)
+	}
+}
+
 func TestRunAutoCloseOnceNoDB(t *testing.T) {
 	nowMs := time.Now().UnixMilli()
 	// 不连真实 DB，runAutoCloseOnce 会在 GetDb()==nil 时直接返回；

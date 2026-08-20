@@ -181,6 +181,12 @@ func (module *Module) Start(ctx context.Context) error {
 		activationPointsCheck = *module.cfg.Profile.ActivationPointsCheckEnabled
 	}
 	botConnections := messageimbot.NewManager(module.cfg.IM)
+	botConnections.SetTicketTagSync(func(appKey, ticketID string) error {
+		if code := services.SyncTicketGlobalConversationTags(appKey, ticketID); code != 0 {
+			return fmt.Errorf("同步工单全局会话标签失败: code=%d", code)
+		}
+		return nil
+	})
 	if err := botConnections.Start(ctx, db); err != nil {
 		botConnections.Stop()
 		_ = redisclient.Close(redisClient)
