@@ -90,6 +90,8 @@ func TestMessageListenerReopensClosedTicketForCustomerGroupMessage(t *testing.T)
 	var updatedCustomerAt int64
 	var reopenedTicketID string
 	var syncedTicketID string
+	var notifiedTicketID string
+	var notifiedSenderID string
 	findTicketForIMBot = func(appKey, ticketID string) (*storageModels.Ticket, error) {
 		return &storageModels.Ticket{
 			AppKey: appKey, TicketId: ticketID, SourceId: "customer_1",
@@ -110,6 +112,10 @@ func TestMessageListenerReopensClosedTicketForCustomerGroupMessage(t *testing.T)
 		syncedTicketID = ticketID
 		return nil
 	})
+	manager.SetTicketReopenNotifier(func(appKey, ticketID, senderID string) {
+		notifiedTicketID = ticketID
+		notifiedSenderID = senderID
+	})
 	listener := &messageListener{appKey: "app_1", botUserID: "bot_1", manager: manager}
 	msg := &sdkmodels.Message{
 		Conversation: &sdkmodels.Conversation{ConversationId: "ticket_1", ConversationType: pbobjs.ChannelType_Group},
@@ -129,6 +135,9 @@ func TestMessageListenerReopensClosedTicketForCustomerGroupMessage(t *testing.T)
 	}
 	if syncedTicketID != "ticket_1" {
 		t.Fatalf("syncedTicketID = %q, want ticket_1", syncedTicketID)
+	}
+	if notifiedTicketID != "ticket_1" || notifiedSenderID != "customer_1" {
+		t.Fatalf("reopen notification ticket=%q sender=%q", notifiedTicketID, notifiedSenderID)
 	}
 }
 

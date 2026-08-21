@@ -701,6 +701,8 @@ curl -X GET 'http://localhost:8080/jmate/tickets/inboxmembers/list?ticket_id=3xv
 | `0` | 认领 |
 | `1` | 指定用户 |
 | `2` | 指定团队 |
+| `3` | Agent 转人工（人工接入）；`operator`、`assignee` 为 `null` |
+| `4` | 重启工单；`operator`、`assignee` 为 `null` |
 
 通知消息发送失败不影响认领接口的 HTTP 响应；客户端应以认领接口返回的工单数据为准。
 

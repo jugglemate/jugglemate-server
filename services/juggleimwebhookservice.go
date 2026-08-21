@@ -71,11 +71,12 @@ func ProcessJuggleIMWebhook(inboxId string, body []byte) errs.IMErrorCode {
 	}
 
 	resultCode, result := startCustomerTicket(customerTicketStartReq{
-		AppKey:      inbox.AppKey,
-		InboxId:     inbox.InboxId,
-		Identifier:  identity,
-		Nickname:    identity,
-		ChannelType: ChannelType_JuggleIM,
+		AppKey:         inbox.AppKey,
+		InboxId:        inbox.InboxId,
+		Identifier:     identity,
+		Nickname:       identity,
+		ChannelType:    ChannelType_JuggleIM,
+		TriggerMsgType: msgType,
 		GenerateSourceId: func() string {
 			return CustomerSourceIDPrefix + tools.GenerateUUIDShort22()
 		},

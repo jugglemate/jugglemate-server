@@ -96,6 +96,28 @@ func TestProcessJuggleIMWebhookReusesCustomerAndTicket(t *testing.T) {
 	}
 }
 
+func TestProcessJuggleIMWebhookDoesNotReopenClosedTicketForNonConversationMessages(t *testing.T) {
+	for _, msgType := range []string{CsatReplyMsgType, TicketAssignedNtfMsgType} {
+		t.Run(msgType, func(t *testing.T) {
+			env := newJuggleIMWebhookTestEnv(t)
+			env.customers.byIdentifier["visitor_1"] = &storageModels.Customer{CustomerId: "c_existing", Identifier: "visitor_1", AppKey: "app_1"}
+			env.rels.byCustomerInbox["c_existing|inbox_juggle"] = &storageModels.CustomerInboxRel{CustomerId: "c_existing", InboxId: "inbox_juggle", SourceId: "customer_existing", AppKey: "app_1"}
+			env.tickets.bySource["customer_existing"] = &storageModels.Ticket{TicketId: "ticket_existing", SourceId: "customer_existing", InboxId: "inbox_juggle", Status: storageModels.TicketStatusClosed, AppKey: "app_1"}
+
+			body := []byte(`{"sender":"visitor_1","msg_type":"` + msgType + `","msg_content":"{\"x\":1}","msg_id":"msg_2"}`)
+			if code := ProcessJuggleIMWebhook("inbox_juggle", body); code != errs.IMErrorCode_SUCCESS {
+				t.Fatalf("code = %d", code)
+			}
+			if env.tickets.updateStatusCalls != 0 {
+				t.Fatalf("status update calls = %d, want 0", env.tickets.updateStatusCalls)
+			}
+			if env.tickets.bySource["customer_existing"].Status != storageModels.TicketStatusClosed {
+				t.Fatalf("ticket status = %d, want closed", env.tickets.bySource["customer_existing"].Status)
+			}
+		})
+	}
+}
+
 type juggleIMWebhookTestEnv struct {
 	inboxes   *telegramFakeInboxStorage
 	customers *telegramFakeCustomerStorage
@@ -138,6 +160,7 @@ func newJuggleIMWebhookTestEnv(t *testing.T) *juggleIMWebhookTestEnv {
 	oldCreateGroup := createGroupForCustomer
 	oldResolveBot := resolveInboxAgentBotForCustomer
 	oldSyncGlobalTags := syncTicketGlobalConversationTagsForCustomer
+	oldSendReopenNtf := sendTicketReopenNtfMsgForCustomer
 	oldSendGroup := sendJuggleIMGroupMsg
 
 	newInboxStorageForJuggleIMWebhook = func() storageModels.IInboxStorage { return env.inboxes }
@@ -165,6 +188,7 @@ func newJuggleIMWebhookTestEnv(t *testing.T) *juggleIMWebhookTestEnv {
 	syncTicketGlobalConversationTagsForCustomer = func(string, string) errs.IMErrorCode {
 		return errs.IMErrorCode_SUCCESS
 	}
+	sendTicketReopenNtfMsgForCustomer = func(string, string, string) {}
 	sendJuggleIMGroupMsg = func(_ *juggleimsdk.JuggleIMSdk, msg juggleimsdk.Message) (juggleimsdk.ApiCode, string, error) {
 		env.sentMsg = msg
 		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
@@ -184,6 +208,7 @@ func newJuggleIMWebhookTestEnv(t *testing.T) *juggleIMWebhookTestEnv {
 		createGroupForCustomer = oldCreateGroup
 		resolveInboxAgentBotForCustomer = oldResolveBot
 		syncTicketGlobalConversationTagsForCustomer = oldSyncGlobalTags
+		sendTicketReopenNtfMsgForCustomer = oldSendReopenNtf
 		sendJuggleIMGroupMsg = oldSendGroup
 	})
 	return env

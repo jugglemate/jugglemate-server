@@ -25,6 +25,8 @@ const (
 	// TIPS: 此类通知没有确定的 operator/assignee —— 转人工由客户在群里触发，此刻还没有
 	// 坐席接单，两个字段都为 null，前端只按 assign_type 渲染。
 	AssignType_HumanTakeover AssignType = 3
+	// AssignType_Reopen 表示关闭后的工单被客户新消息重新开启。
+	AssignType_Reopen AssignType = 4
 )
 
 type TicketAssignedNtfMsg struct {
@@ -32,6 +34,23 @@ type TicketAssignedNtfMsg struct {
 	Operator   *apiModels.UserInfo `json:"operator"`
 	Assignee   *apiModels.UserInfo `json:"assignee"`
 	AssignType AssignType          `json:"assign_type"`
+}
+
+// SendTicketReopenNtfMsg 向 Ticket 群广播「重启工单」通知。
+// senderId 应使用触发重新开启的客户 IM 身份。
+func SendTicketReopenNtfMsg(appkey, ticketId, senderId string) {
+	sdk := imsdk.GetImSdk(appkey)
+	if sdk == nil {
+		return
+	}
+	sdk.SendGroupMsg(juggleimsdk.Message{
+		SenderId:   senderId,
+		TargetIds:  []string{ticketId},
+		MsgType:    TicketAssignedNtfMsgType,
+		MsgContent: tools.ToJson(&TicketAssignedNtfMsg{TicketId: ticketId, AssignType: AssignType_Reopen}),
+		IsStorage:  tools.BoolPtr(true),
+		IsCount:    tools.BoolPtr(false),
+	})
 }
 
 // SendTicketHumanTakeoverNtfMsg 向 Ticket 群广播「人工接入」通知。

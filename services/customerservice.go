@@ -36,6 +36,7 @@ var (
 	}
 	resolveInboxAgentBotForCustomer             = ResolveInboxAgentBot
 	syncTicketGlobalConversationTagsForCustomer = SyncTicketGlobalConversationTags
+	sendTicketReopenNtfMsgForCustomer           = SendTicketReopenNtfMsg
 )
 
 // registerIMUser 注册 IM 用户但不关心返回的 token。
@@ -156,6 +157,9 @@ type customerTicketStartReq struct {
 	ChannelType      ChannelType
 	SourceId         string
 	GenerateSourceId func() string
+	// TriggerMsgType 是触发本次 start 的消息类型。评价回复和分配通知仅作业务留痕，
+	// 即使工单已关闭也不能将其重新开启。
+	TriggerMsgType string
 }
 
 type customerTicketStartResp struct {
@@ -262,11 +266,12 @@ func startCustomerTicket(req customerTicketStartReq) (errs.IMErrorCode, *custome
 	if code != errs.IMErrorCode_SUCCESS {
 		return code, nil
 	}
-	if ticket != nil && ticket.Status == storageModels.TicketStatusClosed {
+	if ticket != nil && ticket.Status == storageModels.TicketStatusClosed && shouldReopenTicketForMessage(req.TriggerMsgType) {
 		if err := ticketStorage.UpdateStatus(appkey, ticket.TicketId, storageModels.TicketStatusReOpen); err != nil {
 			return errs.IMErrorCode_APP_INTERNAL_TIMEOUT, nil
 		}
 		ticket.Status = storageModels.TicketStatusReOpen
+		sendTicketReopenNtfMsgForCustomer(appkey, ticket.TicketId, rel.SourceId)
 		if code := syncTicketGlobalConversationTagsForCustomer(appkey, ticket.TicketId); code != errs.IMErrorCode_SUCCESS {
 			return code, nil
 		}
@@ -316,6 +321,15 @@ func startCustomerTicket(req customerTicketStartReq) (errs.IMErrorCode, *custome
 		Rel:      rel,
 		Ticket:   ticket,
 		ImToken:  imToken,
+	}
+}
+
+func shouldReopenTicketForMessage(msgType string) bool {
+	switch strings.TrimSpace(msgType) {
+	case CsatReplyMsgType, TicketAssignedNtfMsgType:
+		return false
+	default:
+		return true
 	}
 }
 

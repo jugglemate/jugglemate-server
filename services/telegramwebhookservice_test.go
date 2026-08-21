@@ -134,6 +134,9 @@ func TestProcessTelegramWebhookReusesCustomerAndTicket(t *testing.T) {
 	if env.globalTagAppKey != "app_1" || env.globalTagTicketId != "ticket_existing" {
 		t.Fatalf("global tag sync app=%q ticket=%q", env.globalTagAppKey, env.globalTagTicketId)
 	}
+	if env.reopenNtfTicketId != "ticket_existing" || env.reopenNtfSenderId != "customer_existing" {
+		t.Fatalf("reopen notification ticket=%q sender=%q", env.reopenNtfTicketId, env.reopenNtfSenderId)
+	}
 }
 
 func TestProcessTelegramWebhookDoesNotUpdateActiveTicketStatus(t *testing.T) {
@@ -165,6 +168,8 @@ type telegramWebhookTestEnv struct {
 	sentMsg             juggleimsdk.Message
 	globalTagAppKey     string
 	globalTagTicketId   string
+	reopenNtfTicketId   string
+	reopenNtfSenderId   string
 }
 
 func newTelegramWebhookTestEnv(t *testing.T) *telegramWebhookTestEnv {
@@ -199,6 +204,7 @@ func newTelegramWebhookTestEnv(t *testing.T) *telegramWebhookTestEnv {
 	oldCreateGroup := createGroupForCustomer
 	oldResolveBot := resolveInboxAgentBotForCustomer
 	oldSyncGlobalTags := syncTicketGlobalConversationTagsForCustomer
+	oldSendReopenNtf := sendTicketReopenNtfMsgForCustomer
 	oldSendGroup := sendTelegramGroupMsg
 
 	newInboxStorageForTelegramWebhook = func() storageModels.IInboxStorage { return env.inboxes }
@@ -229,6 +235,10 @@ func newTelegramWebhookTestEnv(t *testing.T) *telegramWebhookTestEnv {
 		env.globalTagTicketId = ticketId
 		return errs.IMErrorCode_SUCCESS
 	}
+	sendTicketReopenNtfMsgForCustomer = func(appkey, ticketId, senderId string) {
+		env.reopenNtfTicketId = ticketId
+		env.reopenNtfSenderId = senderId
+	}
 	sendTelegramGroupMsg = func(_ *juggleimsdk.JuggleIMSdk, msg juggleimsdk.Message) (juggleimsdk.ApiCode, string, error) {
 		env.sentMsg = msg
 		return juggleimsdk.ApiCode(errs.IMErrorCode_SUCCESS), "", nil
@@ -248,6 +258,7 @@ func newTelegramWebhookTestEnv(t *testing.T) *telegramWebhookTestEnv {
 		createGroupForCustomer = oldCreateGroup
 		resolveInboxAgentBotForCustomer = oldResolveBot
 		syncTicketGlobalConversationTagsForCustomer = oldSyncGlobalTags
+		sendTicketReopenNtfMsgForCustomer = oldSendReopenNtf
 		sendTelegramGroupMsg = oldSendGroup
 	})
 	return env

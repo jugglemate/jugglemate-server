@@ -187,6 +187,7 @@ func (module *Module) Start(ctx context.Context) error {
 		}
 		return nil
 	})
+	botConnections.SetTicketReopenNotifier(services.SendTicketReopenNtfMsg)
 	if err := botConnections.Start(ctx, db); err != nil {
 		botConnections.Stop()
 		_ = redisclient.Close(redisClient)

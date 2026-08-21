@@ -62,8 +62,9 @@ type Manager struct {
 	handler func(context.Context, InboundMessage)
 	// syncTicketTags 在工单状态变化后同步 IM 群会话标签，由 bootstrap 注入，
 	// 避免 imbot 包反向依赖 services 包。
-	syncTicketTags func(appKey, ticketID string) error
-	stop           chan struct{}
+	syncTicketTags     func(appKey, ticketID string) error
+	notifyTicketReopen func(appKey, ticketID, senderID string)
+	stop               chan struct{}
 	// stopOnce 保证 Stop 可重入：模块关闭与测试清理都可能调用它。
 	stopOnce sync.Once
 }
@@ -264,6 +265,13 @@ func (manager *Manager) SetInboundHandler(handler func(context.Context, InboundM
 func (manager *Manager) SetTicketTagSync(syncer func(appKey, ticketID string) error) {
 	manager.mu.Lock()
 	manager.syncTicketTags = syncer
+	manager.mu.Unlock()
+}
+
+// SetTicketReopenNotifier 设置工单重新开启后的 IM 通知发送器。
+func (manager *Manager) SetTicketReopenNotifier(notifier func(appKey, ticketID, senderID string)) {
+	manager.mu.Lock()
+	manager.notifyTicketReopen = notifier
 	manager.mu.Unlock()
 }
 
@@ -563,6 +571,12 @@ func (listener *messageListener) advanceTicketLastUserMsgAt(message *sdkmodels.M
 				} else {
 					slog.Info("[IMBot][LastMsgAt] 工单重开会话标签同步成功",
 						"ticket", ticketID, "msg_id", message.MsgId)
+				}
+				listener.manager.mu.RLock()
+				notifyTicketReopen := listener.manager.notifyTicketReopen
+				listener.manager.mu.RUnlock()
+				if notifyTicketReopen != nil {
+					notifyTicketReopen(listener.appKey, ticketID, sender)
 				}
 			}
 		}
