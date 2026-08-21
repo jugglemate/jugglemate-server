@@ -244,13 +244,7 @@ func runtimeFromProvider(provider model.Provider, apiKey string, apiModelName st
 }
 
 func (service *CallService) record(ctx context.Context, entity *model.LLMModel, provider *model.Provider, metadata map[string]interface{}, usage dto.Usage, cost float64, elapsedMS int, status string, callErr error) error {
-	callType := metadataString(metadata, "call_type")
-	if callType == "" {
-		callType = "reasoning"
-	}
-	if callType != "reasoning" && callType != "summary" && callType != "embedding" {
-		callType = "reasoning"
-	}
+	callType := normalizeCallType(metadataString(metadata, "call_type"))
 	requestTime := time.Now().Add(-time.Duration(elapsedMS) * time.Millisecond)
 	responseSeconds := decimal.NewFromInt(int64(elapsedMS)).Div(decimal.NewFromInt(1000))
 	costDecimal := decimal.NewFromFloat(cost)
@@ -275,6 +269,15 @@ func (service *CallService) record(ctx context.Context, entity *model.LLMModel, 
 		}
 		return nil
 	})
+}
+
+func normalizeCallType(callType string) string {
+	switch callType {
+	case "reasoning", "summary", "embedding", "translation":
+		return callType
+	default:
+		return "reasoning"
+	}
 }
 
 func calculateCost(entity *model.LLMModel, usage dto.Usage) float64 {

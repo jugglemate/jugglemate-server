@@ -45,6 +45,17 @@ export const APP_MENU_TREE: MenuItem[] = [
     sort: 3,
     hidden: false,
   },
+  {
+    id: "5",
+    kind: "item",
+    name: "menu.models",
+    path: "/models",
+    icon: "IconLucideCpu",
+    children: null,
+    permissions: null,
+    sort: 4,
+    hidden: false,
+  },
 ];
 
 function hasRequiredPermissions(

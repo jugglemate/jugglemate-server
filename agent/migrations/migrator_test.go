@@ -10,13 +10,22 @@ func TestListContainsCompleteBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取迁移失败: %v", err)
 	}
-	if len(items) != 7 {
-		t.Fatalf("当前应包含 Agent 基线、客服域收敛、Agent 软删除、工单-Agent 绑定、工单转人工标记、工单自动关闭与评价、csat_notified_at 重发支持迁移，实际为 %d", len(items))
+	if len(items) != 9 {
+		t.Fatalf("当前应包含 9 份迁移（含翻译模型调用类型约束），实际为 %d", len(items))
 	}
-	if items[6].Version != "000007" ||
-		!strings.Contains(items[6].SQL, "ALTER TABLE tickets") ||
-		!strings.Contains(items[6].SQL, "csat_notified_at") {
-		t.Fatalf("csat_notified_at 重发支持迁移不完整: version=%s", items[6].Version)
+	translation := migrationByName(t, items, "000008_allow_translation_model_calls.sql")
+	if translation.Version != "000008" ||
+		!strings.Contains(translation.SQL, "DROP CONSTRAINT IF EXISTS ck_llm_model_calls_call_type") ||
+		!strings.Contains(translation.SQL, "ADD CONSTRAINT ck_llm_model_calls_call_type") ||
+		!strings.Contains(translation.SQL, "CHECK (call_type IN") ||
+		!strings.Contains(translation.SQL, "'translation'") {
+		t.Fatalf("翻译调用类型迁移不完整: version=%s sql=%s", translation.Version, translation.SQL)
+	}
+	csatNotified := migrationByName(t, items, "000007_ticket_csat_notified_at.sql")
+	if csatNotified.Version != "000007" ||
+		!strings.Contains(csatNotified.SQL, "ALTER TABLE tickets") ||
+		!strings.Contains(csatNotified.SQL, "csat_notified_at") {
+		t.Fatalf("csat_notified_at 重发支持迁移不完整: version=%s", csatNotified.Version)
 	}
 	if items[5].Version != "000006" ||
 		!strings.Contains(items[5].SQL, "ALTER TABLE tickets") ||
@@ -57,6 +66,17 @@ func TestListContainsCompleteBaseline(t *testing.T) {
 			t.Fatalf("基线缺少核心表 %s", table)
 		}
 	}
+}
+
+func migrationByName(t *testing.T, items []Migration, name string) Migration {
+	t.Helper()
+	for _, item := range items {
+		if item.Name == name {
+			return item
+		}
+	}
+	t.Fatalf("迁移列表缺少 %s", name)
+	return Migration{}
 }
 
 func TestMigrationVersionRejectsInvalidName(t *testing.T) {

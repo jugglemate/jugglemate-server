@@ -22,9 +22,10 @@ import (
 const defaultProviderKey = "default_provider_id"
 
 var defaultModelKeys = map[string]string{
-	"reasoning_model": "default_reasoning_model",
-	"summary_model":   "default_summary_model",
-	"embedding_model": "default_embedding_model",
+	"reasoning_model":   "default_reasoning_model",
+	"summary_model":     "default_summary_model",
+	"embedding_model":   "default_embedding_model",
+	"translation_model": "default_translation_model",
 }
 
 var providerTransitions = map[string]map[string]bool{
@@ -511,7 +512,7 @@ func (service *RegistryService) DeleteModel(ctx context.Context, modelPK string)
 	})
 }
 
-// GetDefaults 读取三类系统默认模型。
+// GetDefaults 读取系统默认模型。
 func (service *RegistryService) GetDefaults(ctx context.Context) (dto.DefaultModels, error) {
 	values := dto.DefaultModels{}
 	var err error
@@ -524,7 +525,15 @@ func (service *RegistryService) GetDefaults(ctx context.Context) (dto.DefaultMod
 	if values.EmbeddingModel, err = service.getConfigString(ctx, service.db, defaultModelKeys["embedding_model"]); err != nil {
 		return values, err
 	}
+	if values.TranslationModel, err = service.getConfigString(ctx, service.db, defaultModelKeys["translation_model"]); err != nil {
+		return values, err
+	}
 	return values, nil
+}
+
+// TranslationModel 返回当前配置的默认翻译模型。
+func (service *RegistryService) TranslationModel(ctx context.Context) (*string, error) {
+	return service.getConfigString(ctx, service.db, defaultModelKeys["translation_model"])
 }
 
 // SetDefaults 校验并更新请求中显式出现的默认模型字段。
@@ -536,20 +545,27 @@ func (service *RegistryService) SetDefaults(ctx context.Context, updates map[str
 				return validationError("不支持的默认模型字段: " + field)
 			}
 			if value != nil {
+				trimmed := strings.TrimSpace(*value)
+				if trimmed == "" {
+					return validationError("默认模型不能为空: " + field)
+				}
 				var entity model.LLMModel
-				if err := tx.Where("model_id = ? AND status <> ?", *value, "archived").First(&entity).Error; err != nil {
+				if err := tx.Where("model_id = ? AND status <> ?", trimmed, "archived").First(&entity).Error; err != nil {
 					if errors.Is(err, gorm.ErrRecordNotFound) {
-						return validationError("默认模型不存在: " + *value)
+						return validationError("默认模型不存在: " + trimmed)
 					}
 					return err
 				}
 				if entity.Status != "active" {
-					return validationError("默认模型必须为 active 状态: " + *value)
+					return validationError("默认模型必须为 active 状态: " + trimmed)
 				}
-				capability := strings.TrimSuffix(field, "_model")
-				if !entity.HasCapability(capability) {
-					return validationError("默认模型能力不匹配: " + field)
+				if field != "translation_model" {
+					capability := strings.TrimSuffix(field, "_model")
+					if !entity.HasCapability(capability) {
+						return validationError("默认模型能力不匹配: " + field)
+					}
 				}
+				value = &trimmed
 			}
 			if err := service.upsertConfig(ctx, tx, key, value, "llm-default-model", "系统默认模型配置: "+field); err != nil {
 				return err

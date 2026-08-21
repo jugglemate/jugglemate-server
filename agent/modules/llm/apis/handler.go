@@ -2,8 +2,10 @@
 package apis
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -13,18 +15,27 @@ import (
 	"github.com/juggleim/jugglemate-server/agent/shared/httpresponse"
 )
 
+type translationService interface {
+	Translate(context.Context, dto.TranslateRequest) (dto.TranslateResponse, error)
+}
+
 // Handler 聚合 LLM 注册表和模型调用接口。
 type Handler struct {
-	registry *service.RegistryService
-	calls    *service.CallService
+	registry  *service.RegistryService
+	calls     *service.CallService
+	translate translationService
 }
 
 // NewHandler 创建 LLM HTTP Handler。
-func NewHandler(registry *service.RegistryService, calls *service.CallService) *Handler {
-	return &Handler{registry: registry, calls: calls}
+func NewHandler(registry *service.RegistryService, calls *service.CallService, translations ...translationService) *Handler {
+	handler := &Handler{registry: registry, calls: calls}
+	if len(translations) > 0 {
+		handler.translate = translations[0]
+	}
+	return handler
 }
 
-// RegisterRoutes 注册 LLM 域 16 个源兼容接口。
+// RegisterRoutes 注册 LLM 域接口。
 func (handler *Handler) RegisterRoutes(group *gin.RouterGroup) {
 	providers := group.Group("/admin/llm/providers")
 	providers.GET("", handler.listProviders)
@@ -48,6 +59,7 @@ func (handler *Handler) RegisterRoutes(group *gin.RouterGroup) {
 
 	group.POST("/llm/call", handler.call)
 	group.POST("/llm/call/stream", handler.stream)
+	group.POST("/llm/translate", handler.translateText)
 }
 
 // listProviders 获取 Provider 列表。
@@ -217,12 +229,41 @@ func (handler *Handler) setDefaults(ctx *gin.Context) {
 		return
 	}
 	for key := range payload {
-		if key != "reasoning_model" && key != "summary_model" && key != "embedding_model" {
+		if key != "reasoning_model" && key != "summary_model" && key != "embedding_model" && key != "translation_model" {
 			writeValidationError(ctx, errors.New("请求包含未知字段: "+key))
 			return
 		}
 	}
 	result, err := handler.registry.SetDefaults(ctx.Request.Context(), payload)
+	if err != nil {
+		writeError(ctx, err)
+		return
+	}
+	httpresponse.Success(ctx, result)
+}
+
+// translateText 使用系统默认模型翻译文本。
+func (handler *Handler) translateText(ctx *gin.Context) {
+	var payload dto.TranslateRequest
+	decoder := json.NewDecoder(ctx.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		writeValidationError(ctx, err)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeValidationError(ctx, errors.New("请求体只能包含一个 JSON 对象"))
+		return
+	}
+	if strings.TrimSpace(payload.Source) == "" {
+		writeValidationError(ctx, errors.New("source 不能为空"))
+		return
+	}
+	if strings.TrimSpace(payload.TargetLanguage) == "" {
+		writeValidationError(ctx, errors.New("target_language 不能为空"))
+		return
+	}
+	result, err := handler.translate.Translate(ctx.Request.Context(), payload)
 	if err != nil {
 		writeError(ctx, err)
 		return

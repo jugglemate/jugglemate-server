@@ -317,9 +317,10 @@
     "actionFailed": "操作失败"
   },
   "models": {
-    "setDefaultOk": "已设为默认",
-    "defaultTag": "默认",
-    "setDefault": "设为默认",
+    "setDefaultOk": "已设为默认 Provider",
+    "defaultTag": "默认 Provider",
+    "setDefault": "设为默认 Provider",
+    "providersTitle": "模型服务商与默认 Provider",
     "newProvider": "新增服务商",
     "editProvider": "编辑服务商",
     "colName": "名称",
@@ -336,6 +337,21 @@
     "test": "测试",
     "testOk": "连接正常",
     "testFailed": "连接测试失败",
+    "translation": {
+      "title": "默认翻译模型",
+      "description": "为系统翻译功能选择一个独立的默认模型。此设置不同于默认 Provider。",
+      "placeholder": "搜索并选择 active 模型",
+      "noActiveModels": "暂无 active 模型",
+      "current": "当前默认翻译模型",
+      "notSet": "未设置",
+      "save": "保存",
+      "saveSuccess": "默认翻译模型已保存",
+      "clear": "清除",
+      "clearSuccess": "默认翻译模型已清除",
+      "clearConfirmTitle": "确认清除默认翻译模型？",
+      "clearConfirmDesc": "清除后，系统翻译功能将无法使用默认翻译模型，直到重新设置。",
+      "loadFailed": "加载默认翻译模型失败"
+    },
     "form": {
       "titleCreate": "新增模型服务商",
       "titleEdit": "编辑模型服务商",

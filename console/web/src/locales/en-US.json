@@ -317,9 +317,10 @@
     "actionFailed": "Action failed"
   },
   "models": {
-    "setDefaultOk": "Set as default",
-    "defaultTag": "Default",
-    "setDefault": "Set default",
+    "setDefaultOk": "Set as default provider",
+    "defaultTag": "Default provider",
+    "setDefault": "Set default provider",
+    "providersTitle": "Model Providers and Default Provider",
     "newProvider": "New provider",
     "editProvider": "Edit provider",
     "colName": "Name",
@@ -336,6 +337,21 @@
     "test": "Test",
     "testOk": "Connection OK",
     "testFailed": "Connection test failed",
+    "translation": {
+      "title": "Default Translation Model",
+      "description": "Select a dedicated default model for system translation. This is separate from the default provider.",
+      "placeholder": "Search and select an active model",
+      "noActiveModels": "No active models",
+      "current": "Current default translation model",
+      "notSet": "Not set",
+      "save": "Save",
+      "saveSuccess": "Default translation model saved",
+      "clear": "Clear",
+      "clearSuccess": "Default translation model cleared",
+      "clearConfirmTitle": "Clear the default translation model?",
+      "clearConfirmDesc": "System translation will have no default model until another one is selected.",
+      "loadFailed": "Failed to load the default translation model"
+    },
     "form": {
       "titleCreate": "New model provider",
       "titleEdit": "Edit model provider",

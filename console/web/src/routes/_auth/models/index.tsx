@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { App, Button, Card, Flex, Space, Table, Tag, Typography } from "antd";
+import { App, Button, Card, Flex, Select, Space, Table, Tag, Typography } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Star, Pencil, Trash2, Plug } from "lucide-react";
@@ -25,12 +25,33 @@ interface ProviderListResponse {
   items: LlmProvider[];
 }
 
+interface LlmModel {
+  id: string;
+  modelId: string;
+  displayName: string;
+  providerName: string;
+  status: string;
+}
+
+interface ModelListResponse {
+  items: LlmModel[];
+}
+
+interface DefaultModels {
+  translation_model: string | null;
+}
+
 function ModelsPage() {
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<LlmProvider[]>([]);
+  const [translationLoading, setTranslationLoading] = useState(false);
+  const [translationSaving, setTranslationSaving] = useState(false);
+  const [models, setModels] = useState<LlmModel[]>([]);
+  const [translationModel, setTranslationModel] = useState<string | null>(null);
+  const [selectedTranslationModel, setSelectedTranslationModel] = useState<string>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,9 +66,79 @@ function ModelsPage() {
     }
   }, [message, t]);
 
+  const loadTranslationDefaults = useCallback(async () => {
+    setTranslationLoading(true);
+    try {
+      const [defaults, modelList] = await Promise.all([
+        agentApi.get<DefaultModels>("/admin/llm/defaults"),
+        agentApi.get<ModelListResponse>("/admin/llm/models", {
+          params: { status: "active" },
+        }),
+      ]);
+      const current = defaults?.translation_model ?? null;
+      setTranslationModel(current);
+      setSelectedTranslationModel(current ?? undefined);
+      setModels(modelList?.items ?? []);
+    } catch (err) {
+      message.error((err as Error).message || t("models.translation.loadFailed"));
+      setModels([]);
+    } finally {
+      setTranslationLoading(false);
+    }
+  }, [message, t]);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadTranslationDefaults();
+  }, [load, loadTranslationDefaults]);
+
+  const saveTranslationModel = async () => {
+    if (!selectedTranslationModel) return;
+    setTranslationSaving(true);
+    try {
+      const defaults = await agentApi.put<DefaultModels>("/admin/llm/defaults", {
+        translation_model: selectedTranslationModel,
+      });
+      const current = defaults?.translation_model ?? selectedTranslationModel;
+      setTranslationModel(current);
+      setSelectedTranslationModel(current);
+      message.success(t("models.translation.saveSuccess"));
+    } catch (err) {
+      message.error((err as Error).message || t("agentAdmin.saveFailed"));
+    } finally {
+      setTranslationSaving(false);
+    }
+  };
+
+  const clearTranslationModel = () => {
+    modal.confirm({
+      title: t("models.translation.clearConfirmTitle"),
+      content: t("models.translation.clearConfirmDesc"),
+      okText: t("models.translation.clear"),
+      okType: "danger",
+      cancelText: t("common.cancel"),
+      onOk: async () => {
+        setTranslationSaving(true);
+        try {
+          await agentApi.put<DefaultModels>("/admin/llm/defaults", {
+            translation_model: null,
+          });
+          setTranslationModel(null);
+          setSelectedTranslationModel(undefined);
+          message.success(t("models.translation.clearSuccess"));
+        } catch (err) {
+          message.error((err as Error).message || t("agentAdmin.saveFailed"));
+        } finally {
+          setTranslationSaving(false);
+        }
+      },
+    });
+  };
+
+  const modelOptions = models.map((model) => ({
+    value: model.modelId,
+    label: `${model.displayName} (${model.modelId}) - ${model.providerName}`,
+  }));
 
   const setDefault = async (record: LlmProvider) => {
     try {
@@ -166,29 +257,73 @@ function ModelsPage() {
   );
 
   return (
-    <Card>
-      <Flex vertical gap={16}>
-        <Flex justify="space-between" align="center">
-          <Typography.Title level={5} style={{ margin: 0 }}>
-            {t("menu.models")}
-          </Typography.Title>
-          <Button
-            type="primary"
-            icon={<Plus size={16} />}
-            onClick={() => void navigate({ to: "/models/config" })}
-          >
-            {t("models.newProvider")}
-          </Button>
+    <Flex vertical gap={16}>
+      <Card title={t("models.translation.title")}>
+        <Flex vertical gap={16}>
+          <Typography.Text type="secondary">{t("models.translation.description")}</Typography.Text>
+          <Flex gap={12} align="center" wrap>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              loading={translationLoading}
+              disabled={translationLoading}
+              value={selectedTranslationModel}
+              options={modelOptions}
+              placeholder={t("models.translation.placeholder")}
+              onChange={setSelectedTranslationModel}
+              style={{ width: "min(100%, 560px)" }}
+              notFoundContent={t("models.translation.noActiveModels")}
+            />
+            <Button
+              type="primary"
+              loading={translationSaving}
+              disabled={
+                translationLoading ||
+                !selectedTranslationModel ||
+                selectedTranslationModel === translationModel
+              }
+              onClick={() => void saveTranslationModel()}
+            >
+              {t("models.translation.save")}
+            </Button>
+            <Button
+              danger
+              disabled={translationLoading || translationSaving || !translationModel}
+              onClick={clearTranslationModel}
+            >
+              {t("models.translation.clear")}
+            </Button>
+          </Flex>
+          <Typography.Text>
+            {t("models.translation.current")}: {translationModel ?? t("models.translation.notSet")}
+          </Typography.Text>
         </Flex>
-        <Table<LlmProvider>
-          rowKey="id"
-          size="small"
-          columns={columns}
-          dataSource={items}
-          loading={loading}
-          pagination={{ pageSize: 20, hideOnSinglePage: true }}
-        />
-      </Flex>
-    </Card>
+      </Card>
+
+      <Card>
+        <Flex vertical gap={16}>
+          <Flex justify="space-between" align="center">
+            <Typography.Title level={5} style={{ margin: 0 }}>
+              {t("models.providersTitle")}
+            </Typography.Title>
+            <Button
+              type="primary"
+              icon={<Plus size={16} />}
+              onClick={() => void navigate({ to: "/models/config" })}
+            >
+              {t("models.newProvider")}
+            </Button>
+          </Flex>
+          <Table<LlmProvider>
+            rowKey="id"
+            size="small"
+            columns={columns}
+            dataSource={items}
+            loading={loading}
+            pagination={{ pageSize: 20, hideOnSinglePage: true }}
+          />
+        </Flex>
+      </Card>
+    </Flex>
   );
 }

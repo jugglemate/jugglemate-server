@@ -156,6 +156,7 @@ func (module *Module) Start(ctx context.Context) error {
 	}
 	registryService := llmservice.NewRegistryService(db, encryption)
 	callService := llmservice.NewCallService(db, encryption, llmadapter.NewHTTPGateway())
+	translateService := llmservice.NewTranslateService(registryService, callService)
 	billingService := billingservice.New(db)
 	freeDailyEnabled := true
 	if module.cfg.Billing.DirectFreeDailyEnabled != nil {
@@ -219,7 +220,7 @@ func (module *Module) Start(ctx context.Context) error {
 	module.db = db
 	module.redis = redisClient
 	module.auth = authmodule.NewService(module.cfg.Auth)
-	module.llm = llmapis.NewHandler(registryService, callService)
+	module.llm = llmapis.NewHandler(registryService, callService, translateService)
 	module.knowledge = knowledgeapis.NewHandler(knowledgeService)
 	module.knowledgeWorker = knowledgeWorker
 	module.capability = capabilityapis.NewHandler(capabilityservice.New(db))

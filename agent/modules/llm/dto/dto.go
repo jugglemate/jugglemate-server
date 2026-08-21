@@ -123,9 +123,10 @@ type ProviderRead struct {
 
 // DefaultModels 系统默认模型响应。
 type DefaultModels struct {
-	ReasoningModel *string `json:"reasoning_model"`
-	SummaryModel   *string `json:"summary_model"`
-	EmbeddingModel *string `json:"embedding_model"`
+	ReasoningModel   *string `json:"reasoning_model"`
+	SummaryModel     *string `json:"summary_model"`
+	EmbeddingModel   *string `json:"embedding_model"`
+	TranslationModel *string `json:"translation_model"`
 }
 
 // Message 模型调用中的单条文本消息。
@@ -158,4 +159,21 @@ type CallResponse struct {
 	Cost           float64 `json:"cost"`
 	ResponseTimeMS int     `json:"response_time_ms"`
 	FinishReason   *string `json:"finish_reason"`
+}
+
+// TranslateRequest 文本翻译请求。模型由系统默认配置决定，不允许调用方指定。
+type TranslateRequest struct {
+	Source         string            `json:"source"`
+	TargetLanguage string            `json:"target_language"`
+	SourceLanguage *string           `json:"source_language,omitempty"`
+	Glossary       map[string]string `json:"glossary,omitempty"`
+}
+
+// TranslateResponse 文本翻译结果及模型调用诊断信息。
+type TranslateResponse struct {
+	Content        string  `json:"content"`
+	ModelID        string  `json:"model_id"`
+	Usage          Usage   `json:"usage"`
+	Cost           float64 `json:"cost"`
+	ResponseTimeMS int     `json:"response_time_ms"`
 }

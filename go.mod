@@ -3,6 +3,7 @@ module github.com/juggleim/jugglemate-server
 go 1.25.0
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/aliyun/aliyun-oss-go-sdk v2.2.10+incompatible
 	github.com/gin-gonic/gin v1.10.1
 	github.com/google/uuid v1.6.0
