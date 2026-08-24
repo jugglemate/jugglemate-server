@@ -11,6 +11,7 @@ import (
 )
 
 func TestOpenAICallProtocol(t *testing.T) {
+	reasoningEffort := "none"
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/chat/completions" || request.Header.Get("Authorization") != "Bearer key" {
 			t.Fatalf("OpenAI 请求不符合协议: path=%s auth=%s", request.URL.Path, request.Header.Get("Authorization"))
@@ -22,12 +23,15 @@ func TestOpenAICallProtocol(t *testing.T) {
 		if payload["model"] != "gpt-test" {
 			t.Fatalf("模型名未使用 API 配置: %#v", payload)
 		}
+		if payload["reasoning_effort"] != "none" {
+			t.Fatalf("OpenAI-compatible 请求未转发 reasoning_effort: %#v", payload)
+		}
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`))
 	}))
 	defer server.Close()
 
-	result, err := NewHTTPGateway().Call(context.Background(), Runtime{Protocol: "openai", APIKey: "key", BaseURL: server.URL, APIModelName: "gpt-test", TimeoutSeconds: 5}, dto.CallRequest{Messages: []dto.Message{{Role: "user", Content: "你好"}}})
+	result, err := NewHTTPGateway().Call(context.Background(), Runtime{Protocol: "openai", APIKey: "key", BaseURL: server.URL, APIModelName: "gpt-test", TimeoutSeconds: 5}, dto.CallRequest{Messages: []dto.Message{{Role: "user", Content: "你好"}}, ReasoningEffort: &reasoningEffort})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +41,7 @@ func TestOpenAICallProtocol(t *testing.T) {
 }
 
 func TestAnthropicSystemMessageAndResponseProtocol(t *testing.T) {
+	reasoningEffort := "none"
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/messages" || request.Header.Get("x-api-key") != "key" {
 			t.Fatalf("Anthropic 请求不符合协议")
@@ -46,11 +51,14 @@ func TestAnthropicSystemMessageAndResponseProtocol(t *testing.T) {
 		if payload["system"] != "系统提示" {
 			t.Fatalf("system 消息未提升到顶层: %#v", payload)
 		}
+		if _, exists := payload["reasoning_effort"]; exists {
+			t.Fatalf("Anthropic 原生请求不应发送 OpenAI reasoning_effort: %#v", payload)
+		}
 		_, _ = writer.Write([]byte(`{"content":[{"type":"text","text":"done"}],"usage":{"input_tokens":4,"output_tokens":6},"stop_reason":"end_turn"}`))
 	}))
 	defer server.Close()
 
-	result, err := NewHTTPGateway().Call(context.Background(), Runtime{Protocol: "anthropic", APIKey: "key", BaseURL: server.URL, APIModelName: "claude-test", TimeoutSeconds: 5}, dto.CallRequest{Messages: []dto.Message{{Role: "system", Content: "系统提示"}, {Role: "user", Content: "你好"}}})
+	result, err := NewHTTPGateway().Call(context.Background(), Runtime{Protocol: "anthropic", APIKey: "key", BaseURL: server.URL, APIModelName: "claude-test", TimeoutSeconds: 5}, dto.CallRequest{Messages: []dto.Message{{Role: "system", Content: "系统提示"}, {Role: "user", Content: "你好"}}, ReasoningEffort: &reasoningEffort})
 	if err != nil {
 		t.Fatal(err)
 	}

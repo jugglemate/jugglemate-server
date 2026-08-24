@@ -95,8 +95,8 @@ func TestTranslateBuildsControlledRequestAndMapsResponse(t *testing.T) {
 	if payload.Source != source || payload.SourceLanguage == nil || *payload.SourceLanguage != sourceLanguage || payload.TargetLanguage != "中文" || payload.Glossary["Juggle"] != "聚合" {
 		t.Fatalf("JSON prompt 未原样映射输入: %#v", payload)
 	}
-	if caller.request.Temperature == nil || *caller.request.Temperature != 0.2 || caller.request.Metadata["call_type"] != "translation" {
-		t.Fatalf("调用参数错误: temperature=%v metadata=%#v", caller.request.Temperature, caller.request.Metadata)
+	if caller.request.Temperature == nil || *caller.request.Temperature != 0.2 || caller.request.ReasoningEffort == nil || *caller.request.ReasoningEffort != "none" || caller.request.Metadata["call_type"] != "translation" {
+		t.Fatalf("调用参数错误: temperature=%v reasoning_effort=%v metadata=%#v", caller.request.Temperature, caller.request.ReasoningEffort, caller.request.Metadata)
 	}
 	if result.Content != caller.result.Content || result.ModelID != "translate-v1" || result.Usage != caller.result.Usage || result.Cost != caller.result.Cost || result.ResponseTimeMS != caller.result.ResponseTimeMS {
 		t.Fatalf("响应映射错误: %#v", result)

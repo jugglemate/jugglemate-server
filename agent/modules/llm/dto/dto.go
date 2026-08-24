@@ -137,12 +137,13 @@ type Message struct {
 
 // CallRequest 统一模型调用请求。
 type CallRequest struct {
-	ModelID     string                   `json:"model_id" binding:"required"`
-	Messages    []Message                `json:"messages"`
-	Tools       []map[string]interface{} `json:"tools"`
-	Temperature *float64                 `json:"temperature,omitempty"`
-	MaxTokens   *int                     `json:"max_tokens,omitempty"`
-	Metadata    map[string]interface{}   `json:"metadata"`
+	ModelID         string                   `json:"model_id" binding:"required"`
+	Messages        []Message                `json:"messages"`
+	Tools           []map[string]interface{} `json:"tools"`
+	Temperature     *float64                 `json:"temperature,omitempty"`
+	MaxTokens       *int                     `json:"max_tokens,omitempty"`
+	ReasoningEffort *string                  `json:"reasoning_effort,omitempty"`
+	Metadata        map[string]interface{}   `json:"metadata"`
 }
 
 // Usage 模型调用 Token 用量。

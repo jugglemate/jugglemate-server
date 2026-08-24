@@ -62,14 +62,16 @@ func (service *TranslateService) Translate(ctx context.Context, request dto.Tran
 		return dto.TranslateResponse{}, err
 	}
 	temperature := 0.2
+	reasoningEffort := "none"
 	result, err := service.caller.Call(ctx, dto.CallRequest{
 		ModelID: modelID,
 		Messages: []dto.Message{
 			{Role: "system", Content: translationSystemPrompt},
 			{Role: "user", Content: string(userContent)},
 		},
-		Temperature: &temperature,
-		Metadata:    map[string]interface{}{"call_type": "translation"},
+		Temperature:     &temperature,
+		ReasoningEffort: &reasoningEffort,
+		Metadata:        map[string]interface{}{"call_type": "translation"},
 	})
 	if err != nil {
 		return dto.TranslateResponse{}, err

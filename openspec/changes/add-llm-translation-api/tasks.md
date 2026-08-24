@@ -41,3 +41,9 @@
 - [x] 6.2 Add a manual curl example for authenticated translation and expected diagnostics.
 - [ ] 6.3 Manually verify `llm_model_calls.call_type=translation` and that credentials/source text are not added to ordinary logs.
 - [x] 6.4 Run `openspec validate add-llm-translation-api --strict`.
+
+## 7. Translation Reasoning Mode
+
+- [x] 7.1 Extend non-streaming model requests with optional `reasoning_effort` and forward it to OpenAI-compatible Providers.
+- [x] 7.2 Set translation calls to `reasoning_effort=none` while leaving Anthropic native thinking disabled.
+- [x] 7.3 Add service and gateway tests and rerun focused/full validation.

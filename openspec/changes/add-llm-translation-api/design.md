@@ -12,7 +12,7 @@ The caller must not select a model. Administrators select an active model throug
 - Validate bounded source text, language labels, and a bounded optional glossary.
 - Resolve only the explicitly configured default translation model and return a clear error when absent.
 - Reuse `CallService.Call`, including Provider credential decryption, active-state checks, usage, cost, timing, and facts.
-- Produce a deterministic, injection-resistant prompt with `temperature=0.2` and return only translated content plus diagnostics.
+- Produce a deterministic, injection-resistant prompt with `temperature=0.2`, disable deep reasoning, and return only translated content plus diagnostics.
 - Record successful and failed upstream calls as `call_type=translation`.
 
 **Non-Goals:**
@@ -43,15 +43,19 @@ The caller must not select a model. Administrators select an active model throug
    - JSON serialization avoids delimiter ambiguity and nondeterministic manual map iteration.
    - The original source is preserved for translation; trimming is used only to detect blank input.
 
-5. **Reject unknown request fields.**
+5. **Disable deep reasoning for translation calls.**
+   - Translation sets `reasoning_effort=none` for OpenAI-compatible Providers such as JuggleRouter to reduce latency and avoid unnecessary reasoning tokens.
+   - The Anthropic native protocol omits its optional thinking configuration, which is the equivalent non-thinking mode for that protocol.
+
+6. **Reject unknown request fields.**
    - The handler uses a strict JSON decoder so `model_id` and misspelled fields fail explicitly rather than being silently ignored.
    - Input limits use Unicode rune counts and cap source text, language labels, glossary entries, and glossary term lengths.
 
-6. **Extend the existing call-type database constraint.**
+7. **Extend the existing call-type database constraint.**
    - `CallService.record` recognizes `translation`, and a forward migration recreates `ck_llm_model_calls_call_type` with the new value.
    - No table or column is added.
 
-7. **Return the resolved model ID from `TranslateService`.**
+8. **Return the resolved model ID from `TranslateService`.**
    - The generic `CallResponse` remains unchanged; the translation response combines it with the exact default model ID captured before the call.
 
 ## Risks / Trade-offs

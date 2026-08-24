@@ -292,6 +292,11 @@ func buildPayload(runtime Runtime, request dto.CallRequest, stream bool) map[str
 	if request.MaxTokens != nil {
 		payload["max_tokens"] = *request.MaxTokens
 	}
+	// OpenAI-compatible 路由使用 reasoning_effort 控制思考强度；Anthropic 原生协议
+	// 未启用 thinking 时即为普通模式，不发送该 OpenAI 扩展字段。
+	if runtime.Protocol != "anthropic" && request.ReasoningEffort != nil {
+		payload["reasoning_effort"] = *request.ReasoningEffort
+	}
 	if stream {
 		payload["stream"] = true
 		if runtime.Protocol != "anthropic" {

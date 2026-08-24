@@ -64,11 +64,11 @@ The translation service SHALL use only `default_translation_model` and SHALL NOT
 - **THEN** the system returns `未配置默认翻译模型，请先在管理后台设置` without invoking a model
 
 ### Requirement: Controlled translation prompt
-The translation service SHALL use a fixed professional translation system instruction, SHALL encode source language, target language, glossary, and source text as JSON data, SHALL preserve the original source content, and SHALL invoke the model with `temperature=0.2` and `metadata.call_type=translation`.
+The translation service SHALL use a fixed professional translation system instruction, SHALL encode source language, target language, glossary, and source text as JSON data, SHALL preserve the original source content, and SHALL invoke the model with `temperature=0.2`, no deep reasoning, and `metadata.call_type=translation`.
 
 #### Scenario: Translation with all optional data
 - **WHEN** source language and glossary are supplied
-- **THEN** the model request contains those values as JSON data, the original source, the fixed system instruction, temperature 0.2, and translation metadata
+- **THEN** the model request contains those values as JSON data, the original source, the fixed system instruction, temperature 0.2, `reasoning_effort=none` for OpenAI-compatible Providers, and translation metadata
 
 #### Scenario: Automatic source-language detection
 - **WHEN** source language is omitted
